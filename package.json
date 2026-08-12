@@ -1,0 +1,29 @@
+{
+  "name": "sentinel",
+  "version": "1.0.0",
+  "description": "Personal investment intelligence agent",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "migrate": "tsx src/db/migrate.ts",
+    "seed": "tsx src/seed/seed.ts",
+    "sync": "tsx src/jobs/sync.ts",
+    "digest": "tsx src/jobs/digest.ts",
+    "ips": "tsx src/jobs/ips.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.14.0",
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "tsx": "^4.23.12",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.4",
+    "postgres": "^3.4.9"
+  }
+}
