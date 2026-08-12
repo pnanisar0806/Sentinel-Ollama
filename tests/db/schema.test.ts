@@ -30,12 +30,49 @@ describe('phase 0 schema', () => {
     );
     await expect(db.query(`update audit_log set action = 'X'`)).rejects.toThrow();
     await expect(db.query(`delete from audit_log`)).rejects.toThrow();
+    await expect(db.query(`truncate audit_log`)).rejects.toThrow();
+  });
+
+  it('refuses truncate on snapshots', async () => {
+    await expect(db.query(`truncate snapshots`)).rejects.toThrow();
   });
 
   it('requires as_of and source on every holdings row', async () => {
+    // Create test fixtures: a real snapshot and instrument
+    const [snapshot] = await db.query<{ id: string }>(
+      `insert into snapshots (business_date, source) values ('2026-08-12', 'test')
+       returning id`,
+    );
+    await db.query(
+      `insert into instruments (id, kind, name) values ('TEST:INST', 'EQUITY', 'Test Instrument')`,
+    );
+
+    // Test that omitting as_of fails
     await expect(
-      db.query(`insert into holdings (snapshot_id, instrument_id, quantity) values (null, null, 1)`),
+      db.query(
+        `insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, source)
+         values ($1, 'TEST:INST', 1.0, 1000, 'test', 'test')`,
+        [snapshot!.id],
+      ),
     ).rejects.toThrow();
+
+    // Test that omitting source fails
+    await expect(
+      db.query(
+        `insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of)
+         values ($1, 'TEST:INST', 1.0, 1000, 'test', now())`,
+        [snapshot!.id],
+      ),
+    ).rejects.toThrow();
+
+    // Test that including both succeeds
+    await expect(
+      db.query(
+        `insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
+         values ($1, 'TEST:INST', 1.0, 1000, 'test', now(), 'test')`,
+        [snapshot!.id],
+      ),
+    ).resolves.toBeDefined();
   });
 
   it('stores money as bigint paise without precision loss', async () => {

@@ -190,5 +190,9 @@ $$ language plpgsql;
 
 create trigger audit_log_append_only before update or delete on audit_log
   for each statement execute function sentinel_append_only();
+create trigger audit_log_truncate_only before truncate on audit_log
+  for each statement execute function sentinel_append_only();
 create trigger snapshots_append_only before update or delete on snapshots
+  for each statement execute function sentinel_append_only();
+create trigger snapshots_truncate_only before truncate on snapshots
   for each statement execute function sentinel_append_only();
