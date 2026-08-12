@@ -91,6 +91,7 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
     );
   }
 
+  // Append audit log entry on every run by design (audit trail records each seeding; this is not an idempotency issue)
   await db.query(
     `insert into audit_log (entity, entity_id, action, actor, payload)
      values ('seed', $1, 'SEEDED', 'system', $2::jsonb)`,

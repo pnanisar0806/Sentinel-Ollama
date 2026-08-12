@@ -6,10 +6,12 @@ import {
 } from '../../src/seed/seed-data.js';
 
 describe('seed data matches the PRD balance sheet', () => {
-  it('totals roughly 48L of assets including Fidelity', () => {
+  it('totals exactly 47.69L of assets (within ±0.5L)', () => {
     const total = addP(...SEED_HOLDINGS.map((h) => h.valuePaise));
-    expect(Number(total / 100n)).toBeGreaterThan(4_600_000);
-    expect(Number(total / 100n)).toBeLessThan(5_000_000);
+    const totalRupees = Number(total / 100n);
+    // After residue fix: 1,354,000 (EPF) + 1,183,000 (MF) + 832,000 (stocks/ETFs) + 600,000 (bonds) + 163,000 (savings) + 137,000 (US basket) + 500,000 (Fidelity) = 4,769,000
+    expect(totalRupees).toBeGreaterThan(4_764_000); // 4,769,000 - 50,000
+    expect(totalRupees).toBeLessThan(4_774_000); // 4,769,000 + 50,000
   });
 
   it('carries EPF and Fidelity at their stated values', () => {
@@ -49,5 +51,26 @@ describe('seed data matches the PRD balance sheet', () => {
   it('carries six RSU grants totalling 1105 units', () => {
     expect(SEED_RSU_GRANTS).toHaveLength(6);
     expect(SEED_RSU_GRANTS.reduce((a, g) => a + g.units, 0)).toBe(1105);
+  });
+
+  it('assembles Zerodha equity/ETF lines plus Groww RPOWER to exactly 8.32L', () => {
+    // NIFTYBEES + GOLDBEES + LIQUIDBEES + SMALLCASE-RESIDUE (zerodha) + RPOWER (groww)
+    const zerodhaEquity = addP(
+      rupees(95_000),    // NIFTYBEES
+      rupees(63_000),    // GOLDBEES
+      rupees(16_000),    // LIQUIDBEES
+      rupees(655_400),   // SMALLCASE-RESIDUE
+      rupees(2_600),     // RPOWER (Groww)
+    );
+    expect(zerodhaEquity).toBe(rupees(832_000));
+  });
+
+  it('assembles bond lines to exactly 6.00L (line-item sum; source document states 6.33L)', () => {
+    const bonds = addP(
+      rupees(284_000),   // SAMMAAN-2026
+      rupees(96_000),    // SAMMAAN-2029
+      rupees(220_000),   // EDELWEISS-2033
+    );
+    expect(bonds).toBe(rupees(600_000));
   });
 });

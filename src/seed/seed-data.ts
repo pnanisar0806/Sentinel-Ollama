@@ -65,7 +65,7 @@ export const SEED_INSTRUMENTS: InstrumentSeed[] = [
 export const SEED_HOLDINGS: HoldingSeed[] = [
   { instrumentId: 'EPF:ANIRBAN', account: 'epf', quantity: 1, valuePaise: rupees(1_354_000), avgCostPaise: null },
 
-  // Mutual funds - 11.84L total (PRD 2.3)
+  // Mutual funds - 11.83L (source states 11.84L, rounding)
   { instrumentId: 'MF:ICICI-NIFTY50-IDX', account: 'zerodha', quantity: 1, valuePaise: rupees(47_000), avgCostPaise: null },
   { instrumentId: 'MF:ICICI-NIFTY50-IDX', account: 'indmoney', quantity: 1, valuePaise: rupees(281_000), avgCostPaise: null },
   { instrumentId: 'MF:ICICI-NIFTY50-IDX', account: 'indmoney', quantity: 1, valuePaise: rupees(368_000), avgCostPaise: null },
@@ -79,10 +79,10 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
   { instrumentId: 'NSE:NIFTYBEES', account: 'zerodha', quantity: 1, valuePaise: rupees(95_000), avgCostPaise: null },
   { instrumentId: 'NSE:GOLDBEES', account: 'zerodha', quantity: 2616, valuePaise: rupees(63_000), avgCostPaise: null },
   { instrumentId: 'NSE:LIQUIDBEES', account: 'zerodha', quantity: 1, valuePaise: rupees(16_000), avgCostPaise: null },
-  { instrumentId: 'NSE:SMALLCASE-RESIDUE', account: 'zerodha', quantity: 1, valuePaise: rupees(555_400), avgCostPaise: null },
+  { instrumentId: 'NSE:SMALLCASE-RESIDUE', account: 'zerodha', quantity: 1, valuePaise: rupees(655_400), avgCostPaise: null },
   { instrumentId: 'NSE:RPOWER', account: 'groww', quantity: 1, valuePaise: rupees(2_600), avgCostPaise: null },
 
-  // Corporate bonds - 6.33L
+  // Corporate bonds - line items sum to 6.00L; source document states 6.33L for this bucket (difference likely accrued interest) - flagged for owner true-up
   { instrumentId: 'BOND:SAMMAAN-2026', account: 'indmoney', quantity: 1, valuePaise: rupees(284_000), avgCostPaise: null },
   { instrumentId: 'BOND:SAMMAAN-2029', account: 'indmoney', quantity: 1, valuePaise: rupees(96_000), avgCostPaise: null },
   { instrumentId: 'BOND:EDELWEISS-2033', account: 'indmoney', quantity: 1, valuePaise: rupees(220_000), avgCostPaise: null },
