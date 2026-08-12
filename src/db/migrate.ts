@@ -24,16 +24,11 @@ export async function runMigrations(db: Db, dir = DEFAULT_DIR): Promise<string[]
     if (applied.has(file)) continue;
     const sql = await readFile(join(dir, file), 'utf8');
     // Wrap migration apply + bookkeeping in a transaction for atomicity
-    await db.exec('begin');
-    try {
-      await db.exec(sql);
-      await db.query('insert into schema_migrations (name) values ($1)', [file]);
-      await db.exec('commit');
-      newlyApplied.push(file);
-    } catch (error) {
-      await db.exec('rollback');
-      throw error;
-    }
+    await db.withTransaction(async (tx) => {
+      await tx.exec(sql);
+      await tx.query('insert into schema_migrations (name) values ($1)', [file]);
+    });
+    newlyApplied.push(file);
   }
   return newlyApplied;
 }

@@ -65,4 +65,20 @@ insert into multi_a values (42);`,
     expect(recorded).toHaveLength(0);
     await db.close();
   });
+
+  it('withTransaction rolls back on error and propagates rejection', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    const error = new Error('intentional test error');
+    await expect(
+      db.withTransaction(async (tx) => {
+        await tx.exec('create table tx_test (id int primary key)');
+        await tx.query('insert into tx_test values ($1)', [42]);
+        throw error;
+      }),
+    ).rejects.toBe(error);
+    // Verify table does not exist (rollback worked)
+    await expect(db.query('select * from tx_test')).rejects.toThrow();
+    await db.close();
+  });
 });
