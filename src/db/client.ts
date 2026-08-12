@@ -3,6 +3,8 @@ import postgres from 'postgres';
 
 export interface Db {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
+  /** Executes one or more statements over the simple protocol (DDL / migration files). */
+  exec(sql: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -20,6 +22,9 @@ export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
         const res = await pg.query<T>(sql, params);
         return res.rows;
       },
+      async exec(sql: string) {
+        await pg.exec(sql);
+      },
       async close() {
         await pg.close();
       },
@@ -30,6 +35,9 @@ export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
   return {
     async query<T>(text: string, params: unknown[] = []) {
       return (await sql.unsafe(text, params as never[])) as unknown as T[];
+    },
+    async exec(text: string) {
+      await sql.unsafe(text);
     },
     async close() {
       await sql.end({ timeout: 5 });
