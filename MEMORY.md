@@ -18,7 +18,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 3 | Phase 0 schema, 16 tables | complete (1 fix round) |
 | 4 | money primitives + FX | complete |
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
-| 6 | loan amortization + prepayment cascade | **implemented, NOT reviewed; 1 red test** |
+| 6 | loan amortization + prepayment cascade | review clean; **1 red test blocked on owner** |
 | 7 | investable surplus curve | not started |
 | 8 | RSU vest projection | not started |
 | 9 | net worth + allocation drift | not started |
@@ -127,29 +127,47 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 ---
 
-## Open question blocking Task 6
+## Open question blocking Task 6 — needs the owner's SBI statement
 
-`SEED_LOANS.home` is internally inconsistent. Outstanding ₹30.24L at 7.95% with EMI
-₹24,482 amortizes to a natural payoff of **Mar 2048**, not the seeded `naturalEndOn` of
-**Feb 2047**. Verified independently: monthly interest ₹20,034, principal ₹4,448,
-n = −ln(1 − 0.8183)/ln(1.006625) ≈ 258 months from Sep 2026.
+`SEED_LOANS.home` is internally inconsistent: `outstandingPaise`, `emiPaise` and
+`naturalEndOn` cannot all three be true. Confirmed twice, independently:
 
-Consequence: computed home-loan interest saved is **₹21,18,438**, ~0.9% above the brief's
-₹17L–₹21L cap, so one Task 6 test is red. **Assessment: the model is right and the band's
-premise is wrong** — the band derives from the PRD's ~₹19.3L figure, which assumed the
-Feb 2047 end date the seeded balance/EMI pair cannot produce. Needs the owner's real
-statement, not a band edit.
+- ₹30.24L at 7.95% with EMI ₹24,482 from Sep 2026 amortizes over **259 months → payoff
+  Mar 2048**, not the seeded `naturalEndOn` of **Feb 2047**.
+- The EMI that *would* clear ₹32.40L in 299 months at 7.95% is **≈₹24,926–24,929**, not
+  the seeded ₹24,482.
+- Forward-running the original loan (₹32.40L, EMI ₹24,482) 54 months from Mar 2022 lands
+  at ≈₹30,44,898 against the seeded ₹30,24,000 — ~0.7% apart.
 
-Also from Task 6, not yet independently reviewed: the implementer **rewrote `runCascade`**
-from the brief's sequential version (a later loan idle until the earlier closed) to a
-concurrent one, on the grounds that the brief's own flat-outflow requirement
-(~₹55,526/month) is impossible under sequential amortization. That rewrite looks correct
-but the task review never ran. Computed closures: car1 → 2028-01-01, car2 → 2028-10-01,
-home → 2034-03-01.
+Each figure is individually plausible; the set is not. Consequence: computed home-loan
+interest saved is **₹21,18,438** against the brief's ₹17L–₹21L cap, so one Task 6 test is
+red. **The defect is in the seed data, not in `amortize`** — the band derives from the
+PRD's ~₹19.3L figure, which assumed the Feb 2047 end date the seeded balance/EMI pair
+cannot produce. Do not widen the band, tune the model, or edit a seed value to close this.
+
+## Task 6 — resolved by review
+
+The brief's reference `runCascade` was **defective**: it amortized sequentially (a later
+loan idle until the earlier closed), which fails its own flat-outflow criterion by
+construction — month 1 yields ₹13,821, not ₹55,526 (= 13,821 + 17,223 + 24,482, i.e. all
+three EMIs paying at once). The implementer's concurrent rewrite is correct and required.
+
+Verified by executing the shipped code: `freedEmi` accumulates additively (the sum of
+*all* freed EMIs, not just the latest), targets the earliest-`cascadeOrder` **open** loan,
+and is recomputed each month; steady-state months total exactly ₹55,526.00; closure-month
+stubs are capped at `min(scheduled, balance + interest)` so nothing overpays. `openLoan`
+is fixed at the *start* of the month, so redirection correctly begins the month **after** a
+closure — that is why the two stub months dip below ₹55,526. Closures: car1 → 2028-01-01,
+car2 → 2028-10-01, home → 2034-03-01.
+
+That makes four tasks in a row (2, 3, 5, 6) where the plan's reference code contained a
+real defect. **Treat the plan's implementation snippets as a sketch, not as truth** —
+brief the acceptance criteria and let the implementer derive the code.
 
 ## Owner true-up items (need real statements — do not guess)
 
-- **Home loan:** actual outstanding + actual EMI (see above; blocks Task 6).
+- **Home loan:** actual outstanding + actual EMI + actual end date — any two of the three
+  pin the model (see above; blocks Task 6's one red test).
 - **Car loan 1:** outstanding ₹2.20L is an estimate.
 - **Bonds:** line items sum to ₹6.00L against the PRD's stated ₹6.33L bucket — accrued
   interest? ₹0.33L unexplained.
@@ -169,3 +187,9 @@ home → 2034-03-01.
   by trace; negative flows first appear in Task 10 withdrawals.
 - Task 5: `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L" but asserts
   11.83L — cosmetic typo, value correct.
+- Task 6: `runCascade`'s inner month-step duplicates `amortize`'s interest / payment /
+  principal math (`src/domain/loans.ts:92–121`). Extract a shared `stepLoan()` next time
+  this file is touched.
+- Task 6: `persistSchedules` does `delete` + N sequential inserts, unwrapped
+  (`src/domain/loans.ts:144–171`). Matches the existing `seed.ts` convention — batch and
+  wrap as a codebase-wide pass, not here.
