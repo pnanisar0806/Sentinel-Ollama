@@ -60,6 +60,30 @@ Keep all three terse. They are read in full at every session start; length is a 
 - **Every externally-sourced row carries `as_of` and `source`.** No exceptions.
 - Unknown cost basis is `NULL`, never `0`. Never render an unknown as ₹0.
 
+## Handling defects and deferred minors
+
+**The plan's reference code is a sketch, not truth.** Tasks 2, 3, 5 and 6 each shipped
+with a real defect in the plan's own snippet — including one that failed its own stated
+acceptance criterion by construction. When briefing an implementer: give it the acceptance
+criteria and the interfaces, include the reference code only as an illustration, and say
+plainly that it is **unverified and has a track record of being wrong**. An implementer
+that contradicts the brief with working arithmetic is doing its job; adjudicate on the
+merits rather than defending the brief.
+
+Do **not** retro-edit the plan to patch these. It is the record of what was asked, and the
+ledger already documents every divergence.
+
+**Fix-on-touch for deferred minors.** When a task edits a file that carries a deferred
+minor in `MEMORY.md`, fix that minor in the same commit and strike it from the list. The
+plan ends with only *one* fix wave; it can absorb a handful of cross-cutting items, not an
+accumulated backlog. Anything genuinely cross-cutting (batching, transaction wrapping
+across modules) stays deferred to that wave by design.
+
+**Never silently absorb a data discrepancy.** If the PRD's stated total disagrees with the
+line items, or a test goes red against real data, the resolution is the owner's real
+statement — not a widened band, a tuned constant, or an invented value. Record it under
+owner true-up items in `MEMORY.md` and surface it.
+
 ## Execution model
 
 Work runs subagent-driven: implementer → task reviewer → fix loop (≤5 rounds) → scoped

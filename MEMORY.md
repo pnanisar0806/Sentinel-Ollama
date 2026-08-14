@@ -187,17 +187,16 @@ brief the acceptance criteria and let the implementer derive the code.
 
 ## Deferred minors (tracked, not blocking)
 
-- Task 1: 3 `ASSUMPTIONS` keys untested; planning INR values are plain numbers, so
-  consumers must convert to bigint paise.
-- Task 2: the postgres-js path has **no** automated test — no live Postgres here. Verify at
-  Supabase provisioning (Task 15 checklist item 2).
-- Task 4: no negative-amount tests for `formatInr` / `mulP` / `usdToInr`. Behavior verified
-  by trace; negative flows first appear in Task 10 withdrawals.
-- Task 5: `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L" but asserts
-  11.83L — cosmetic typo, value correct.
-- Task 6: `runCascade`'s inner month-step duplicates `amortize`'s interest / payment /
-  principal math (`src/domain/loans.ts:92–121`). Extract a shared `stepLoan()` next time
-  this file is touched.
-- Task 6: `persistSchedules` does `delete` + N sequential inserts, unwrapped
-  (`src/domain/loans.ts:144–171`). Matches the existing `seed.ts` convention — batch and
-  wrap as a codebase-wide pass, not here.
+**Fix-on-touch**: if the task you are running edits one of these files, fix the minor in
+the same commit and strike it from this list. Do not let these pile up for the single
+end-of-branch fix wave. The "fixes at" column is the expected home, not a hard schedule.
+
+| # | From | Minor | Fixes at |
+|---|---|---|---|
+| 1 | T6 | `runCascade`'s month-step duplicates `amortize`'s interest / payment / principal math (`src/domain/loans.ts:92–121`) — extract a shared `stepLoan()` | Task 7 (touches this file) |
+| 2 | T4 | No negative-amount tests for `formatInr` / `mulP` / `usdToInr`. Verified by trace only | Task 10 (first negative flows) |
+| 3 | T1 | 3 `ASSUMPTIONS` keys untested (`childMonthlyDentInr`, `fiIncomeFloor/StretchMonthlyInr`) | Task 8/10, whichever consumes them |
+| 4 | T1 | Planning INR values are plain numbers; consumers must convert to bigint paise | same |
+| 5 | T2 | postgres-js path has **no** automated test — no live Postgres here | Task 15, provisioning checklist item 2 |
+| 6 | T5 | `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L", asserts 11.83L — cosmetic, value correct | final fix wave |
+| 7 | T6 | `persistSchedules` does `delete` + N sequential inserts, unwrapped (`src/domain/loans.ts:144–171`) — matches existing `seed.ts` convention, so genuinely cross-cutting | final fix wave |
