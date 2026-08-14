@@ -106,10 +106,19 @@ export const SEED_LOANS: LoanSeed[] = [
     startedOn: '2026-04-01', naturalEndOn: '2029-04-01', cascadeOrder: 2,
   },
   {
+    // Owner-verified 2026-08-14 from the SBI portal. The loan is split across two
+    // accounts at the same rate and origination; modelled here as one line because
+    // amortization at a shared rate is linear, so the sum behaves identically:
+    //   a/c ...7807  sanctioned 30,00,000  outstanding 29,09,463  EMI 23,988
+    //   a/c ...8245  sanctioned    56,924  outstanding    53,680  EMI    494
+    // The portal's "Remaining Tenure" (379 / 246 months) does NOT reconcile with the
+    // balance, EMI and rate on either account and is treated as a stale field: 379
+    // months at 23,988 would require a 33.24L balance. Balance + EMI + rate give a
+    // natural payoff of ~Dec 2046, which is what naturalEndOn records.
     id: 'home', name: 'Home loan (Kolkata flat)', lender: 'SBI',
-    principalPaise: rupees(3_200_000), outstandingPaise: rupees(3_024_000),
+    principalPaise: rupees(3_056_924), outstandingPaise: rupees(2_963_143),
     annualRateBps: 795, emiPaise: rupees(24_482),
-    startedOn: '2022-03-01', naturalEndOn: '2047-02-01', cascadeOrder: 3,
+    startedOn: '2022-03-01', naturalEndOn: '2046-12-01', cascadeOrder: 3,
   },
 ];
 

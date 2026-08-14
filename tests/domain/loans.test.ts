@@ -58,7 +58,7 @@ describe('the committed prepayment cascade', () => {
     expect(closures.get('car2')!.slice(0, 4)).toBe('2028');
   });
 
-  it('closes the home loan around Dec 2033, not its natural Feb 2047', () => {
+  it('closes the home loan around Dec 2033, not its natural Dec 2046', () => {
     const home = closures.get('home')!;
     expect(home >= '2033-06-01' && home <= '2034-06-01').toBe(true);
   });

@@ -18,7 +18,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 3 | Phase 0 schema, 16 tables | complete (1 fix round) |
 | 4 | money primitives + FX | complete |
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
-| 6 | loan amortization + prepayment cascade | review clean; **1 red test blocked on owner** |
+| 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
 | 7 | investable surplus curve | not started |
 | 8 | RSU vest projection | not started |
 | 9 | net worth + allocation drift | not started |
@@ -127,23 +127,30 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 ---
 
-## Open question blocking Task 6 — needs the owner's SBI statement
+## Home loan — RESOLVED 2026-08-14 from the owner's SBI portal
 
-`SEED_LOANS.home` is internally inconsistent: `outstandingPaise`, `emiPaise` and
-`naturalEndOn` cannot all three be true. Confirmed twice, independently:
+The loan is **two accounts**, same rate and origination, modelled as one line (amortization
+at a shared rate is linear, so the sum behaves identically):
 
-- ₹30.24L at 7.95% with EMI ₹24,482 from Sep 2026 amortizes over **259 months → payoff
-  Mar 2048**, not the seeded `naturalEndOn` of **Feb 2047**.
-- The EMI that *would* clear ₹32.40L in 299 months at 7.95% is **≈₹24,926–24,929**, not
-  the seeded ₹24,482.
-- Forward-running the original loan (₹32.40L, EMI ₹24,482) 54 months from Mar 2022 lands
-  at ≈₹30,44,898 against the seeded ₹30,24,000 — ~0.7% apart.
+| a/c | sanctioned | outstanding | EMI |
+|---|---|---|---|
+| …7807 | ₹30,00,000 | ₹29,09,463 | ₹23,988 |
+| …8245 | ₹56,924 | ₹53,680 | ₹494 |
+| **total** | **₹30,56,924** | **₹29,63,143** | **₹24,482** |
 
-Each figure is individually plausible; the set is not. Consequence: computed home-loan
-interest saved is **₹21,18,438** against the brief's ₹17L–₹21L cap, so one Task 6 test is
-red. **The defect is in the seed data, not in `amortize`** — the band derives from the
-PRD's ~₹19.3L figure, which assumed the Feb 2047 end date the seeded balance/EMI pair
-cannot produce. Do not widen the band, tune the model, or edit a seed value to close this.
+The seeded EMI was already right; the **outstanding was ₹60,857 too high** and the
+principal was wrong. Corrected, the natural payoff lands ~Dec 2046 — so the old
+`naturalEndOn` of Feb 2047 was also roughly right, and the earlier "Mar 2048" reading was
+an artifact of the bad balance alone.
+
+**The portal's "Remaining Tenure" field is stale — do not trust it.** It reads 379 months
+on …7807 and 246 on …8245; neither reconciles with that account's own balance, EMI and
+rate (379 months at ₹23,988 would require a ₹33.24L balance). Balance + EMI + rate are the
+hard facts; derive tenure, never read it.
+
+Corroboration that the model is sound: with real figures the cascade closes the home loan
+**Jan 2034** saving **₹19.07L** of interest, against the PRD's independently-stated
+~Dec 2033 and ~₹19.3L. Both within 1%, and the model never saw either number.
 
 ## Task 6 — resolved by review
 
@@ -166,12 +173,13 @@ brief the acceptance criteria and let the implementer derive the code.
 
 ## Owner true-up items (need real statements — do not guess)
 
-- **Home loan:** actual outstanding + actual EMI + actual end date — any two of the three
-  pin the model (see above; blocks Task 6's one red test).
-- **Car loan 1:** outstanding ₹2.20L is an estimate.
+- ~~Home loan~~ — **resolved 2026-08-14**, see above.
+- ~~Loans total~~ — **resolved**: now ₹36.78L against the PRD's ₹36.7L, was ₹37.39L. The
+  home-loan correction closed this gap too.
+- **Car loan 1:** outstanding ₹2.20L is an estimate. Same portal check would settle it.
+- **Car loan 2:** ₹4.95L outstanding is unverified against a statement.
 - **Bonds:** line items sum to ₹6.00L against the PRD's stated ₹6.33L bucket — accrued
   interest? ₹0.33L unexplained.
-- **Loans total:** ₹37.39L computed vs ₹36.7L stated in the PRD.
 - **RSU grants:** per-grant unit split was reconstructed to total 1,105 units; the PRD
   never published the breakdown.
 - **Holdings total is exact at ₹47.69L** — EPF 13.54L, MF 11.83L, stocks/ETFs 8.32L,
