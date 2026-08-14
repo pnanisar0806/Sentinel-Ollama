@@ -198,8 +198,35 @@ brief the acceptance criteria and let the implementer derive the code.
 
 - ~~Home loan~~, ~~car loan 1~~, ~~car loan 2~~, ~~loans total~~ — **all resolved
   2026-08-14** from lender portals; see the verified table above.
-- **Bonds:** line items sum to ₹6.00L against the PRD's stated ₹6.33L bucket — accrued
-  interest? ₹0.33L unexplained. **The only remaining data gap.**
+- ~~Bonds~~ — **resolved 2026-08-14**, see below.
+
+**No open data gaps. Every figure in `SEED_HOLDINGS` and `SEED_LOANS` is now either
+owner-verified or explicitly marked as a PRD-stated value.**
+
+## Bonds — owner-verified 2026-08-14 from the INDmoney bonds screen
+
+| ISIN | units | coupon | YTM | invested | matures | next coupon |
+|---|---|---|---|---|---|---|
+| INE148I07GL3 (Sammaan) | 300 | 9.00% | 11.29% | ₹2,84,057.70 | 26-Sep-2026 | 26-Sep-2026 |
+| INE148I07TX1 (Sammaan) | 1 | 9.75% | 11.70% | ₹95,941.91 | 23-Jul-2029 | 23-Jul-2027 |
+| INE532F07EK1 (Edelweiss) | 220 | 10.45% | 10.44% | ₹2,20,000.00 | 26-Oct-2033 | 26-Oct-2026 |
+| **total** | | | **10.86%** | **₹5,99,999.61** | | |
+
+Sums to the portal's own stated Total Investment to the paise, so **the PRD's ₹6.33L for
+this bucket is superseded**. Two things to keep straight:
+
+- These are **invested amounts, not marks.** The screen reports cost, so `valuePaise ==
+  avgCostPaise` and unrealised P&L reads as zero until Task 11B supplies real marks.
+- The portal's ₹1,19,480 "Returns Till Date" is **cash already received**, not accrued
+  value — it is exactly 2 years of coupon on each of the three lines, and coupons here pay
+  out annually rather than compounding into the bond. **Do not add it to the holding
+  values.** That double-count is roughly what the PRD's ₹6.33L looks like.
+- Concentration note for §3.5: **two of three bonds are the same issuer** (Sammaan
+  Capital, ₹3.80L = 63% of the bond bucket). The single-issuer cap must see them as one.
+
+`InstrumentSeed` now carries `isin`, and `seed.ts` writes it (the schema column existed but
+went unwritten). Task 11B's mapper matches on ISIN, so this is load-bearing; two tests
+cover it, both mutation-checked.
 - **RSU grants:** per-grant unit split was reconstructed to total 1,105 units; the PRD
   never published the breakdown.
 - **Holdings total is exact at ₹47.69L** — EPF 13.54L, MF 11.83L, stocks/ETFs 8.32L,

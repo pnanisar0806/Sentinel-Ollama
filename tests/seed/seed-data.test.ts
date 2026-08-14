@@ -70,8 +70,12 @@ describe('seed data matches the PRD balance sheet', () => {
     ])).toBe(rupees(1_183_000));
   });
 
-  it('bond line items sum to exactly 6.00L (source document states 6.33L for this bucket)', () => {
+  // Owner-verified 2026-08-14: the three line items sum to the INDmoney bonds screen's own
+  // stated Total Investment of 5,99,999.61, to the paise. The PRD's 6.33L for this bucket
+  // is superseded. Asserted exactly, not banded - this is a reconciled figure, so any drift
+  // is a regression rather than an estimate moving.
+  it('bond line items sum to exactly 5,99,999.61 (INDmoney stated Total Investment)', () => {
     expect(sumOf(['BOND:SAMMAAN-2026', 'BOND:SAMMAAN-2029', 'BOND:EDELWEISS-2033']))
-      .toBe(rupees(600_000));
+      .toBe(rupees('599999.61'));
   });
 });

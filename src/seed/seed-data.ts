@@ -7,6 +7,7 @@ export interface InstrumentSeed {
   kind: 'EQUITY' | 'ETF' | 'MF' | 'BOND' | 'CASH' | 'EPF' | 'RSU' | 'GOLD';
   name: string;
   currency: 'INR' | 'USD';
+  isin?: string;
   sector?: string;
   issuer?: string;
   isEmployer?: boolean;
@@ -54,9 +55,9 @@ export const SEED_INSTRUMENTS: InstrumentSeed[] = [
   { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR' },
   { id: 'NSE:SMALLCASE-RESIDUE', kind: 'EQUITY', name: 'Smallcase residue (unallocated; cleanup queue)', currency: 'INR' },
   { id: 'NSE:RPOWER', kind: 'EQUITY', name: 'Reliance Power (Groww - manual closure)', currency: 'INR', sector: 'Power' },
-  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital' },
-  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% Jul-2029', currency: 'INR', issuer: 'Sammaan Capital' },
-  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial' },
+  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07GL3' },
+  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% 23-Jul-2029', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07TX1' },
+  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% 26-Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial', isin: 'INE532F07EK1' },
   { id: 'CASH:SAVINGS', kind: 'CASH', name: 'Savings account', currency: 'INR' },
   { id: 'US:INDMONEY-BASKET', kind: 'EQUITY', name: 'US fractional basket (AAPL/GOOGL/AMZN/MSFT/TSLA/VOO)', currency: 'USD' },
   { id: 'US:NOW', kind: 'RSU', name: 'ServiceNow (NOW) - vested, Fidelity', currency: 'USD', sector: 'Technology', issuer: 'ServiceNow', isEmployer: true },
@@ -82,10 +83,28 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
   { instrumentId: 'NSE:SMALLCASE-RESIDUE', account: 'zerodha', quantity: 1, valuePaise: rupees(655_400), avgCostPaise: null },
   { instrumentId: 'NSE:RPOWER', account: 'groww', quantity: 1, valuePaise: rupees(2_600), avgCostPaise: null },
 
-  // Corporate bonds - line items sum to 6.00L; source document states 6.33L for this bucket (difference likely accrued interest) - flagged for owner true-up
-  { instrumentId: 'BOND:SAMMAAN-2026', account: 'indmoney', quantity: 1, valuePaise: rupees(284_000), avgCostPaise: null },
-  { instrumentId: 'BOND:SAMMAAN-2029', account: 'indmoney', quantity: 1, valuePaise: rupees(96_000), avgCostPaise: null },
-  { instrumentId: 'BOND:EDELWEISS-2033', account: 'indmoney', quantity: 1, valuePaise: rupees(220_000), avgCostPaise: null },
+  // Corporate bonds - owner-verified 2026-08-14 from the INDmoney bonds screen. The three
+  // line items sum to exactly 5,99,999.61, which is the portal's own stated Total
+  // Investment, so the PRD's 6.33L for this bucket is superseded. Portfolio YTM 10.86%.
+  //
+  //   ISIN           units  coupon   YTM     invested      matures      next coupon
+  //   INE148I07GL3     300   9.00%  11.29%  2,84,057.70   26-Sep-2026   26-Sep-2026
+  //   INE148I07TX1       1   9.75%  11.70%    95,941.91   23-Jul-2029   23-Jul-2027
+  //   INE532F07EK1     220  10.45%  10.44%  2,20,000.00   26-Oct-2033   26-Oct-2026
+  //
+  // These are INVESTED amounts, not marks - the screen reports cost, not market value, so
+  // value == cost here and unrealised P&L reads as zero until the Task 11B sync supplies
+  // real marks. Coupons are paid out annually rather than accrued into the bond, so the
+  // portal's 1,19,480 "Returns Till Date" (exactly 2 years of coupon on each line) is cash
+  // already received and must NOT be added to these values.
+  //
+  // quantity stays 1 with the total in valuePaise, matching every other line in this file;
+  // avg_cost_paise is therefore the total cost, not a per-unit cost. Real unit counts live
+  // in the table above. Per-unit cost would not be a whole number of paise anyway
+  // (2,84,057.70 / 300).
+  { instrumentId: 'BOND:SAMMAAN-2026', account: 'indmoney', quantity: 1, valuePaise: rupees('284057.70'), avgCostPaise: rupees('284057.70') },
+  { instrumentId: 'BOND:SAMMAAN-2029', account: 'indmoney', quantity: 1, valuePaise: rupees('95941.91'), avgCostPaise: rupees('95941.91') },
+  { instrumentId: 'BOND:EDELWEISS-2033', account: 'indmoney', quantity: 1, valuePaise: rupees('220000.00'), avgCostPaise: rupees('220000.00') },
 
   { instrumentId: 'CASH:SAVINGS', account: 'bank', quantity: 1, valuePaise: rupees(163_000), avgCostPaise: null },
   { instrumentId: 'US:INDMONEY-BASKET', account: 'indmoney', quantity: 1, valuePaise: rupees(137_000), avgCostPaise: null },
