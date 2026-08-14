@@ -54,7 +54,7 @@ describe('the committed prepayment cascade', () => {
     expect(Number(closures.get('car1')!.slice(5, 7))).toBeLessThanOrEqual(3);
   });
 
-  it('closes car loan 2 in 2028, ahead of its natural Apr 2029 end', () => {
+  it('closes car loan 2 in 2028, ahead of its natural Mar 2029 end', () => {
     expect(closures.get('car2')!.slice(0, 4)).toBe('2028');
   });
 
@@ -63,18 +63,26 @@ describe('the committed prepayment cascade', () => {
     expect(home >= '2033-06-01' && home <= '2034-06-01').toBe(true);
   });
 
-  // Boundary months where a loan closes with a partial stub instalment are excluded:
-  // the stub is real (a closing loan needs less than a full EMI+extra to zero out) and
-  // must not be smeared across the model. car1 closes 2028-01-01, car2 closes 2028-10-01.
+  // Boundary months where a loan closes with a partial stub instalment are excluded: the
+  // stub is real (a closing loan needs less than a full EMI+extra to zero out) and must
+  // not be smeared across the model. The excluded months are DERIVED from the closures
+  // map, never hard-coded - hard-coded literals silently go stale the moment a seed value
+  // is corrected, which is precisely what happened when the real loan figures landed.
   it('keeps total monthly loan outflow flat at ~55,526 through the steady state', () => {
+    const stubMonths = new Set(closures.values());
     const byMonth = new Map<string, bigint>();
     for (const r of rows) byMonth.set(r.month, (byMonth.get(r.month) ?? 0n) + r.paymentPaise);
+    let checked = 0;
     for (const [month, total] of byMonth) {
       if (month < '2026-10-01' || month > '2033-01-01') continue;
-      if (month === '2028-01-01' || month === '2028-10-01') continue; // stub months (real closures)
+      if (stubMonths.has(month)) continue;
       expect(Number(total / 100n), `month ${month}`).toBeGreaterThan(55_000);
       expect(Number(total / 100n), `month ${month}`).toBeLessThan(56_100);
+      checked += 1;
     }
+    // Guard the guard: if the range or the closure set ever collapses, the loop above
+    // would vacuously pass. 2026-10..2033-01 is 76 months less at most 3 closure stubs.
+    expect(checked).toBeGreaterThan(70);
   });
 
   it('saves roughly 17-21 lakh of home-loan interest versus the natural schedule', () => {

@@ -94,16 +94,25 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
 
 export const SEED_LOANS: LoanSeed[] = [
   {
+    // Owner-verified 2026-08-14 from the HDFC portal (a/c ...7670). Every field
+    // reconciles: principal paid 6,74,755 + outstanding 2,22,006 = 8,96,761 sanctioned;
+    // 8,96,761 over 84 months at 7.65% gives exactly the 13,821 EMI; 2,22,006 at 13,821
+    // runs 17.0 more months, matching the portal's 17 pending instalments and its
+    // 07 Jan 2028 maturity. NOTE the rate is 7.65%, not the 7.95% previously assumed.
     id: 'car1', name: 'Car loan 1', lender: 'HDFC',
-    principalPaise: rupees(650_000), outstandingPaise: rupees(220_000),
-    annualRateBps: 795, emiPaise: rupees(13_821),
-    startedOn: '2023-02-01', naturalEndOn: '2028-01-01', cascadeOrder: 1,
+    principalPaise: rupees(896_761), outstandingPaise: rupees(222_006),
+    annualRateBps: 765, emiPaise: rupees(13_821),
+    startedOn: '2021-02-01', naturalEndOn: '2028-01-01', cascadeOrder: 1,
   },
   {
+    // Owner-verified 2026-08-14 from the Bank of Baroda portal (a/c ...8366). Sanctioned
+    // and disbursed 5,50,000; outstanding 4,68,205; EMI 17,223 at 7.95%. 5,50,000 over
+    // 36 months at 7.95% gives exactly 17,223, confirming a 3-year term from Apr 2026,
+    // so the natural end is Mar 2029 (was recorded as Apr 2029).
     id: 'car2', name: 'Car loan 2', lender: 'Bank of Baroda',
-    principalPaise: rupees(550_000), outstandingPaise: rupees(495_000),
+    principalPaise: rupees(550_000), outstandingPaise: rupees(468_205),
     annualRateBps: 795, emiPaise: rupees(17_223),
-    startedOn: '2026-04-01', naturalEndOn: '2029-04-01', cascadeOrder: 2,
+    startedOn: '2026-04-01', naturalEndOn: '2029-03-01', cascadeOrder: 2,
   },
   {
     // Owner-verified 2026-08-14 from the SBI portal. The loan is split across two

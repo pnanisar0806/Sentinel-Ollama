@@ -127,7 +127,30 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 ---
 
-## Home loan — RESOLVED 2026-08-14 from the owner's SBI portal
+## All three loans — owner-verified 2026-08-14 from lender portals
+
+Every loan in `SEED_LOANS` now comes from a real statement, and every field reconciles
+arithmetically. **These are facts, not estimates — do not "correct" them toward the PRD.**
+
+| | outstanding | EMI | rate | natural end |
+|---|---|---|---|---|
+| car1 (HDFC …7670) | ₹2,22,006 | ₹13,821 | **7.65%** | Jan 2028 |
+| car2 (BoB …8366) | ₹4,68,205 | ₹17,223 | 7.95% | Mar 2029 |
+| home (SBI, 2 a/cs) | ₹29,63,143 | ₹24,482 | 7.95% | Dec 2046 |
+| **total** | **₹36.53L** | **₹55,526** | | |
+
+car1's rate was wrong in the seed (7.95% → **7.65%**) and its principal was ₹6.50L against
+the real ₹8,96,761 (= ₹6,74,755 paid + ₹2,22,006 outstanding, an 84-month loan from Feb
+2021). car2's outstanding was ₹4.95L against the real ₹4,68,205; ₹5.50L over 36 months at
+7.95% gives exactly the ₹17,223 EMI, confirming a 3-year term ending Mar 2029.
+
+The PRD's ₹36.7L loan total is stale by ₹0.17L. The verified figures win.
+
+**Cascade output with real data**: car1 closes Feb 2028, car2 Sep 2028, home **Dec 2033**,
+saving **₹19.23L** — against the PRD's independently stated ~Dec 2033 and ~₹19.3L. The
+model never saw either figure.
+
+## Home loan detail — RESOLVED 2026-08-14 from the owner's SBI portal
 
 The loan is **two accounts**, same rate and origination, modelled as one line (amortization
 at a shared rate is linear, so the sum behaves identically):
@@ -173,13 +196,10 @@ brief the acceptance criteria and let the implementer derive the code.
 
 ## Owner true-up items (need real statements — do not guess)
 
-- ~~Home loan~~ — **resolved 2026-08-14**, see above.
-- ~~Loans total~~ — **resolved**: now ₹36.78L against the PRD's ₹36.7L, was ₹37.39L. The
-  home-loan correction closed this gap too.
-- **Car loan 1:** outstanding ₹2.20L is an estimate. Same portal check would settle it.
-- **Car loan 2:** ₹4.95L outstanding is unverified against a statement.
+- ~~Home loan~~, ~~car loan 1~~, ~~car loan 2~~, ~~loans total~~ — **all resolved
+  2026-08-14** from lender portals; see the verified table above.
 - **Bonds:** line items sum to ₹6.00L against the PRD's stated ₹6.33L bucket — accrued
-  interest? ₹0.33L unexplained.
+  interest? ₹0.33L unexplained. **The only remaining data gap.**
 - **RSU grants:** per-grant unit split was reconstructed to total 1,105 units; the PRD
   never published the breakdown.
 - **Holdings total is exact at ₹47.69L** — EPF 13.54L, MF 11.83L, stocks/ETFs 8.32L,
