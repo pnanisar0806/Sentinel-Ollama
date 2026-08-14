@@ -36,6 +36,31 @@ re-review → delete SDD workspace → `superpowers:finishing-a-development-bran
 
 ---
 
+## Plan audit — tasks 7–15 audited 2026-08-14 BEFORE implementation
+
+**21 findings. Full register:
+`.superpowers/sdd/2026-08-12-sentinel-phase-0/plan-audit-findings.md` — read it before
+starting any task from 7 onward.** Do not implement a task until its findings are struck.
+
+Five critical, in priority order:
+
+1. **T7** reference test contradicts the plan's own derived value (₹82,124 vs a `< 82,000`
+   band) — fails on first run.
+2. **T10** the no-catch-up architecture test does **not** enforce the firewall. It greps for
+   an import string; passing `fundedRatio: number` as a parameter from an allowed file
+   defeats it entirely, as do dynamic imports, double quotes, and any file outside `src/`.
+3. **T11** the Kite read-only test forbids only the literal name `placeOrder`.
+   `submitOrder()` passes. Needs a full method allowlist.
+4. **T11A** `oauth_clients.client_secret` is stored in plaintext while the token table beside
+   it is AES-256-GCM encrypted.
+5. **T13** requires PRD §3.1–§3.10 **verbatim** (shown to the owner at −20% drawdown, so a
+   paraphrase is a product failure) — and §3.2–§3.10 exist in no artifact in this repo.
+   **Blocked on the owner supplying the text.**
+
+Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney source**, so
+11A and 11B would be built and then never used; and **T12's staleness engine reads only
+`holdings`**, so it may be structurally blind to stale prices, NAVs and FX.
+
 ## Owner decisions (do not re-litigate)
 
 - **Runtime: TypeScript everywhere.** One package. Next.js UI + jobs as TS scripts. vitest.
