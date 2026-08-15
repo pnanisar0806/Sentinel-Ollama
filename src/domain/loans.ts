@@ -32,6 +32,32 @@ function monthlyInterest(balance: Paise, annualRateBps: number): Paise {
   return ((balance * BigInt(annualRateBps)) / 120_000n) as Paise;
 }
 
+/**
+ * One month of a single loan: interest on the opening balance, the scheduled
+ * payment (EMI + any extra principal redirected onto it), and the resulting
+ * split. The final month is capped at `balance + interest` so a loan never
+ * overpays itself.
+ *
+ * Shared by `amortize` and `runCascade` — the two differ only in where `extra`
+ * comes from, never in the arithmetic.
+ */
+function stepLoan(loan: LoanInput, month: string, balance: Paise, extra: Paise): ScheduleRow {
+  const interest = monthlyInterest(balance, loan.annualRateBps);
+  const scheduled = (loan.emiPaise + extra) as Paise;
+  if (scheduled <= interest) {
+    throw new Error(`loan ${loan.id} never amortises: EMI does not exceed monthly interest`);
+  }
+  const payment = (scheduled > balance + interest ? balance + interest : scheduled) as Paise;
+  const principal = (payment - interest) as Paise;
+  const closing = (balance - principal) as Paise;
+
+  return {
+    loanId: loan.id, month,
+    openingPaise: balance, paymentPaise: payment,
+    interestPaise: interest, principalPaise: principal, closingPaise: closing,
+  };
+}
+
 export function amortize(
   loan: LoanInput,
   opts: { from: string; extraByMonth?: Map<string, Paise> },
@@ -44,23 +70,11 @@ export function amortize(
     if (rows.length >= MAX_MONTHS) {
       throw new Error(`loan ${loan.id} never amortises: EMI does not exceed monthly interest`);
     }
-    const interest = monthlyInterest(balance, loan.annualRateBps);
     const extra = opts.extraByMonth?.get(month) ?? (0n as Paise);
-    const scheduled = (loan.emiPaise + extra) as Paise;
-    if (scheduled <= interest) {
-      throw new Error(`loan ${loan.id} never amortises: EMI does not exceed monthly interest`);
-    }
-    const payment = (scheduled > balance + interest ? balance + interest : scheduled) as Paise;
-    const principal = (payment - interest) as Paise;
-    const closing = (balance - principal) as Paise;
+    const row = stepLoan(loan, month, balance, extra);
+    rows.push(row);
 
-    rows.push({
-      loanId: loan.id, month,
-      openingPaise: balance, paymentPaise: payment,
-      interestPaise: interest, principalPaise: principal, closingPaise: closing,
-    });
-
-    balance = closing;
+    balance = row.closingPaise;
     month = nextMonth(month);
   }
   return rows;
@@ -94,22 +108,11 @@ export function runCascade(
     for (const loan of ordered) {
       if (closures.has(loan.id)) continue;
       const balance = balances.get(loan.id)!;
-      const interest = monthlyInterest(balance, loan.annualRateBps);
       const extra = loan.id === openLoan!.id ? freedEmi : (0n as Paise);
-      const scheduled = (loan.emiPaise + extra) as Paise;
-      if (scheduled <= interest) {
-        throw new Error(`loan ${loan.id} never amortises: EMI does not exceed monthly interest`);
-      }
-      const payment = (scheduled > balance + interest ? balance + interest : scheduled) as Paise;
-      const principal = (payment - interest) as Paise;
-      const closing = (balance - principal) as Paise;
+      const row = stepLoan(loan, month, balance, extra);
+      rows.push(row);
 
-      rows.push({
-        loanId: loan.id, month,
-        openingPaise: balance, paymentPaise: payment,
-        interestPaise: interest, principalPaise: principal, closingPaise: closing,
-      });
-
+      const closing = row.closingPaise;
       balances.set(loan.id, closing);
       if (closing === 0n) {
         closures.set(loan.id, month);

@@ -265,7 +265,7 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 
 | # | From | Minor | Fixes at |
 |---|---|---|---|
-| 1 | T6 | `runCascade`'s month-step duplicates `amortize`'s interest / payment / principal math (`src/domain/loans.ts:92–121`) — extract a shared `stepLoan()` | Task 7 (touches this file) |
+| ~~1~~ | T6 | ~~`runCascade`'s month-step duplicates `amortize`'s math — extract `stepLoan()`~~ | **fixed in Task 7** (fix-on-touch) |
 | 2 | T4 | No negative-amount tests for `formatInr` / `mulP` / `usdToInr`. Verified by trace only | Task 10 (first negative flows) |
 | 3 | T1 | 3 `ASSUMPTIONS` keys untested (`childMonthlyDentInr`, `fiIncomeFloor/StretchMonthlyInr`) | Task 8/10, whichever consumes them |
 | 4 | T1 | Planning INR values are plain numbers; consumers must convert to bigint paise | same |
