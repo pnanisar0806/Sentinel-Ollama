@@ -28,7 +28,7 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 | `src/seed/seed-data.ts` | `SEED_INSTRUMENTS`, `SEED_HOLDINGS`, `SEED_LOANS`, `SEED_BUCKETS`, `SEED_MILESTONES`, `SEED_RSU_GRANTS` — the owner's real balance sheet. All loan and bond figures are owner-verified against lender/broker portals; see `MEMORY.md`. `InstrumentSeed` carries optional `isin` (populated for the three bonds; Task 11B matches on it) |
 | `src/seed/seed.ts` | `seed(db, opts?)` — idempotent; one snapshot per (business_date, source); writes `instruments.isin` |
 | `src/domain/loans.ts` | `amortize`, `runCascade`, `interestPaid`, `nextMonth`, `persistSchedules`. Both schedules share the private `stepLoan()` month step |
-| `src/domain/surplus.ts` | `FIXED_OUTFLOWS`, `BASE_TAKE_HOME`, `RENT_TO_EMI_FLAG`, `SurplusMonth`, `AnnualSurplus`, `loanOutflowByMonth`, `projectSurplus`, `projectAnnualSurplus` |
+| `src/domain/surplus.ts` | `FIXED_OUTFLOWS`, `BASE_TAKE_HOME`, `BASE_TAKE_HOME_AS_OF`, `RENT_TO_EMI_FLAG`, `CHILD_DENT_NO_END_FLAG`, `PARTIAL_YEAR_FLAG`, `SurplusMonth`, `AnnualSurplus` (carries `monthCount` + `flags`), `loanOutflowByMonth`, `projectSurplus`, `projectAnnualSurplus`. `projectSurplus`'s coverage guard is derived from the outflow map's own key range, never from `closures` alone — see `MEMORY.md` |
 | `src/jobs/sync.ts` *(planned)* | Task 15 — `pnpm sync` |
 | `src/jobs/digest.ts` *(planned)* | Task 15 — `pnpm digest` |
 | `src/jobs/ips.ts` *(planned)* | Task 13/15 — `pnpm ips` |
@@ -44,7 +44,7 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 
 One file per source module under `tests/`, same relative path. Plus:
 `tests/db/schema.test.ts` (constraints, `as_of`/`source` NOT NULL, append-only incl.
-TRUNCATE) and `tests/domain/loans.persist.test.ts` (schedule persistence). 55 tests.
+TRUNCATE) and `tests/domain/loans.persist.test.ts` (schedule persistence). 61 tests.
 
 Two conventions worth preserving, both learned from tests that caught nothing:
 derive the *actual* side of an assertion from the real data structure rather than

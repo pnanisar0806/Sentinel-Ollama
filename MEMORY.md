@@ -1,6 +1,6 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-15. Branch `phase-0`, Task 7 shipped.
+Last updated: 2026-08-15. Branch `phase-0`, Task 7 shipped (+ fix round 1).
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -19,7 +19,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 4 | money primitives + FX | complete |
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
 | 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
-| 7 | investable surplus curve | complete, 55/55 green |
+| 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
 | 8 | RSU vest projection | not started |
 | 9 | net worth + allocation drift | not started |
 | 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
@@ -172,9 +172,15 @@ the real ₹8,96,761 (= ₹6,74,755 paid + ₹2,22,006 outstanding, an 84-month 
 
 The PRD's ₹36.7L loan total is stale by ₹0.17L. The verified figures win.
 
-**Cascade output with real data**: car1 closes Feb 2028, car2 Sep 2028, home **Dec 2033**,
-saving **₹19.23L** — against the PRD's independently stated ~Dec 2033 and ~₹19.3L. The
-model never saw either figure.
+**Cascade output with real data** (`runCascade(SEED_LOANS, '2026-09-01')`, re-verified by
+execution 2026-08-15): car1 `2028-02-01`, car2 `2028-09-01`, home **`2033-12-01`**, interest
+saved **₹19,26,308** (natural ₹31,01,145 − cascade ₹11,74,837) — against the PRD's
+independently stated ~Dec 2033 and ~₹19.3L. The model never saw either figure.
+
+**These three dates are the only correct ones.** Two other closure sets appeared in earlier
+drafts of this file (Jan 2034 / ₹19.07L, and car1 2028-01 · car2 2028-10 · home 2034-03);
+both predate the seed corrections and are wrong. Never write any of them as a literal —
+derive from `closures`.
 
 ## Home loan detail — RESOLVED 2026-08-14 from the owner's SBI portal
 
@@ -198,8 +204,9 @@ rate (379 months at ₹23,988 would require a ₹33.24L balance). Balance + EMI 
 hard facts; derive tenure, never read it.
 
 Corroboration that the model is sound: with real figures the cascade closes the home loan
-**Jan 2034** saving **₹19.07L** of interest, against the PRD's independently-stated
+**Dec 2033** saving **₹19.26L** of interest, against the PRD's independently-stated
 ~Dec 2033 and ~₹19.3L. Both within 1%, and the model never saw either number.
+(An earlier "Jan 2034 / ₹19.07L" reading here was stale — see the verified block above.)
 
 ## Task 6 — resolved by review
 
@@ -213,8 +220,10 @@ Verified by executing the shipped code: `freedEmi` accumulates additively (the s
 and is recomputed each month; steady-state months total exactly ₹55,526.00; closure-month
 stubs are capped at `min(scheduled, balance + interest)` so nothing overpays. `openLoan`
 is fixed at the *start* of the month, so redirection correctly begins the month **after** a
-closure — that is why the two stub months dip below ₹55,526. Closures: car1 → 2028-01-01,
-car2 → 2028-10-01, home → 2034-03-01.
+closure — that is why the stub months dip below ₹55,526 (₹41,707 in 2028-02, ₹42,466 in
+2028-09, ₹24,307 in the final month 2033-12). **Any consumer asserting flat outflow must
+exempt `closures.values()`.** The closure dates written here in an earlier draft
+(2028-01 / 2028-10 / 2034-03) were stale; the verified set is in the block above.
 
 That makes four tasks in a row (2, 3, 5, 6) where the plan's reference code contained a
 real defect. **Treat the plan's implementation snippets as a sketch, not as truth** —
@@ -228,17 +237,33 @@ SIPs*; the ~₹6,100 gap is its unquantified "+ electricity" line. **Do not tune
 hit ₹76,000** — when the owner supplies an electricity figure it goes into
 `FIXED_OUTFLOWS.misc` and the test's expected value moves in the same commit.
 
-- Take-home steps up each **April** at `ASSUMPTIONS.salaryStepUp`, not `sipStepUp`.
+- Take-home steps up each **April** at `ASSUMPTIONS.salaryStepUp`, not `sipStepUp`, counted
+  from **`BASE_TAKE_HOME_AS_OF` = '2026-09-01'** — the epoch the PRD figure is quoted at,
+  NOT the caller's `from`. Anchoring to `from` made the same calendar month pay differently
+  depending on when the projection started, silently rebasing salary for a later caller.
 - Loan release is a consequence of the cascade (home closes 2033-12), never a date literal.
-- `projectSurplus` throws if a month inside the window is missing from the outflow map and
-  falls on/before the last closure — otherwise a mismatched cascade would silently inflate
-  surplus by a whole EMI block. That is what the `closures` argument is for.
+- **`projectSurplus`'s coverage guard is derived from the outflow map's OWN key range**
+  (every month at or before `max(keys)` must be present), plus an outright refusal of an
+  empty map when `months > 0`. `closures` is kept as an ADDITIONAL tail signal and stays in
+  the interface, but **nothing may depend on it being populated**: it is returned only by
+  `runCascade` and persisted NOWHERE (`loan_schedule` has no closure column), so a Task 8+
+  consumer reading a schedule back from Postgres passes an empty map. Keying the guard off
+  `closures` alone made it a silent no-op there and inflated surplus by the full ₹55,526.
+- **Never assert the release on annual investable totals.** Take-home compounds 10%/fiscal
+  year, so by 2033 two years of growth swamps a ₹55,526 release: a projection where the
+  release NEVER happens still shows y2035 > y2033. Assert `loanOutflowPaise` directly.
 - **Open, tied to Task 10:** the child dent (₹10k/mo from Jan 2028) has **no end
   condition**. PRD §2.2 ends it at B4 activation; B4 does not exist yet, so a `TODO(Task 10)`
   sits on `childDentFor`. Over the 300-month annual view it runs 22 years and understates
   late-horizon surplus. **Gate it when B4 lands.**
-- `RENT_TO_EMI_FLAG` on every `AnnualSurplus` row: rent is still modelled as rent because no
-  Hyderabad purchase date exists. Narrow the flag and move rent into the cascade when it does.
+- **`AnnualSurplus.flags` carries three caveats, plus `monthCount`.** `RENT_TO_EMI_FLAG` on
+  every row (rent still modelled as rent, no Hyderabad purchase date — narrow it and move
+  rent into the cascade when one exists); `CHILD_DENT_NO_END_FLAG` on every year carrying a
+  dent (the open-ended dent above, up to ₹1.2L/yr understated); `PARTIAL_YEAR_FLAG` where
+  `monthCount < 12`. The head and tail years of a window are partial — from 2026-09 the
+  2026 row holds 4 months and the 2051 row holds 8, which unflagged reads as a 3.5x jump
+  and a 27% collapse that are pure artifacts. **Any new caveat goes on `flags`**: a consumer
+  seeing one flag reasonably concludes it is the only one.
 
 ## Owner true-up items (need real statements — do not guess)
 

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { runCascade } from '../../src/domain/loans.js';
 import {
-  FIXED_OUTFLOWS, RENT_TO_EMI_FLAG, loanOutflowByMonth, projectAnnualSurplus, projectSurplus,
+  CHILD_DENT_NO_END_FLAG, FIXED_OUTFLOWS, PARTIAL_YEAR_FLAG, RENT_TO_EMI_FLAG,
+  loanOutflowByMonth, projectAnnualSurplus, projectSurplus,
 } from '../../src/domain/surplus.js';
+import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { addP, rupees, subP } from '../../src/money/paise.js';
 import { SEED_LOANS } from '../../src/seed/seed-data.js';
 
@@ -70,14 +72,44 @@ describe('surplus curve', () => {
     }
   });
 
+  // The model's headline behaviour, asserted on `loanOutflowPaise` ITSELF.
+  //
+  // An earlier draft compared ANNUAL INVESTABLE totals (y2035 > y2033) and was vacuous:
+  // take-home compounds 10% per fiscal year, so by 2033 monthly take-home is ~4.19L and two
+  // further years add ~1.5L/month - the 55,526 release is noise against it. Verified by
+  // feeding projectSurplus a synthetic map holding 55,526 flat for all 300 months (release
+  // NEVER happens) with closures pushed to 2060: y2033=319891218 y2035=423073227, and the
+  // old assertion still passed. It tested neither flatness nor release.
+  //
+  // The closure month is derived from `closures`, never written as a date literal - Task 6
+  // was already bitten by a hard-coded closure month.
   it('holds loan outflow flat until the home loan closes, then releases it', () => {
-    const annual = projectAnnualSurplus({
-      fromYear: 2026, toYear: 2050,
-      monthly: projectSurplus({ from: '2026-09-01', months: 300, closures, loanOutflowByMonth: outflow }),
+    const homeClosure = closures.get('home')!;
+    // Closure months legitimately dip: the closing loan's final payment is capped at
+    // balance + interest, and freedEmi is credited only after the month completes. See the
+    // runCascade docstring.
+    const closureMonths = new Set(closures.values());
+    const fullBlock = addP(...SEED_LOANS.map((l) => l.emiPaise));
+    const months = projectSurplus({
+      from: '2026-09-01', months: 300, closures, loanOutflowByMonth: outflow,
     });
-    const y2033 = annual.find((a) => a.year === 2033)!.investablePaise;
-    const y2035 = annual.find((a) => a.year === 2035)!.investablePaise;
-    expect(y2035).toBeGreaterThan(y2033);
+
+    let flatChecked = 0;
+    let releasedChecked = 0;
+    for (const m of months) {
+      if (closureMonths.has(m.month)) continue;
+      if (m.month < homeClosure) {
+        expect(m.loanOutflowPaise).toBe(fullBlock);
+        flatChecked++;
+      } else if (m.month > homeClosure) {
+        expect(m.loanOutflowPaise).toBe(0n);
+        releasedChecked++;
+      }
+    }
+    // Counters: without these an empty window would pass the loop vacuously.
+    expect(flatChecked).toBeGreaterThan(80);
+    expect(releasedChecked).toBeGreaterThan(200);
+    expect(fullBlock).toBe(rupees(55_526));
   });
 
   it('produces one row per month with no gaps', () => {
@@ -117,5 +149,99 @@ describe('surplus curve', () => {
     expect(() =>
       projectSurplus({ from: '2026-08-01', months: 3, closures, loanOutflowByMonth: outflow }),
     ).toThrow(/loan outflow missing/);
+  });
+
+  // ...and the guard must not be disablable by its own arguments. Keying coverage off
+  // `closures` alone made it a silent no-op for an EMPTY closures map, which is reachable in
+  // production rather than hypothetical: `closures` is returned only by runCascade and is
+  // persisted NOWHERE (persistSchedules writes loan_schedule, which has no closure column),
+  // so any Task 8+ consumer reading a schedule back from Postgres holds an outflow map and
+  // no closures. The disabled guard returned two happy rows for a 2019 window with
+  // investable 1,37,650 - inflated by exactly the 55,526 EMI block the guard exists to catch.
+  it('still refuses an uncovered window when closures is empty', () => {
+    expect(() => projectSurplus({
+      from: '2019-01-01', months: 2, closures: new Map(), loanOutflowByMonth: outflow,
+    })).toThrow(/loan outflow missing/);
+  });
+
+  it('refuses an empty outflow map outright, with or without closures', () => {
+    expect(() => projectSurplus({
+      from: '2019-01-01', months: 2, closures: new Map(), loanOutflowByMonth: new Map(),
+    })).toThrow(/loan outflow missing/);
+    expect(() => projectSurplus({
+      from: '2026-09-01', months: 2, closures, loanOutflowByMonth: new Map(),
+    })).toThrow(/loan outflow missing/);
+    // months: 0 asks for nothing, so nothing can be uncovered.
+    expect(projectSurplus({
+      from: '2026-09-01', months: 0, closures: new Map(), loanOutflowByMonth: new Map(),
+    })).toEqual([]);
+  });
+
+  // A hole INSIDE the map, with no closures at all: the map's own key range is what makes
+  // this detectable. The victim month is picked out of the real map, never written down.
+  it('refuses a hole in the middle of the outflow map with no closures supplied', () => {
+    const holed = new Map(outflow);
+    const victim = [...outflow.keys()].sort()[10]!;
+    holed.delete(victim);
+    expect(() => projectSurplus({
+      from: '2026-09-01', months: 24, closures: new Map(), loanOutflowByMonth: holed,
+    })).toThrow(new RegExp(`loan outflow missing for ${victim}`));
+  });
+
+  // BASE_TAKE_HOME is a PRD figure quoted as of BASE_TAKE_HOME_AS_OF. Anchoring the April
+  // ladder to the caller's `from` made the same calendar month pay differently depending on
+  // when the projection started (Apr-2027 read 2,36,500 from a 2026-09 start but 2,15,000
+  // from a 2027-04 start), silently rebasing salary for any later caller.
+  it('yields the same take-home for a calendar month from any projection start', () => {
+    const early = projectSurplus({
+      from: '2026-09-01', months: 120, closures, loanOutflowByMonth: outflow,
+    });
+    const late = projectSurplus({
+      from: '2027-04-01', months: 120, closures, loanOutflowByMonth: outflow,
+    });
+    const earlyByMonth = new Map(early.map((m) => [m.month, m.takeHomePaise]));
+    const shared = late.filter((m) => earlyByMonth.has(m.month));
+    expect(shared.length).toBeGreaterThan(100);
+    for (const m of shared) expect(m.takeHomePaise).toBe(earlyByMonth.get(m.month));
+  });
+
+  // A partial head or tail year is not comparable with a full one. Unflagged, this window
+  // reads as a 3.5x jump from 2026 (4 months) to 2027 and a 27% collapse from 2050 to 2051
+  // (8 months) - both pure windowing artifacts.
+  it('flags partial years and carries the month count', () => {
+    const annual = projectAnnualSurplus({
+      fromYear: 2026, toYear: 2100, monthly: project(300),
+    });
+    const [first] = annual;
+    const last = annual.at(-1)!;
+    expect(first!.monthCount).toBeLessThan(12);
+    expect(first!.flags).toContain(PARTIAL_YEAR_FLAG);
+    expect(last.monthCount).toBeLessThan(12);
+    expect(last.flags).toContain(PARTIAL_YEAR_FLAG);
+
+    const middle = annual.slice(1, -1);
+    expect(middle.length).toBeGreaterThan(20);
+    for (const a of middle) {
+      expect(a.monthCount).toBe(12);
+      expect(a.flags).not.toContain(PARTIAL_YEAR_FLAG);
+    }
+    // Every projected month lands in exactly one bucket.
+    expect(annual.reduce((n, a) => n + a.monthCount, 0)).toBe(300);
+  });
+
+  // The child dent has no end condition (TODO Task 10), which understates late-horizon
+  // surplus by up to 1.2L/year. `flags` already carried the rent caveat, so a consumer
+  // seeing one caveat would reasonably conclude it was the only one.
+  it('flags the open-ended child dent on every year from the arrival onward', () => {
+    const annual = projectAnnualSurplus({
+      fromYear: 2026, toYear: 2100, monthly: project(300),
+    });
+    expect(annual.length).toBeGreaterThan(20);
+    for (const a of annual) {
+      expect(a.flags.includes(CHILD_DENT_NO_END_FLAG))
+        .toBe(a.year >= ASSUMPTIONS.childArrivalYear);
+    }
+    // It must not fall off the far end: the understatement never stops.
+    expect(annual.at(-1)!.flags).toContain(CHILD_DENT_NO_END_FLAG);
   });
 });

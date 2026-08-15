@@ -85,7 +85,16 @@ export function amortize(
  * paying its own EMI every month. Loans close in cascadeOrder; the moment one
  * closes, the sum of all EMIs freed so far is redirected in full as extra
  * principal onto whichever loan is earliest in cascadeOrder and still open, so
- * total household loan outflow stays flat until the last loan dies.
+ * total household loan outflow stays flat until the last loan dies — EXCEPT in a
+ * closure month itself, which dips below the flat block.
+ *
+ * That dip is deliberate, not a leak. A closing loan's final payment is capped at
+ * `balance + interest` (see `stepLoan`) so it never overpays, and `freedEmi` is
+ * credited only after the month completes, so redirection starts the FOLLOWING
+ * month. With the seed cascade from 2026-09 the household total is ₹55,526 for 85
+ * months and dips to ₹41,707 in 2028-02 (car1's stub) and ₹42,466 in 2028-09
+ * (car2's stub); the last month, 2033-12, is the home loan's own stub at ₹24,307.
+ * A consumer asserting flatness must exempt the months in `closures.values()`.
  *
  * (Running each loan's full amortization sequentially — one after another —
  * would leave later-order loans paying nothing until earlier ones close, which
