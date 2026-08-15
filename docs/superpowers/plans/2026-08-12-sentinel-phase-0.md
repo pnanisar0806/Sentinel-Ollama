@@ -1653,7 +1653,10 @@ git commit -m "feat(domain): loan amortization, prepayment cascade and persisted
 ```ts
 import { describe, expect, it } from 'vitest';
 import { runCascade } from '../../src/domain/loans.js';
-import { loanOutflowByMonth, projectAnnualSurplus, projectSurplus } from '../../src/domain/surplus.js';
+import {
+  FIXED_OUTFLOWS, loanOutflowByMonth, projectAnnualSurplus, projectSurplus,
+} from '../../src/domain/surplus.js';
+import { addP, rupees, subP } from '../../src/money/paise.js';
 import { SEED_LOANS } from '../../src/seed/seed-data.js';
 
 const inputs = SEED_LOANS.map((l) => ({
@@ -1667,10 +1670,20 @@ const project = (months: number) =>
   projectSurplus({ from: '2026-09-01', months, closures, loanOutflowByMonth: outflow });
 
 describe('surplus curve', () => {
-  it('starts at roughly the PRD 76,000 investable surplus', () => {
+  // Every input here is a constant, so the first month is fully determined:
+  //   215,000 take-home - 55,526 loan outflow - 77,350 fixed = 82,124, child dent 0.
+  // Asserted EXACTLY rather than banded. An earlier draft of this plan banded it at
+  // <82,000 while its own implementer note derived 82,124 - the test contradicted the
+  // model it was testing. A band here buys nothing: there is no estimate to absorb.
+  it('starts at the derived 82,124 investable surplus', () => {
     const [first] = project(1);
-    expect(Number(first!.investablePaise / 100n)).toBeGreaterThan(70_000);
-    expect(Number(first!.investablePaise / 100n)).toBeLessThan(82_000);
+    expect(first!.investablePaise).toBe(rupees(82_124));
+    // Bolted to the parts, so a change to any constant fails here rather than silently
+    // shifting the curve.
+    expect(first!.takeHomePaise).toBe(rupees(215_000));
+    expect(first!.loanOutflowPaise).toBe(rupees(55_526));
+    expect(first!.fixedOutflowPaise).toBe(rupees(77_350));
+    expect(first!.childDentPaise).toBe(rupees(0));
   });
 
   it('steps take-home up 10% each April', () => {
@@ -1688,9 +1701,24 @@ describe('surplus curve', () => {
     expect(Number(months.find((m) => m.month === '2028-01-01')!.childDentPaise / 100n)).toBe(10_000);
   });
 
+  // Asserts the mother's-support COMPONENT, not the sum of all five fixed outflows. An
+  // earlier draft checked `fixedOutflowPaise > 0n`, which no single-line change to
+  // mother's support alone could ever fail - you would have had to zero all five. The
+  // whole point of this rule (PRD §2.2) is that this one line never terminates, so the
+  // test has to be able to see it on its own.
   it('never terminates the mother support line', () => {
+    expect(FIXED_OUTFLOWS.motherSupport).toBe(rupees(20_000));
     const months = project(24);
-    expect(months.every((m) => m.fixedOutflowPaise > 0n)).toBe(true);
+    // Every month must carry at least the mother's-support line, and the fixed block must
+    // still contain it: drop motherSupport from the sum and the residual has to shrink by
+    // exactly that amount.
+    const others = addP(
+      FIXED_OUTFLOWS.rent, FIXED_OUTFLOWS.wifeAllowance,
+      FIXED_OUTFLOWS.maidAndMaintenance, FIXED_OUTFLOWS.misc,
+    );
+    for (const m of months) {
+      expect(subP(m.fixedOutflowPaise, others)).toBe(FIXED_OUTFLOWS.motherSupport);
+    }
   });
 
   it('holds loan outflow flat until the home loan closes, then releases it', () => {
@@ -1819,7 +1847,7 @@ export function projectAnnualSurplus(opts: {
 }
 ```
 
-> **Implementer note:** the PRD states ₹76,000 investable surplus *inclusive of existing SIPs*. This model derives it (₹2,15,000 − ₹55,526 loans − ₹77,350 fixed ≈ ₹82,124) rather than hardcoding it; the gap is the PRD's "+ electricity" line. Do not tune the model to hit ₹76,000 exactly — the test band is deliberately 70–82k. When the owner supplies an electricity figure, add it to `FIXED_OUTFLOWS.misc` and narrow the band.
+> **Implementer note:** the PRD states ₹76,000 investable surplus *inclusive of existing SIPs*. This model derives ₹82,124 (₹2,15,000 − ₹55,526 loans − ₹77,350 fixed) rather than hardcoding it; the ~₹6,100 gap is the PRD's "+ electricity" line, which has no figure yet. Do **not** tune the model to hit ₹76,000 — the derived number is the honest one and the test asserts it exactly. When the owner supplies an electricity figure, add it to `FIXED_OUTFLOWS.misc` and update the expected value in the same commit; the test is designed to fail loudly when that happens, which is the point.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2732,7 +2760,7 @@ describe('funded status', () => {
 
 ```ts
 import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 async function walk(dir: string): Promise<string[]> {
@@ -2748,31 +2776,208 @@ async function walk(dir: string): Promise<string[]> {
 /**
  * PRD FR-16 / §11.9: funded status is a REPORTING metric. No sizing, risk, or
  * allocation code may read it, so "catch-up" behaviour cannot be written by accident.
+ *
+ * READ THIS BEFORE WEAKENING ANYTHING BELOW.
+ *
+ * An earlier version of this test was a single regex, `/from '.*funded-status\.js'/`,
+ * run over `src/**\/*.ts`. It enforced almost nothing. All four of these defeated it
+ * without touching funded-status.ts at all:
+ *
+ *   1. PARAMETER INJECTION - the real risk. A sizing function never imports the module;
+ *      instead `jobs/nightly.ts` (legitimately allowed to import it) computes the ratio
+ *      and passes it in as `sizeRisk(portfolio, assumptions, fundedRatio)`. The sizing
+ *      file contains no matching string, so the old test never even looked at it.
+ *   2. Dynamic `await import('...')` has no `from` clause.
+ *   3. Double-quoted imports - the regex hard-coded single quotes, and there is no lint
+ *      config in this repo forcing quote style.
+ *   4. Anything outside `src/` was never walked.
+ *
+ * So this version does four things instead:
+ *   (a) builds a real import graph - any quote style, dynamic imports, re-exports - and
+ *       tests TRANSITIVE reachability, across every source root, not just `src/`;
+ *   (b) closes parameter injection at the type level: the ratios are branded, so a
+ *       function that accepts one must name the brand, which the graph then sees. The
+ *       only way around that is an explicit cast, which (c) hunts for;
+ *   (c) flags brand-stripping casts inside the allowed reporting files;
+ *   (d) runs the whole checker against fixtures that deliberately violate it, so the
+ *       test proves it can still catch each bypass. Without (d) this test could rot into
+ *       a no-op and stay green forever - which is exactly what happened to its ancestor.
+ *
+ * If you find yourself relaxing this test to make code pass, you are almost certainly
+ * about to introduce catch-up behaviour. Change the code.
  */
-describe('no-catch-up property', () => {
-  it('is imported only by reporting code', async () => {
-    const files = (await walk('src')).filter((f) => f.endsWith('.ts'));
-    const offenders: string[] = [];
 
-    for (const file of files) {
-      const normalised = file.replace(/\\/g, '/');
-      if (normalised.endsWith('src/domain/funded-status.ts')) continue;
-      const source = await readFile(file, 'utf8');
-      if (!/from '.*funded-status\.js'/.test(source)) continue;
-      const isReporting =
-        normalised.includes('src/notify/') || normalised.includes('src/jobs/');
-      if (!isReporting) offenders.push(normalised);
+const SOURCE_ROOTS = ['src'];           // extend if entry points ever live elsewhere
+const MODULE = 'src/domain/funded-status.ts';
+/** Only these may reach funded status. Reporting surfaces, nothing that decides size. */
+const REPORTING = ['src/notify/', 'src/jobs/', 'src/render/'];
+
+const norm = (p: string) => p.replace(/\\/g, '/');
+
+/** Every specifier a file references, however it is written. */
+function specifiersOf(source: string): string[] {
+  const out: string[] = [];
+  const patterns = [
+    /(?:^|\s)(?:import|export)\s[^;]*?\sfrom\s*['"]([^'"]+)['"]/g, // static import / re-export
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,                       // dynamic import
+    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,                      // require
+    /(?:^|\s)import\s*['"]([^'"]+)['"]/g,                           // bare side-effect import
+  ];
+  for (const re of patterns) {
+    for (const m of source.matchAll(re)) out.push(m[1]!);
+  }
+  return out;
+}
+
+/** Resolve a relative specifier to a repo-relative .ts path. */
+function resolveSpec(fromFile: string, spec: string): string | null {
+  if (!spec.startsWith('.')) return null;                     // package import, not ours
+  const resolved = norm(join(dirname(fromFile), spec));
+  return resolved.replace(/\.js$/, '.ts');
+}
+
+async function buildGraph(roots: string[]) {
+  const files: string[] = [];
+  for (const r of roots) files.push(...(await walk(r)).filter((f) => f.endsWith('.ts')));
+  const graph = new Map<string, string[]>();
+  const sources = new Map<string, string>();
+  for (const f of files) {
+    const key = norm(f);
+    const src = await readFile(f, 'utf8');
+    sources.set(key, src);
+    graph.set(
+      key,
+      specifiersOf(src)
+        .map((s) => resolveSpec(key, s))
+        .filter((x): x is string => x !== null),
+    );
+  }
+  return { graph, sources };
+}
+
+/** Files that can reach `target` by any chain of imports. */
+function reachers(graph: Map<string, string[]>, target: string): string[] {
+  const out: string[] = [];
+  for (const start of graph.keys()) {
+    if (start === target) continue;
+    const seen = new Set<string>([start]);
+    const stack = [...(graph.get(start) ?? [])];
+    while (stack.length) {
+      const next = stack.pop()!;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      if (next === target) { out.push(start); break; }
+      stack.push(...(graph.get(next) ?? []));
     }
+  }
+  return out;
+}
 
-    expect(offenders, `funded-status may only be imported by notify/ and jobs/`).toEqual([]);
+describe('no-catch-up property', () => {
+  it('is reachable only from reporting code, transitively', async () => {
+    const { graph } = await buildGraph(SOURCE_ROOTS);
+
+    // Fail closed. If the walk breaks or the module is renamed, this test must go red
+    // rather than pass by finding nothing to check.
+    expect(graph.size, 'source walk found no files - checker is broken').toBeGreaterThan(5);
+    expect([...graph.keys()], `${MODULE} not found - was it renamed?`).toContain(MODULE);
+
+    const offenders = reachers(graph, MODULE)
+      .filter((f) => !REPORTING.some((allowed) => f.includes(allowed)));
+
+    expect(offenders, 'funded status must be reachable only from reporting code').toEqual([]);
+  });
+
+  it('closes parameter injection: the ratios are branded and the brand is not stripped',
+    async () => {
+      const { sources } = await buildGraph(SOURCE_ROOTS);
+
+      // The brand is what stops `sizeRisk(portfolio, fundedRatio: number)` from compiling
+      // without naming the type - which the import graph above would then catch.
+      const module = sources.get(MODULE)!;
+      expect(module, 'FundedRatio brand missing - parameter injection is reopened')
+        .toMatch(/FundedRatio/);
+
+      // The remaining escape hatch is an explicit cast in an allowed file. Casting a
+      // funded ratio back to a bare number is exactly how it would get smuggled into a
+      // sizing call, so require it to be impossible rather than merely discouraged.
+      const smuggling: string[] = [];
+      for (const [file, src] of sources) {
+        if (!REPORTING.some((allowed) => file.includes(allowed))) continue;
+        if (/\b(floorRatio|stretchRatio|fundedRatio)\b[^\n]*\bas\s+number\b/.test(src)
+          || /\bNumber\s*\(\s*[^)]*\b(floorRatio|stretchRatio|fundedRatio)\b/.test(src)) {
+          smuggling.push(file);
+        }
+      }
+      expect(smuggling, 'funded ratio unbranded in reporting code - where does it go next?')
+        .toEqual([]);
+    });
+
+  // (d) The checker checks itself. Without this, the test above can silently rot into a
+  // no-op - which is precisely what happened to the regex it replaced.
+  it('detects every known bypass when run against deliberate violations', async () => {
+    const fixture = 'tests/architecture/fixtures';
+    const { graph } = await buildGraph([fixture]);
+    const target = `${fixture}/funded-status.ts`;
+
+    const caught = reachers(graph, target).map((f) => f.split('/').pop());
+
+    // One fixture per bypass that defeated the old regex.
+    expect(caught).toContain('double-quoted.ts');   // from "..."
+    expect(caught).toContain('dynamic-import.ts');  // await import('...')
+    expect(caught).toContain('transitive.ts');      // imports a re-exporting barrel
+    expect(caught).toContain('barrel.ts');          // the barrel itself
   });
 });
+```
+
+Also create the bypass fixtures the third test runs against. These are deliberately
+"wrong" files whose only job is to prove the checker still fires. Keep them minimal and
+never import them from real code.
+
+`tests/architecture/fixtures/funded-status.ts`:
+```ts
+export const marker = 'fixture target - not the real module';
+```
+
+`tests/architecture/fixtures/double-quoted.ts`:
+```ts
+// Bypass 1: double quotes. The old regex hard-coded single quotes.
+import { marker } from "./funded-status.js";
+export const a = marker;
+```
+
+`tests/architecture/fixtures/dynamic-import.ts`:
+```ts
+// Bypass 2: dynamic import has no `from` clause at all.
+export async function b() {
+  const m = await import('./funded-status.js');
+  return m.marker;
+}
+```
+
+`tests/architecture/fixtures/barrel.ts`:
+```ts
+// Bypass 3a: a re-exporting barrel launders the dependency.
+export { marker } from './funded-status.js';
+```
+
+`tests/architecture/fixtures/transitive.ts`:
+```ts
+// Bypass 3b: two hops from the target, so no direct reference to it exists here.
+import { marker } from './barrel.js';
+export const c = marker;
 ```
 
 - [ ] **Step 6: Run them and watch them fail**
 
 Run: `pnpm test tests/domain/funded-status.test.ts tests/architecture`
 Expected: FAIL — `src/domain/funded-status.js` not found.
+
+> **Do not skip the fixture test.** It is the only thing standing between this suite and a
+> green architecture test that enforces nothing. If it ever starts passing trivially
+> (e.g. because `buildGraph` silently returned an empty map), the fail-closed assertions in
+> the first test are the backstop.
 
 - [ ] **Step 7: Write `src/domain/funded-status.ts`**
 
@@ -2788,20 +2993,46 @@ import { rupees, type Paise } from '../money/paise.js';
  * funded status annually; the agent must never let it change how much risk it takes.
  */
 
-/** Corpus needed for the FI income band at the floor SWR, in today's rupees. */
+/**
+ * A funded ratio. Branded so it cannot be passed into a sizing or risk function as a
+ * bare `number` - that was the one bypass the architecture test could not see, because
+ * such a function need never import this module at all. With the brand, any signature
+ * that accepts one must name the type, which puts it in the import graph where the test
+ * WILL see it. Do not un-brand this, and do not cast it back to `number` outside a
+ * rendering call.
+ */
+export type FundedRatio = number & { readonly __brand: unique symbol };
+
+/** SWR as integer basis points. Rates may be floats; money may not. */
+const swrBps = (swr: number) => BigInt(Math.round(swr * 10_000));
+
+/**
+ * Corpus needed for the FI income band at the floor SWR, in today's rupees.
+ *
+ * Integer throughout: corpus = annualIncome / swr, evaluated as
+ * `annualPaise * 10_000 / swrBps` so the 0.035 divisor - which has no exact binary
+ * representation - never touches a money value.
+ */
 export function fiCorpusBand(): { floorPaise: Paise; stretchPaise: Paise } {
-  const annual = (monthly: number) => monthly * 12;
+  const corpusFor = (monthlyInr: number): Paise => {
+    const annualPaise = rupees(monthlyInr * 12);
+    return ((annualPaise * 10_000n) / swrBps(ASSUMPTIONS.swrFloor)) as Paise;
+  };
   return {
-    floorPaise: rupees(Math.round(annual(ASSUMPTIONS.fiIncomeFloorMonthlyInr) / ASSUMPTIONS.swrFloor)),
-    stretchPaise: rupees(Math.round(annual(ASSUMPTIONS.fiIncomeStretchMonthlyInr) / ASSUMPTIONS.swrFloor)),
+    floorPaise: corpusFor(ASSUMPTIONS.fiIncomeFloorMonthlyInr),
+    stretchPaise: corpusFor(ASSUMPTIONS.fiIncomeStretchMonthlyInr),
   };
 }
 
-export function fundedStatus(corpusPaise: Paise): { floorRatio: number; stretchRatio: number } {
+export function fundedStatus(
+  corpusPaise: Paise,
+): { floorRatio: FundedRatio; stretchRatio: FundedRatio } {
   const { floorPaise, stretchPaise } = fiCorpusBand();
+  // Ratios are rates, not money, so float division is correct here. The inputs are
+  // exact integers; only the quotient is approximate, and it is only ever displayed.
   return {
-    floorRatio: Number(corpusPaise) / Number(floorPaise),
-    stretchRatio: Number(corpusPaise) / Number(stretchPaise),
+    floorRatio: (Number(corpusPaise) / Number(floorPaise)) as FundedRatio,
+    stretchRatio: (Number(corpusPaise) / Number(stretchPaise)) as FundedRatio,
   };
 }
 ```
@@ -2837,7 +3068,9 @@ git commit -m "feat(domain): bucket balances, milestone nags and reporting-only 
   - `writeSnapshot(db: Db, source: string, businessDate: string, rows: SourceRow[], asOf: string): Promise<string>`
   - `env` — validated config object; throws on first access with a missing required key.
 
-**Hard constraint:** `KiteSource` exposes **only** `getHoldings`, `getMfHoldings`, `getPositions`. There is no order method in Phase 0 — not a disabled one, an absent one (PRD §4.2, §11.3).
+**Hard constraint:** `KiteSource` exposes **only** `fetch` and `getHoldings` in Phase 0. There is no order method — not a disabled one, an absent one (PRD §4.2, §11.3).
+
+> Earlier drafts of this line named three read methods (`getHoldings`, `getMfHoldings`, `getPositions`) while the reference code implemented one, so the plan satisfied neither reading of its own constraint. The allowlist test below is now the authority: it asserts the exact method set, so if you add `getMfHoldings` or `getPositions` later you must widen the list deliberately and in the same commit. Do not widen it to make a failure go away — a method appearing here that you did not add is the alarm this test exists to raise.
 
 **INDmoney in this task:** build `FileIndmoneySource` only — it is the test double, the fallback, and the shape `RemoteIndmoneySource` (Task 11B) must match. The real OAuth-backed source is Tasks 11A and 11B.
 
@@ -2981,10 +3214,32 @@ describe('KiteSource', () => {
     await expect(src.fetch()).rejects.toThrow(/Invalid access token/);
   });
 
-  it('has no order-placement method at all', () => {
+  // An earlier version asserted only `.not.toContain('placeOrder')`. That is a check on
+  // one NAME, and the constraint is about CAPABILITY: `submitOrder`, `createOrder`,
+  // `modifyGtt`, `exitPosition` would all have sailed through it. CLAUDE.md is explicit
+  // that trading paths are "absent code paths, not disabled features", so the guard has
+  // to be an exhaustive allowlist - anything not on it fails, including methods nobody
+  // has thought of yet.
+  //
+  // If you are here because you added a legitimate read method and this test failed:
+  // that is the test working. Add it to the list deliberately, and only after checking it
+  // cannot mutate broker state.
+  it('exposes exactly the read-only surface and nothing else', () => {
     const src = new KiteSource({ apiKey: 'k', accessToken: 'a' });
-    expect(Object.getOwnPropertyNames(Object.getPrototypeOf(src)))
-      .not.toContain('placeOrder');
+    const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(src))
+      .filter((m) => m !== 'constructor')
+      .sort();
+    expect(methods).toEqual(['fetch', 'getHoldings'].sort());
+  });
+
+  // Belt and braces: the allowlist above governs the prototype, but a write path could
+  // also be reached through a raw endpoint string. Kite's mutating endpoints all live
+  // under /orders, /gtt and /positions, and the only HTTP verb this source may use is GET.
+  it('contains no mutating endpoint or verb anywhere in the module', async () => {
+    const source = await readFile('src/sources/kite.ts', 'utf8');
+    expect(source).not.toMatch(/\/orders\b/);
+    expect(source).not.toMatch(/\/gtt\b/);
+    expect(source).not.toMatch(/method:\s*['"](POST|PUT|DELETE|PATCH)['"]/i);
   });
 });
 ```
@@ -3097,7 +3352,7 @@ export interface Source {
 }
 ```
 
-Run: `pnpm test tests/sources/kite.test.ts` → PASS (5 tests).
+Run: `pnpm test tests/sources/kite.test.ts` → PASS (6 tests).
 
 - [ ] **Step 7: Write the INDmoney fixture and its failing test**
 
