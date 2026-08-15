@@ -1,6 +1,6 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-14. Branch `phase-0`, HEAD `1c96ae8`.
+Last updated: 2026-08-15. Branch `phase-0`, Task 7 shipped.
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -19,7 +19,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 4 | money primitives + FX | complete |
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
 | 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
-| 7 | investable surplus curve | not started |
+| 7 | investable surplus curve | complete, 55/55 green |
 | 8 | RSU vest projection | not started |
 | 9 | net worth + allocation drift | not started |
 | 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
@@ -119,7 +119,8 @@ deliberately NULLABLE (NULL = unknown cost). Append-only enforced on `audit_log`
 ### Planning assumptions — `src/config/assumptions.ts`
 
 Single source of truth for PRD §15.2. Equity CAGR 12% ±3%, inflation 6%, SWR 3.5%/4%,
-SIP step-up 10%, RSU refresher $20k/yr over 4 years net 70%, seed USDINR 95.3,
+SIP step-up 10%, **`salaryStepUp` 10% — separate key from `sipStepUp` on purpose** (equal
+today; do not re-merge them), RSU refresher $20k/yr over 4 years net 70%, seed USDINR 95.3,
 seed NOW price $127.54, child arrives 2028 (−₹10k/mo), FI at age 55, owner born 1995,
 FI income floor ₹3L/mo, stretch ₹5L/mo.
 
@@ -219,6 +220,26 @@ That makes four tasks in a row (2, 3, 5, 6) where the plan's reference code cont
 real defect. **Treat the plan's implementation snippets as a sketch, not as truth** —
 brief the acceptance criteria and let the implementer derive the code.
 
+## Task 7 — surplus curve
+
+Derived, never hardcoded: **₹82,124/month** investable at Sep 2026
+(₹2,15,000 − ₹55,526 loans − ₹77,350 fixed). The PRD's ₹76,000 is *inclusive of existing
+SIPs*; the ~₹6,100 gap is its unquantified "+ electricity" line. **Do not tune the model to
+hit ₹76,000** — when the owner supplies an electricity figure it goes into
+`FIXED_OUTFLOWS.misc` and the test's expected value moves in the same commit.
+
+- Take-home steps up each **April** at `ASSUMPTIONS.salaryStepUp`, not `sipStepUp`.
+- Loan release is a consequence of the cascade (home closes 2033-12), never a date literal.
+- `projectSurplus` throws if a month inside the window is missing from the outflow map and
+  falls on/before the last closure — otherwise a mismatched cascade would silently inflate
+  surplus by a whole EMI block. That is what the `closures` argument is for.
+- **Open, tied to Task 10:** the child dent (₹10k/mo from Jan 2028) has **no end
+  condition**. PRD §2.2 ends it at B4 activation; B4 does not exist yet, so a `TODO(Task 10)`
+  sits on `childDentFor`. Over the 300-month annual view it runs 22 years and understates
+  late-horizon surplus. **Gate it when B4 lands.**
+- `RENT_TO_EMI_FLAG` on every `AnnualSurplus` row: rent is still modelled as rent because no
+  Hyderabad purchase date exists. Narrow the flag and move rent into the cascade when it does.
+
 ## Owner true-up items (need real statements — do not guess)
 
 - ~~Home loan~~, ~~car loan 1~~, ~~car loan 2~~, ~~loans total~~ — **all resolved
@@ -267,7 +288,7 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 |---|---|---|---|
 | ~~1~~ | T6 | ~~`runCascade`'s month-step duplicates `amortize`'s math — extract `stepLoan()`~~ | **fixed in Task 7** (fix-on-touch) |
 | 2 | T4 | No negative-amount tests for `formatInr` / `mulP` / `usdToInr`. Verified by trace only | Task 10 (first negative flows) |
-| 3 | T1 | 3 `ASSUMPTIONS` keys untested (`childMonthlyDentInr`, `fiIncomeFloor/StretchMonthlyInr`) | Task 8/10, whichever consumes them |
+| 3 | T1 | 2 `ASSUMPTIONS` keys still untested (`fiIncomeFloor/StretchMonthlyInr`); `childMonthlyDentInr` covered in T7 | Task 10 |
 | 4 | T1 | Planning INR values are plain numbers; consumers must convert to bigint paise | same |
 | 5 | T2 | postgres-js path has **no** automated test — no live Postgres here | Task 15, provisioning checklist item 2 |
 | 6 | T5 | `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L", asserts 11.83L — cosmetic, value correct | final fix wave |

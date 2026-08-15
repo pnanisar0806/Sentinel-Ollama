@@ -9,12 +9,14 @@ describe('planning assumptions', () => {
     expect(ASSUMPTIONS.swrFloor).toBe(0.035);
     expect(ASSUMPTIONS.swrOptimistic).toBe(0.04);
     expect(ASSUMPTIONS.sipStepUp).toBe(0.10);
+    expect(ASSUMPTIONS.salaryStepUp).toBe(0.10);
     expect(ASSUMPTIONS.rsuRefresherUsdPerYear).toBe(20_000);
     expect(ASSUMPTIONS.rsuVestYears).toBe(4);
     expect(ASSUMPTIONS.rsuNetOfWithholding).toBe(0.70);
     expect(ASSUMPTIONS.seedUsdInr).toBe(95.3);
     expect(ASSUMPTIONS.seedNowPriceUsd).toBe(127.54);
     expect(ASSUMPTIONS.childArrivalYear).toBe(2028);
+    expect(ASSUMPTIONS.childMonthlyDentInr).toBe(10_000);
     expect(ASSUMPTIONS.fiTargetAge).toBe(55);
     expect(ASSUMPTIONS.ownerBirthYear).toBe(1995);
   });

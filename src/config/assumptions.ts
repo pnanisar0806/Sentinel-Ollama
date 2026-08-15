@@ -9,6 +9,13 @@ export const ASSUMPTIONS = {
   swrFloor: 0.035,
   swrOptimistic: 0.04,
   sipStepUp: 0.10,
+  /**
+   * Annual take-home growth, applied each April (fiscal-year start).
+   * Deliberately SEPARATE from `sipStepUp` despite being equal today: one is the rate
+   * at which the owner raises SIP contributions, the other is salary growth. Sharing a
+   * constant would silently move modelled salary the day the SIP step-up is revised.
+   */
+  salaryStepUp: 0.10,
   rsuRefresherUsdPerYear: 20_000,
   rsuVestYears: 4,
   rsuNetOfWithholding: 0.70,
