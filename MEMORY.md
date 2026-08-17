@@ -1,6 +1,6 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-15. Branch `phase-0`, Task 7 shipped (+ fix round 1).
+Last updated: 2026-08-17. Branch `phase-0`, Task 8 shipped.
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -20,7 +20,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
 | 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
 | 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
-| 8 | RSU vest projection | not started |
+| 8 | RSU vest projection | complete, 78/78 green |
 | 9 | net worth + allocation drift | not started |
 | 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
 | 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | not started |
@@ -265,14 +265,54 @@ hit ₹76,000** — when the owner supplies an electricity figure it goes into
   and a 27% collapse that are pure artifacts. **Any new caveat goes on `flags`**: a consumer
   seeing one flag reasonably concludes it is the only one.
 
+## Task 8 — RSU vest projection
+
+Derived, never hardcoded: **469.375 unvested units / ₹57,05,047.56** (`570_504_756` paise)
+at `asOf` 2026-09-01, at $127.54 × 95.3. Working: G2021 and G2022 have fully vested by then;
+G2023 2 tranches × 10.3125, G2024 6 × 11.875, G2025 10 × 12.8125, G2026 14 × 17.8125.
+**The PRD's ₹53.25L is ~7% lower — that gap is an OWNER TRUE-UP, not a modelling error**
+(see the true-up list below). Asserted exactly, so it fails loudly.
+
+- **Tranches are allocated cumulatively**: tranche k gets `floor(T·k/16) − floor(T·(k−1)/16)`
+  for units, gross and net alike, so 16 parts always sum back to the whole grant. Rounding
+  each tranche independently (the plan's sketch) leaves a projection whose parts need not
+  add to its whole. A per-grant reconciliation test asserts parts == whole for all three.
+- **USD prices go through `dollars()`**, never `Math.round(price*100)` — `127.54*100` is
+  `12753.999999999998` and `127.545*100` is `12754.500000000002`. A sub-cent price is now
+  *rejected* rather than silently rounded.
+- **`withRefreshers` skips any year that already carries a real grant**, derived from the
+  `grants` argument. Without it `fromYear: 2026` emitted `REFRESH-2026` beside the real
+  285-unit G2026 and overstated the pipeline by a whole grant.
+- **`confirmVest` recomputes `gross_paise`** from the confirmed units/price/FX (the sketch
+  wrote only `net_paise`, leaving the row's implied withholding rate wrong), rejects a net
+  above that gross, rejects an unknown id, and stamps `source = 'owner-confirmed'`.
+- **`persistVests(db, vests, {asOf?, source?})`** — `asOf` injectable so runs are
+  reproducible. Upsert is keyed on (grant_id, vest_on); an ACTUAL row is never touched.
+- **`unvestedValue` sums exactly what it is given.** A projection window that stops short of
+  the last tranche understates the pipeline silently — project the full range.
+- **Refresher grants have no `rsu_grants` row**, and `rsu_vests.grant_id` is a FK, so vests
+  projected from `withRefreshers` output **cannot be persisted**. Scenario input only. The
+  `rsu_grants.scenario` column ('ACTUAL'|'REFRESHER') exists for the day they are;
+  `RsuGrantSeed` carries no `scenario` field yet.
+- **PGlite returns `bigint` columns as JS numbers, not strings.** The plan's own T8 test
+  asserted `net_paise === '900000'` and would have failed on that alone. Always widen through
+  `BigInt()`. (Precision is lost above 2^53 paise ≈ ₹90,000Cr — not reachable here.)
+
 ## Owner true-up items (need real statements — do not guess)
 
 - ~~Home loan~~, ~~car loan 1~~, ~~car loan 2~~, ~~loans total~~ — **all resolved
   2026-08-14** from lender portals; see the verified table above.
 - ~~Bonds~~ — **resolved 2026-08-14**, see below.
 
-**No open data gaps. Every figure in `SEED_HOLDINGS` and `SEED_LOANS` is now either
-owner-verified or explicitly marked as a PRD-stated value.**
+**OPEN (Task 8): the RSU per-grant unit split.** The PRD never published it; the six-grant
+breakdown totalling 1,105 units was *reconstructed*. The model's unvested total is
+₹57,05,047.56 against the PRD's ₹53.25L — a ~7% gap that is a **data** question, not a
+modelling one. **Needs the owner's Fidelity statement** (per-grant units and grant dates).
+Nothing was tuned toward ₹53.25L; when the real split arrives, `SEED_RSU_GRANTS` and the
+exact assertion in `tests/domain/rsu.test.ts` move in the same commit.
+
+Otherwise no open data gaps: every figure in `SEED_HOLDINGS` and `SEED_LOANS` is either
+owner-verified or explicitly marked as a PRD-stated value.
 
 ## Bonds — owner-verified 2026-08-14 from the INDmoney bonds screen
 
