@@ -30,6 +30,8 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 | `src/domain/loans.ts` | `amortize`, `runCascade`, `interestPaid`, `nextMonth`, `persistSchedules`. Both schedules share the private `stepLoan()` month step |
 | `src/domain/surplus.ts` | `FIXED_OUTFLOWS`, `BASE_TAKE_HOME`, `BASE_TAKE_HOME_AS_OF`, `RENT_TO_EMI_FLAG`, `CHILD_DENT_NO_END_FLAG`, `PARTIAL_YEAR_FLAG`, `SurplusMonth`, `AnnualSurplus` (carries `monthCount` + `flags`), `loanOutflowByMonth`, `projectSurplus`, `projectAnnualSurplus`. `projectSurplus`'s coverage guard is derived from the outflow map's own key range, never from `closures` alone — see `MEMORY.md` |
 | `src/domain/rsu.ts` | `VestEvent`, `PROJECTED_SOURCE`, `CONFIRMED_SOURCE`, `projectVests`, `withRefreshers`, `unvestedValue`, `persistVests(db, vests, {asOf?})`, `confirmVest(db, id, actual, {asOf?})`. Tranches are allocated cumulatively so 16 parts always sum to the whole grant; `confirmVest` RECOMPUTES `gross_paise` and runs its update + audit insert in one transaction; `withRefreshers` skips years that already carry a real grant. FR-03 lives in the SQL — one `insert ... on conflict (grant_id, vest_on) do update ... where rsu_vests.status <> 'ACTUAL'`, backed by the unique constraint in `0001` |
+| `src/domain/networth.ts` | `InstrumentKind` (mirrors the schema check constraint, `'LOAN'` included), `AssetClass`, `Position` (carries `sector`), `NetWorth`, `classify` (throws on LOAN — a liability must never be summed into assets), `loadPositions(db, businessDate?)` (latest snapshot per source, merged), `netWorth`, `outstandingLiabilities(db, asOfMonth)` (lateral join; falls back to `loans.outstanding_paise` for a month before the schedule starts) |
+| `src/domain/allocation.ts` | `IPS_BANDS`, `CAPS` (all five enforced), `SECTOR_COVERAGE_CAVEAT`, `DriftRow`, `Concentration`, `allocationDrift(byAssetClass, total?)` (derives the total, rejects an inconsistent one; drift via `mulP`, never a float), `concentration` (aggregates by instrument/issuer/scheme/sector before applying a cap; reports `sectorCoveragePct`). See `MEMORY.md` for the seed's real breach set |
 | `src/jobs/sync.ts` *(planned)* | Task 15 — `pnpm sync` |
 | `src/jobs/digest.ts` *(planned)* | Task 15 — `pnpm digest` |
 | `src/jobs/ips.ts` *(planned)* | Task 13/15 — `pnpm ips` |
@@ -45,7 +47,11 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 
 One file per source module under `tests/`, same relative path. Plus:
 `tests/db/schema.test.ts` (constraints, `as_of`/`source` NOT NULL, append-only incl.
-TRUNCATE) and `tests/domain/loans.persist.test.ts` (schedule persistence). 82 tests.
+TRUNCATE) and `tests/domain/loans.persist.test.ts` (schedule persistence). 114 tests.
+
+`tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
+portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic
+round numbers alone are how the plan's false "the seed breaches the Sammaan cap" survived.
 
 Two conventions worth preserving, both learned from tests that caught nothing:
 derive the *actual* side of an assertion from the real data structure rather than

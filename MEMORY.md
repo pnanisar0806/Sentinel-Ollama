@@ -1,6 +1,6 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-17. Branch `phase-0`, Task 8 shipped.
+Last updated: 2026-08-17. Branch `phase-0`, Task 9 shipped.
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -21,7 +21,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
 | 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
 | 8 | RSU vest projection | complete, 1 fix round (FR-03 in SQL), 82/82 green |
-| 9 | net worth + allocation drift | not started |
+| 9 | net worth + allocation drift | complete, 114/114 green |
 | 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
 | 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | not started |
 | 11A | INDmoney OAuth: DCR + PKCE + encrypted token store + `pnpm indmoney:login` | not started |
@@ -320,7 +320,53 @@ G2023 2 tranches × 10.3125, G2024 6 × 11.875, G2025 10 × 12.8125, G2026 14 ×
 - **A vest ON the `asOf` date is VESTED**, not unvested: `unvestedValue` filters `vestOn >
   asOf`, strictly. Pinned by a test whose `asOf` is an actual tranche date.
 
+## Task 9 — net worth and allocation drift
+
+Derived, never hardcoded. **Assets ₹47,68,999.61 (`476_899_961` paise)**; liabilities at
+2026-09-01 **₹36,21,975.95 (`362_197_595`)** — the cascade's closing balances after one
+month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
+
+- **The plan's claim that the seed breaches the *Sammaan* issuer cap is FALSE.** Sammaan is
+  ₹3,79,999.61 / ₹47.69L = **7.9681%**, under the 10% cap. Nothing was tuned.
+- **The seed does breach the issuer cap — as `ServiceNow`, at 10.4844%.** `US:NOW` carries
+  `issuer: 'ServiceNow'`, so the employer and single-issuer caps fire on the same money.
+  Any consumer counting breaches must expect that pair, not double-count it as two risks.
+- **Full real breach set (4):** single-stock `NSE:SMALLCASE-RESIDUE` **13.7429%**,
+  single-stock `US:NOW` **10.4844%**, employer `US:NOW` 10.4844%, issuer `ServiceNow`
+  10.4844%. No MF-scheme breach (top scheme `MF:ICICI-NIFTY50-IDX` 14.59% vs a 35% cap), no
+  sector breach (Technology 10.48% vs 25%).
+- **Allocation:** EQUITY 53.95%, DEBT 41.31%, CASH 3.42% all inside band; **GOLD 1.32% is
+  UNDER its 5% floor — ₹1,75,449.98 of gold to buy.** The only IPS drift the seed produces.
+- **`instruments.kind` admits `'LOAN'`; the plan's `InstrumentKind` omitted it**, so a LOAN
+  row fell through `classify` to EQUITY and would be summed into *assets*. `classify` now
+  throws on LOAN. Keep the union in step with the schema check constraint.
+- **`outstandingLiabilities` falls back to `loans.outstanding_paise`** via a lateral join.
+  A plain `where period_month <= $1` returns no row for a month before the schedule starts
+  and reported **zero** liabilities against a real ₹36.53L.
+- **`allocationDrift(byAssetClass, total?)` derives `total` and rejects an inconsistent
+  one.** Two arguments describing one portfolio is a silent-wrong-answer hazard.
+- `driftPaise` goes through `mulP` integer micros. Never `Math.round(pct * Number(total))`.
+- `concentration` aggregates by instrument/issuer/scheme/sector **before** comparing to a
+  cap — the same stock in two accounts is one exposure.
+- **`sectorCoveragePct` + `SECTOR_COVERAGE_CAVEAT`:** only `US:NOW` and `NSE:RPOWER` carry a
+  sector, so the 25% sector cap sees **10.54%** of the portfolio. It is reported, not
+  silently passed. `TODO(Task 11B)` — the sync supplies the rest.
+- **`NSE:SMALLCASE-RESIDUE` and `US:INDMONEY-BASKET` are baskets modelled as one EQUITY
+  line**, so the residue reports as a 13.74% *single-stock* breach it may not really be.
+  That is faithful reporting of the data we have; the fix is decomposition in Task 11B, not
+  an exemption list. Owner true-up below.
+
 ## Owner true-up items (need real statements — do not guess)
+
+**OPEN (Task 9): PRD §3.3 verbatim.** `IPS_BANDS.DEBT.min = 0.25` comes from the plan's
+snippet, not from any PRD text in this repo, and it makes a zero-debt portfolio report an
+UNDER breach. Same blocker as T13 (§3.2–§3.10 exist in no artifact here). Not tuned, not
+removed — flagged.
+
+**OPEN (Task 9): basket decomposition.** `NSE:SMALLCASE-RESIDUE` (₹6,55,400) and
+`US:INDMONEY-BASKET` (₹1,37,000) are baskets held as single EQUITY lines. Until Task 11B
+supplies constituents the single-stock cap has one likely false positive and one blind spot.
+
 
 - ~~Home loan~~, ~~car loan 1~~, ~~car loan 2~~, ~~loans total~~ — **all resolved
   2026-08-14** from lender portals; see the verified table above.
