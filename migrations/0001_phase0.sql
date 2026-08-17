@@ -102,8 +102,15 @@ create table rsu_vests (
   net_paise       bigint,
   confirmed_on    date,
   as_of           timestamptz not null,
-  source          text not null
+  source          text not null,
+  -- The upsert in src/domain/rsu.ts is keyed on this pair, and FR-03 ("a projection never
+  -- overwrites an owner-confirmed ACTUAL") is enforced by its ON CONFLICT ... WHERE clause.
+  -- Without the constraint two runs could both insert and the pair would stop identifying a
+  -- row at all.
+  unique (grant_id, vest_on)
 );
+-- Kept: the unique constraint's index leads on grant_id, so it cannot serve a lookup or a
+-- range scan on vest_on alone (the common "what vests this quarter" query).
 create index rsu_vests_date_idx on rsu_vests (vest_on);
 
 create table loans (

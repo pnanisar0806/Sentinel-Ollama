@@ -114,6 +114,22 @@ describe('vest projection', () => {
     expect(unvestedUnits).toBeCloseTo(469.375, 6);
     expect(unvestedValue(projected, asOf)).toBe(570_504_756n as Paise);
   });
+
+  it('treats a vest ON the as-of date as already vested, not unvested', () => {
+    // The headline as-of (2026-09-01) is not a vest date, so `>` vs `>=` is unobservable
+    // there. Pin the boundary on a date that IS a tranche date, derived from the projection.
+    const asOf = all[Math.floor(all.length / 2)]!.vestOn;
+    const onDate = all.filter((v) => v.vestOn === asOf);
+    expect(onDate.length).toBeGreaterThan(0); // the boundary is actually exercised
+
+    const strictlyAfter = addP(...all.filter((v) => v.vestOn > asOf).map((v) => v.grossPaise));
+    const onDateSum = addP(...onDate.map((v) => v.grossPaise));
+    expect(onDateSum > 0n).toBe(true);
+
+    expect(unvestedValue(all, asOf)).toBe(strictlyAfter);
+    // ...and that is strictly less than the inclusive reading, so `>=` cannot also pass.
+    expect(unvestedValue(all, asOf)).not.toBe(addP(strictlyAfter, onDateSum));
+  });
 });
 
 describe('refresher scenario', () => {
@@ -284,7 +300,127 @@ describe('persistence and reconciliation', () => {
       units: 1, priceUsdCents: 100n, usdInrMicros: 96_000_000n, netPaise: rupees(1),
     })).rejects.toThrow(/no rsu_vests row/i);
   });
+
+  it('refuses a confirmation carrying a negative net, units or price', async () => {
+    await persistVests(db, projectVests(SEED_RSU_GRANTS, opts), { asOf: AS_OF });
+    const [row] = await db.query<{ id: string }>('select id from rsu_vests limit 1');
+    const ok = { units: 9, priceUsdCents: 15_000n, usdInrMicros: 96_000_000n,
+                 netPaise: rupees(90_720) };
+
+    // A zero gross with a Rs 5L negative net passed the one-sided `net > gross` check.
+    await expect(confirmVest(db, row!.id, { ...ok, units: 0, netPaise: rupees(-500_000) }))
+      .rejects.toThrow(/negative/i);
+    await expect(confirmVest(db, row!.id, { ...ok, netPaise: rupees(-1) }))
+      .rejects.toThrow(/negative/i);
+    await expect(confirmVest(db, row!.id, { ...ok, units: -9 }))
+      .rejects.toThrow(/negative/i);
+    await expect(confirmVest(db, row!.id, { ...ok, priceUsdCents: -15_000n }))
+      .rejects.toThrow(/negative/i);
+
+    // Positive control: the same shape without the negatives still confirms.
+    await confirmVest(db, row!.id, ok, { asOf: AS_OF });
+    const [after] = await db.query<{ status: string; confirmed_on: string | Date }>(
+      'select status, confirmed_on from rsu_vests where id = $1', [row!.id],
+    );
+    expect(after!.status).toBe('ACTUAL');
+    // confirmed_on comes from the injected asOf, not the DB clock: `current_date` would
+    // make a replayed confirmation stamp a different date every day it is re-run.
+    expect(isoDate(after!.confirmed_on)).toBe(AS_OF.slice(0, 10));
+    expect(isoDate(after!.confirmed_on)).not.toBe(isoDate(new Date()));
+  });
+
+  it('rolls the confirmation back if its audit row cannot be written', async () => {
+    await persistVests(db, projectVests(SEED_RSU_GRANTS, opts), { asOf: AS_OF });
+    const [row] = await db.query<{ id: string }>('select id from rsu_vests limit 1');
+
+    // A row confirmed with no audit trail defeats the point of an append-only audit table.
+    const auditDown: Db = {
+      query: (sql: string, params?: unknown[]) => db.query(sql, params),
+      exec: (sql: string) => db.exec(sql),
+      withTransaction: <T>(fn: (tx: Db) => Promise<T>) => db.withTransaction((tx) => fn({
+        query: <U = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<U[]> =>
+          /insert into audit_log/i.test(sql)
+            ? Promise.reject(new Error('audit sink down'))
+            : tx.query<U>(sql, params),
+        exec: (sql: string) => tx.exec(sql),
+        withTransaction: <U>(f: (t: Db) => Promise<U>) => tx.withTransaction(f),
+        close: () => Promise.resolve(),
+      })),
+      close: () => Promise.resolve(),
+    };
+
+    await expect(confirmVest(auditDown, row!.id, {
+      units: 9, priceUsdCents: 15_000n, usdInrMicros: 96_000_000n, netPaise: rupees(90_720),
+    }, { asOf: AS_OF })).rejects.toThrow(/audit sink down/);
+
+    const [after] = await db.query<{ status: string; source: string }>(
+      'select status, source from rsu_vests where id = $1', [row!.id],
+    );
+    expect(after!.status).toBe('PROJECTED');
+    expect(after!.source).toBe('model');
+    const audit = await db.query<{ n: string }>(
+      'select count(*) as n from audit_log where entity = $1', ['rsu_vest'],
+    );
+    expect(Number(audit[0]!.n)).toBe(0);
+  });
+
+  it('never lets a projected upsert win a race against a concurrent confirmation', async () => {
+    // FR-03 must hold in the SQL, not in application control flow. This proxy drives a real
+    // owner confirmation into the window between persistVests' status read and its write.
+    const vests = projectVests(SEED_RSU_GRANTS, opts);
+    await persistVests(db, vests, { asOf: AS_OF });
+    const key = vests[0]!;
+    const [row] = await db.query<{ id: string }>(
+      'select id from rsu_vests where grant_id = $1 and vest_on = $2', [key.grantId, key.vestOn],
+    );
+    const confirmed = { units: 9, priceUsdCents: 15_000n, usdInrMicros: 96_000_000n,
+                        netPaise: rupees(90_720) };
+
+    let raced = false;
+    const racing: Db = {
+      query: async <T = Record<string, unknown>>(sql: string, params?: unknown[]) => {
+        const out = await db.query<T>(sql, params);
+        if (!raced && /from rsu_vests/.test(sql) && /^\s*select/i.test(sql)
+            && params?.[0] === key.grantId && params?.[1] === key.vestOn) {
+          raced = true;
+          await confirmVest(db, row!.id, confirmed, { asOf: AS_OF });
+        }
+        return out;
+      },
+      exec: (sql: string) => db.exec(sql),
+      withTransaction: <T>(fn: (tx: Db) => Promise<T>) => db.withTransaction(fn),
+      close: () => Promise.resolve(),
+    };
+
+    await persistVests(racing, projectVests(SEED_RSU_GRANTS, { ...opts, priceUsd: 100 }), {
+      asOf: '2027-01-01T00:00:00+05:30',
+    });
+    expect(raced).toBe(true); // the window was actually entered
+
+    const [after] = await db.query<{
+      status: string; units: string | number; net_paise: string | number;
+      gross_paise: string | number; source: string; as_of: string | Date;
+    }>(
+      `select status, units, net_paise, gross_paise, source, as_of
+         from rsu_vests where id = $1`, [row!.id],
+    );
+    expect(after!.status).toBe('ACTUAL');
+    expect(Number(after!.units)).toBe(confirmed.units);
+    expect(BigInt(after!.net_paise)).toBe(confirmed.netPaise);
+    expect(BigInt(after!.gross_paise)).toBe(usdToInr(
+      cents(confirmed.priceUsdCents * BigInt(confirmed.units)), confirmed.usdInrMicros,
+    ));
+    // Provenance must not be reverted to the model's either: a row claiming owner
+    // confirmation while carrying model numbers is undetectable downstream.
+    expect(after!.source).toBe('owner-confirmed');
+    expect(new Date(after!.as_of).toISOString()).toBe(new Date(AS_OF).toISOString());
+  });
 });
+
+/** A `date` column comes back as a Date from one driver and a string from another. */
+function isoDate(d: string | Date): string {
+  return typeof d === 'string' ? d.slice(0, 10) : d.toISOString().slice(0, 10);
+}
 
 /** Months since year 0, so a tranche span can be asserted without date arithmetic. */
 function monthIndex(date: string): number {

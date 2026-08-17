@@ -20,7 +20,7 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 5 | seed data (real balance sheet) | complete (2 fix rounds) |
 | 6 | loan amortization + prepayment cascade | complete, review clean, 44/44 green |
 | 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
-| 8 | RSU vest projection | complete, 78/78 green |
+| 8 | RSU vest projection | complete, 1 fix round (FR-03 in SQL), 82/82 green |
 | 9 | net worth + allocation drift | not started |
 | 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
 | 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | not started |
@@ -128,6 +128,14 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 ## Gotchas learned the hard way (each cost a fix round)
 
+- **PGlite returns `bigint` columns as JS numbers, not strings**, and `date` columns as
+  `Date` objects. The plan's own T8 test asserted `net_paise === '900000'` and would have
+  failed on that alone. Always widen through `BigInt()`; never compare a bigint column to a
+  string literal. (Precision is lost above 2^53 paise ≈ ₹90,000Cr — not reachable here.)
+- **PGlite is a SINGLE connection**, so a query issued on the outer `Db` while a
+  `withTransaction` is open still lands *inside* that transaction. A test cannot distinguish
+  "inside the tx" from "outside" that way — mutation-check transaction wrapping by removing
+  `withTransaction` outright, not by moving one statement out of it.
 - **Multi-statement SQL needs the simple protocol.** Neither driver accepts it through
   the parameterized/extended path. Hence `Db.exec`.
 - **postgres-js is a pool.** Raw `begin`/`commit` as separate `sql.unsafe()` calls can land
@@ -276,7 +284,8 @@ G2023 2 tranches × 10.3125, G2024 6 × 11.875, G2025 10 × 12.8125, G2026 14 ×
 - **Tranches are allocated cumulatively**: tranche k gets `floor(T·k/16) − floor(T·(k−1)/16)`
   for units, gross and net alike, so 16 parts always sum back to the whole grant. Rounding
   each tranche independently (the plan's sketch) leaves a projection whose parts need not
-  add to its whole. A per-grant reconciliation test asserts parts == whole for all three.
+  add to its whole. A per-grant reconciliation test asserts parts == whole for all **six**
+  seed grants, with a `checked` counter tied to `SEED_RSU_GRANTS.length`.
 - **USD prices go through `dollars()`**, never `Math.round(price*100)` — `127.54*100` is
   `12753.999999999998` and `127.545*100` is `12754.500000000002`. A sub-cent price is now
   *rejected* rather than silently rounded.
@@ -285,18 +294,31 @@ G2023 2 tranches × 10.3125, G2024 6 × 11.875, G2025 10 × 12.8125, G2026 14 ×
   285-unit G2026 and overstated the pipeline by a whole grant.
 - **`confirmVest` recomputes `gross_paise`** from the confirmed units/price/FX (the sketch
   wrote only `net_paise`, leaving the row's implied withholding rate wrong), rejects a net
-  above that gross, rejects an unknown id, and stamps `source = 'owner-confirmed'`.
-- **`persistVests(db, vests, {asOf?, source?})`** — `asOf` injectable so runs are
-  reproducible. Upsert is keyed on (grant_id, vest_on); an ACTUAL row is never touched.
+  above that gross, rejects a **negative** net, units or price (the one-sided `net > gross`
+  test accepted `units: 0` with a −₹5L net), rejects an unknown id, and stamps
+  `source = 'owner-confirmed'`. The row update and its `audit_log` insert run in ONE
+  `withTransaction` — a confirmation with no audit row cannot be back-filled, since the
+  table refuses UPDATE. `confirmed_on` is derived from the injectable `asOf`, never
+  `current_date`.
+- **`persistVests(db, vests, {asOf?})`** — `asOf` injectable so runs are reproducible. No
+  `source` override: these rows are always PROJECTED / `'model'`.
+- **FR-03 is enforced in the SQL, not in control flow.** `rsu_vests` carries
+  `unique (grant_id, vest_on)` (added in `0001` during the T8 fix round — nothing was
+  deployed, so there was no migration to preserve), and the write is a single
+  `insert ... on conflict (grant_id, vest_on) do update ... where rsu_vests.status <>
+  'ACTUAL'`. The original read-then-write was **check-then-act and defeatable**: a
+  `confirmVest` landing between the SELECT and the UPDATE lost, and because that UPDATE
+  never touched `status` the row was left reading `status = 'ACTUAL'` while carrying the
+  model's units, money and `source = 'model'`. A `Db` proxy test drives a real confirmation
+  into that window. **Any future check-then-act on an owner-confirmed row is the same bug.**
 - **`unvestedValue` sums exactly what it is given.** A projection window that stops short of
   the last tranche understates the pipeline silently — project the full range.
 - **Refresher grants have no `rsu_grants` row**, and `rsu_vests.grant_id` is a FK, so vests
   projected from `withRefreshers` output **cannot be persisted**. Scenario input only. The
   `rsu_grants.scenario` column ('ACTUAL'|'REFRESHER') exists for the day they are;
   `RsuGrantSeed` carries no `scenario` field yet.
-- **PGlite returns `bigint` columns as JS numbers, not strings.** The plan's own T8 test
-  asserted `net_paise === '900000'` and would have failed on that alone. Always widen through
-  `BigInt()`. (Precision is lost above 2^53 paise ≈ ₹90,000Cr — not reachable here.)
+- **A vest ON the `asOf` date is VESTED**, not unvested: `unvestedValue` filters `vestOn >
+  asOf`, strictly. Pinned by a test whose `asOf` is an actual tranche date.
 
 ## Owner true-up items (need real statements — do not guess)
 
@@ -309,7 +331,11 @@ breakdown totalling 1,105 units was *reconstructed*. The model's unvested total 
 ₹57,05,047.56 against the PRD's ₹53.25L — a ~7% gap that is a **data** question, not a
 modelling one. **Needs the owner's Fidelity statement** (per-grant units and grant dates).
 Nothing was tuned toward ₹53.25L; when the real split arrives, `SEED_RSU_GRANTS` and the
-exact assertion in `tests/domain/rsu.test.ts` move in the same commit.
+exact assertion in `tests/domain/rsu.test.ts` move in the same commit. **Expect to rework
+the test, not just its expected value:** `tests/domain/rsu.test.ts:80-82` uses
+`BigInt(totalUnits)`, which throws the moment any grant carries fractional units, and its
+per-grant net sum holds only because every `12754 x units` product happens to end in 0.
+Both fail loudly rather than silently, which is why they were left as they are.
 
 Otherwise no open data gaps: every figure in `SEED_HOLDINGS` and `SEED_LOANS` is either
 owner-verified or explicitly marked as a PRD-stated value.
@@ -338,8 +364,6 @@ this bucket is superseded**. Two things to keep straight:
 `InstrumentSeed` now carries `isin`, and `seed.ts` writes it (the schema column existed but
 went unwritten). Task 11B's mapper matches on ISIN, so this is load-bearing; two tests
 cover it, both mutation-checked.
-- **RSU grants:** per-grant unit split was reconstructed to total 1,105 units; the PRD
-  never published the breakdown.
 - **Holdings total is exact at ₹47.69L** — EPF 13.54L, MF 11.83L, stocks/ETFs 8.32L,
   bonds 6.00L, savings 1.63L, US basket 1.37L, Fidelity NOW 5.00L.
 

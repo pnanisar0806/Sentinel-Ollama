@@ -138,41 +138,48 @@ export function unvestedValue(vests: VestEvent[], asOf: string): Paise {
 }
 
 /**
- * Upserts PROJECTED rows keyed on (grant_id, vest_on). An owner-confirmed ACTUAL is never
- * overwritten (FR-03).
+ * Upserts PROJECTED rows keyed on the `unique (grant_id, vest_on)` constraint. An
+ * owner-confirmed ACTUAL is never overwritten (FR-03).
  *
- * `asOf` is injectable so a run is reproducible; it defaults to now. Every row carries
- * `as_of` and `source`, without exception.
+ * FR-03 is enforced **in the SQL**, by the `where rsu_vests.status <> 'ACTUAL'` on the
+ * conflict action — not by application control flow. The earlier read-then-write was
+ * check-then-act: a `confirmVest` landing between the SELECT and the UPDATE won the race,
+ * and because that UPDATE never touched `status` the row was left claiming
+ * `status = 'ACTUAL'` while carrying the model's units, money and `source = 'model'` —
+ * owner provenance over model numbers, undetectable downstream. One statement, one
+ * predicate, no window.
+ *
+ * The read below is belt-and-braces only: it short-circuits the common case, and the
+ * statement that follows is safe on its own.
+ *
+ * `asOf` is injectable so a run is reproducible; it defaults to now. Rows written here are
+ * always PROJECTED and always carry `source = PROJECTED_SOURCE` — there is deliberately no
+ * `source` override, since the only other value in use means "the owner confirmed this".
  */
 export async function persistVests(
   db: Db,
   vests: VestEvent[],
-  opts: { asOf?: string; source?: string } = {},
+  opts: { asOf?: string } = {},
 ): Promise<void> {
   const asOf = opts.asOf ?? new Date().toISOString();
-  const source = opts.source ?? PROJECTED_SOURCE;
   for (const v of vests) {
-    const existing = await db.query<{ id: string; status: string }>(
-      'select id, status from rsu_vests where grant_id = $1 and vest_on = $2',
+    const existing = await db.query<{ status: string }>(
+      'select status from rsu_vests where grant_id = $1 and vest_on = $2',
       [v.grantId, v.vestOn],
     );
     if (existing[0]?.status === 'ACTUAL') continue;
-    if (existing[0]) {
-      await db.query(
-        `update rsu_vests
-            set units = $2, gross_paise = $3, net_paise = $4, as_of = $5, source = $6
-          where id = $1`,
-        [existing[0].id, v.units, v.grossPaise.toString(), v.netPaise.toString(), asOf, source],
-      );
-    } else {
-      await db.query(
-        `insert into rsu_vests
-           (grant_id, vest_on, units, status, gross_paise, net_paise, as_of, source)
-         values ($1,$2,$3,'PROJECTED',$4,$5,$6,$7)`,
-        [v.grantId, v.vestOn, v.units, v.grossPaise.toString(), v.netPaise.toString(),
-         asOf, source],
-      );
-    }
+    await db.query(
+      `insert into rsu_vests
+         (grant_id, vest_on, units, status, gross_paise, net_paise, as_of, source)
+       values ($1,$2,$3,'PROJECTED',$4,$5,$6,$7)
+       on conflict (grant_id, vest_on) do update
+          set units = excluded.units, gross_paise = excluded.gross_paise,
+              net_paise = excluded.net_paise, as_of = excluded.as_of,
+              source = excluded.source
+        where rsu_vests.status <> 'ACTUAL'`,
+      [v.grantId, v.vestOn, v.units, v.grossPaise.toString(), v.netPaise.toString(),
+       asOf, PROJECTED_SOURCE],
+    );
   }
 }
 
@@ -192,6 +199,16 @@ export async function confirmVest(
   opts: { asOf?: string } = {},
 ): Promise<void> {
   const asOf = opts.asOf ?? new Date().toISOString();
+  // Every input is bounded on BOTH sides. A one-sided `net > gross` test accepted
+  // `units: 0` with `netPaise: rupees(-500_000)` — a Rs 5L negative net against a zero
+  // gross — which then flows straight into any sum over the table.
+  if (actual.units < 0) throw new Error(`negative units ${actual.units} for vest ${id}`);
+  if (actual.priceUsdCents < 0n) {
+    throw new Error(`negative price ${actual.priceUsdCents} cents for vest ${id}`);
+  }
+  if (actual.netPaise < 0n) {
+    throw new Error(`negative net ${actual.netPaise} for vest ${id}`);
+  }
   const grossPaise = usdToInr(
     cents((actual.priceUsdCents * toUnitsMicros(actual.units)) / UNITS_SCALE),
     actual.usdInrMicros,
@@ -202,27 +219,35 @@ export async function confirmVest(
     );
   }
 
-  const updated = await db.query<{ id: string }>(
-    `update rsu_vests
-        set status = 'ACTUAL', units = $2, price_usd_cents = $3, usdinr_micros = $4,
-            gross_paise = $5, net_paise = $6, confirmed_on = current_date,
-            as_of = $7, source = '${CONFIRMED_SOURCE}'
-      where id = $1
-      returning id`,
-    [id, actual.units, actual.priceUsdCents.toString(), actual.usdInrMicros.toString(),
-     grossPaise.toString(), actual.netPaise.toString(), asOf],
-  );
-  if (updated.length === 0) throw new Error(`no rsu_vests row with id ${id}`);
+  // The row update and its audit row are one unit of work: a row confirmed with no audit
+  // trail defeats the point of an append-only audit table, and the audit row can never be
+  // back-filled because the table refuses UPDATE.
+  await db.withTransaction(async (tx) => {
+    const updated = await tx.query<{ id: string }>(
+      // `confirmed_on` is derived from the injectable `asOf`, never `current_date`: this
+      // function takes `asOf` precisely so a run is reproducible, and a DB clock would make
+      // the stored date depend on the day the confirmation happened to be replayed.
+      `update rsu_vests
+          set status = 'ACTUAL', units = $2, price_usd_cents = $3, usdinr_micros = $4,
+              gross_paise = $5, net_paise = $6, confirmed_on = ($7)::text::date,
+              as_of = ($7)::text::timestamptz, source = $8
+        where id = $1
+        returning id`,
+      [id, actual.units, actual.priceUsdCents.toString(), actual.usdInrMicros.toString(),
+       grossPaise.toString(), actual.netPaise.toString(), asOf, CONFIRMED_SOURCE],
+    );
+    if (updated.length === 0) throw new Error(`no rsu_vests row with id ${id}`);
 
-  await db.query(
-    `insert into audit_log (entity, entity_id, action, actor, payload)
-     values ('rsu_vest', $1, 'CONFIRMED', 'owner', $2::jsonb)`,
-    [id, JSON.stringify({
-      units: actual.units,
-      priceUsdCents: actual.priceUsdCents.toString(),
-      usdInrMicros: actual.usdInrMicros.toString(),
-      grossPaise: grossPaise.toString(),
-      netPaise: actual.netPaise.toString(),
-    })],
-  );
+    await tx.query(
+      `insert into audit_log (entity, entity_id, action, actor, payload)
+       values ('rsu_vest', $1, 'CONFIRMED', 'owner', $2::jsonb)`,
+      [id, JSON.stringify({
+        units: actual.units,
+        priceUsdCents: actual.priceUsdCents.toString(),
+        usdInrMicros: actual.usdInrMicros.toString(),
+        grossPaise: grossPaise.toString(),
+        netPaise: actual.netPaise.toString(),
+      })],
+    );
+  });
 }
