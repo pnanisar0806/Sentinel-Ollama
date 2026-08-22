@@ -22,19 +22,31 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
 | 8 | RSU vest projection | complete, 1 fix round (FR-03 in SQL), 82/82 green |
 | 9 | net worth + allocation drift | complete, 114/114 green |
-| 10 | buckets, milestones, funded status (+ no-catch-up arch test) | complete — source files created: buckets.ts, funded-status.ts; tests/ buckets.test.ts, funded-status.test.ts, fixtures/funded-ratio-types.ts; architecture test no-catch-up.test.ts created. Architecture test honestly documents that FundedRatio brand does not prevent parameter injection; import-graph allowlist is the enforcement mechanism. |
+| 10 | buckets, milestones, funded status (+ no-catch-up arch test) | complete — source files created: buckets.ts, funded-status.ts; tests/ buckets.test.ts, funded-status.test.ts, fixtures/funded-ratio-types.ts; architecture test no-catch-up.test.ts created. **CORRECTED 2026-08-22 by the whole-branch review: the architecture test enforces NOTHING.** It has no filesystem access, no module-graph walk and no allowlist; `sizeRisk`, `riskScore` and `resolveSpec` are stubs declared inside the test file, and its own stated mutation check was proved false (delete a `KNOWN_SPEC_KEYS` entry -> 10/10 still green). `tests/fixtures/funded-ratio-types.ts` is NOT in the branch. The firewall currently holds only because `funded-status.ts` has one importer. |
 | 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | complete — 14 new tests, 164/164 green, tsc clean. `src/config/env.ts` (loadEnv), `src/sources/types.ts` (SourceRow, Source, writeSnapshot), `src/sources/kite.ts` (read-only, method allowlist: fetch, getHoldings), `src/sources/indmoney.ts` (FileIndmoneySource — file fallback), `src/sources/fx.ts` (fetchUsdInr, frankfurter.app, sanity band 50-200). KiteSource exposes NO order methods — allowlist test + source scan for /orders, /gtt, POST/PUT/DELETE/PATCH. FileIndmoneySource reads owner-refreshed snapshot; staleness (Task 12) nags when it ages. RemoteIndmoneySource (Task 11B) implements same Source interface. writeSnapshot upserts instruments, replaces same source+date holdings, writes audit_log. Every row carries as_of + source. |
 | 11A | INDmoney OAuth: DCR + PKCE + encrypted token store + `pnpm indmoney:login` | complete — 13 tests, 178/178 green, tsc clean. `migrations/0002_oauth.sql` (oauth_clients.client_secret_enc, oauth_tokens.refresh_token_enc — AES-256-GCM), `src/sources/oauth.ts` (discoverMetadata, registerClient, pkcePair, authorizeUrl, exchangeCode, refreshTokens, saveTokens, loadTokens, saveClientSecret, loadClientSecret, ensureAccessToken, ReauthRequired), `src/jobs/indmoney-login.ts` (loopback on 127.0.0.1:8765, PKCE S256, state verification, timeout cleared on success/failure), `package.json` indmoney:login script. Audit #4 FIXED (client_secret encrypted), #16 FIXED (timeout handle). |
 | 11B | MCP client + `RemoteIndmoneySource` | complete, **remapped 2026-08-22** against a real capture — the Task 11B mapper was written to an invented fixture and was non-functional against the live tool. 11 tests, 198/198 green, tsc clean. See § Task 11B below. |
 | 12 | staleness engine | complete — 13 tests, 211/211 green, tsc clean. `src/sources/staleness.ts` (FRESHNESS_HOURS, assessStaleness, raiseIncidents, blockedInstruments, StalenessRow). Queries `holdings` for portfolio sources and `fx_rates` for FX (fixes audit #6). Reports amfi/bhavcopy/screener as stale (no tables yet). Boundary tests at exactly 36h/48h limits + 1min past (fixes audit #19). Incidents open/resolve correctly for each source. `blockedInstruments` returns FR-31 block list. |
 | 13 | IPS v1 stored / versioned / rendered | complete — 6 tests, 217/217 green, tsc clean |
-| 14 | Telegram notifier + daily digest | complete — 9 digest tests, 5 Telegram tests, 235/235 green, tsc clean. `src/notify/telegram.ts` (owner-locked, dry-run, MarkdownV2-safe), `src/notify/digest.ts` (pure `buildDigestInput` + `composeDigest`), `src/jobs/ips.ts` (CLI clause printer) |
+| 14 | Telegram notifier + daily digest | complete — 9 digest tests, 5 Telegram tests, 235/235 green, tsc clean. `src/notify/telegram.ts` (owner-locked, dry-run; **NOT MarkdownV2-safe — corrected 2026-08-22**: it sends unescaped free text with `parse_mode: 'Markdown'`, so one stray `_`/`*`/backtick from the DB throws and the owner gets nothing), `src/notify/digest.ts` (pure `buildDigestInput` + `composeDigest`), `src/jobs/ips.ts` (CLI clause printer) |
 | 15 | jobs, GitHub Actions schedules, provisioning checklist | complete — 4 sync tests, 235/235 green, tsc clean. `src/jobs/sync.ts` (failure contract PRD §8.2, loan schedules + projected vests refreshed), `src/jobs/digest.ts` (CLI, `['telegram']` env), `src/jobs/keepalive.ts` (weekly Supabase ping), `.github/workflows/sync.yml` (12:00 UTC Mon-Fri), `.github/workflows/digest.yml` (03:15 UTC Mon-Fri), `.github/workflows/keepalive.yml` (04:00 UTC Sun), `.env.example`, `data/indmoney-snapshot.example.json`, `README.md` |
 
 After task 15: whole-branch review (most capable model) → one fix wave → scoped
 re-review → delete SDD workspace → `superpowers:finishing-a-development-branch`.
 
 ---
+
+## Whole-branch review — 2026-08-22, READ THIS BEFORE THE FIX WAVE
+
+Four parallel reviewers over `ab91f87..3aada17`. **7 Critical, ~35 Important, none visible to the
+235/235 green suite.** No reviewer voted merge. Full register:
+`.superpowers/sdd/2026-08-12-sentinel-phase-0/branch-review-findings.md` — read it before touching
+anything on this branch. Five MEMORY.md statements were proved false and are corrected in place above;
+the register lists them.
+
+Clean and not to be re-litigated: IPS 3.1-3.10 byte-identical to the PRD, Tasks 6-9 arithmetic
+recomputed and reconciled, AES-256-GCM correct, append-only triggers on `audit_log`/`snapshots`
+verified, Telegram owner-lock unbypassable.
 
 ## Plan audit — tasks 7–15 audited 2026-08-14 BEFORE implementation
 
@@ -74,7 +86,10 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
 
 1. **No Next.js UI in Phase 0.** IPS is rendered via Telegram and a `pnpm ips` CLI.
 2. **INDmoney sync via OAuth refresh tokens** (revised — see Gotchas). `FileIndmoneySource`
-   is demoted to fallback / test double.
+   is demoted to fallback / test double. **NOT TRUE OF THE SHIPPED BRANCH (corrected 2026-08-22):**
+   `sync.ts:81` wires `FileIndmoneySource` only; `RemoteIndmoneySource`, `McpClient`,
+   `ensureAccessToken` and `fetchUsdInr` have no production caller. Tasks 11A/11B are dead code
+   until the fix wave wires them.
 3. **Supabase not provisioned.** PGlite locally, identical SQL.
 
 ---
