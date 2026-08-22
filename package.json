@@ -10,7 +10,8 @@
     "seed": "tsx src/seed/seed.ts",
     "sync": "tsx src/jobs/sync.ts",
     "digest": "tsx src/jobs/digest.ts",
-    "ips": "tsx src/jobs/ips.ts"
+    "ips": "tsx src/jobs/ips.ts",
+    "indmoney:login": "tsx --env-file=.env src/jobs/indmoney-login.ts"
   },
   "keywords": [],
   "author": "",

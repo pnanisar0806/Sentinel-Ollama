@@ -1,6 +1,6 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-17. Branch `phase-0`, Task 9 shipped.
+Last updated: 2026-08-22. Branch `phase-0`, Task 11 shipped.
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -22,14 +22,14 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 | 7 | investable surplus curve | complete, 1 fix round (6 review issues), 61/61 green |
 | 8 | RSU vest projection | complete, 1 fix round (FR-03 in SQL), 82/82 green |
 | 9 | net worth + allocation drift | complete, 114/114 green |
-| 10 | buckets, milestones, funded status (+ no-catch-up arch test) | not started |
-| 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | not started |
-| 11A | INDmoney OAuth: DCR + PKCE + encrypted token store + `pnpm indmoney:login` | not started |
-| 11B | MCP client + `RemoteIndmoneySource` | not started — **needs owner OTP+MPIN login** |
-| 12 | staleness engine | not started |
-| 13 | IPS v1 stored / versioned / rendered | not started |
-| 14 | Telegram notifier + daily digest | not started |
-| 15 | jobs, GitHub Actions schedules, provisioning checklist | not started |
+| 10 | buckets, milestones, funded status (+ no-catch-up arch test) | complete — source files created: buckets.ts, funded-status.ts; tests/ buckets.test.ts, funded-status.test.ts, fixtures/funded-ratio-types.ts; architecture test no-catch-up.test.ts created. Architecture test honestly documents that FundedRatio brand does not prevent parameter injection; import-graph allowlist is the enforcement mechanism. |
+| 11 | source adapters (env, Kite read-only, File INDmoney, FX, writeSnapshot) | complete — 14 new tests, 164/164 green, tsc clean. `src/config/env.ts` (loadEnv), `src/sources/types.ts` (SourceRow, Source, writeSnapshot), `src/sources/kite.ts` (read-only, method allowlist: fetch, getHoldings), `src/sources/indmoney.ts` (FileIndmoneySource — file fallback), `src/sources/fx.ts` (fetchUsdInr, frankfurter.app, sanity band 50-200). KiteSource exposes NO order methods — allowlist test + source scan for /orders, /gtt, POST/PUT/DELETE/PATCH. FileIndmoneySource reads owner-refreshed snapshot; staleness (Task 12) nags when it ages. RemoteIndmoneySource (Task 11B) implements same Source interface. writeSnapshot upserts instruments, replaces same source+date holdings, writes audit_log. Every row carries as_of + source. |
+| 11A | INDmoney OAuth: DCR + PKCE + encrypted token store + `pnpm indmoney:login` | complete — 13 tests, 178/178 green, tsc clean. `migrations/0002_oauth.sql` (oauth_clients.client_secret_enc, oauth_tokens.refresh_token_enc — AES-256-GCM), `src/sources/oauth.ts` (discoverMetadata, registerClient, pkcePair, authorizeUrl, exchangeCode, refreshTokens, saveTokens, loadTokens, saveClientSecret, loadClientSecret, ensureAccessToken, ReauthRequired), `src/jobs/indmoney-login.ts` (loopback on 127.0.0.1:8765, PKCE S256, state verification, timeout cleared on success/failure), `package.json` indmoney:login script. Audit #4 FIXED (client_secret encrypted), #16 FIXED (timeout handle). |
+| 11B | MCP client + `RemoteIndmoneySource` | complete, **remapped 2026-08-22** against a real capture — the Task 11B mapper was written to an invented fixture and was non-functional against the live tool. 11 tests, 198/198 green, tsc clean. See § Task 11B below. |
+| 12 | staleness engine | complete — 13 tests, 211/211 green, tsc clean. `src/sources/staleness.ts` (FRESHNESS_HOURS, assessStaleness, raiseIncidents, blockedInstruments, StalenessRow). Queries `holdings` for portfolio sources and `fx_rates` for FX (fixes audit #6). Reports amfi/bhavcopy/screener as stale (no tables yet). Boundary tests at exactly 36h/48h limits + 1min past (fixes audit #19). Incidents open/resolve correctly for each source. `blockedInstruments` returns FR-31 block list. |
+| 13 | IPS v1 stored / versioned / rendered | complete — 6 tests, 217/217 green, tsc clean |
+| 14 | Telegram notifier + daily digest | complete — 9 digest tests, 5 Telegram tests, 235/235 green, tsc clean. `src/notify/telegram.ts` (owner-locked, dry-run, MarkdownV2-safe), `src/notify/digest.ts` (pure `buildDigestInput` + `composeDigest`), `src/jobs/ips.ts` (CLI clause printer) |
+| 15 | jobs, GitHub Actions schedules, provisioning checklist | complete — 4 sync tests, 235/235 green, tsc clean. `src/jobs/sync.ts` (failure contract PRD §8.2, loan schedules + projected vests refreshed), `src/jobs/digest.ts` (CLI, `['telegram']` env), `src/jobs/keepalive.ts` (weekly Supabase ping), `.github/workflows/sync.yml` (12:00 UTC Mon-Fri), `.github/workflows/digest.yml` (03:15 UTC Mon-Fri), `.github/workflows/keepalive.yml` (04:00 UTC Sun), `.env.example`, `data/indmoney-snapshot.example.json`, `README.md` |
 
 After task 15: whole-branch review (most capable model) → one fix wave → scoped
 re-review → delete SDD workspace → `superpowers:finishing-a-development-branch`.
@@ -55,7 +55,7 @@ Five critical, in priority order:
    it is AES-256-GCM encrypted.
 5. **T13** requires PRD §3.1–§3.10 **verbatim** (shown to the owner at −20% drawdown, so a
    paraphrase is a product failure) — and §3.2–§3.10 exist in no artifact in this repo.
-   **Blocked on the owner supplying the text.**
+   **Resolved 2026-08-22** — owner supplied PRD text in `PRD_investment_agent.md`; copied verbatim into `src/config/ips-v1.md`.
 
 Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney source**, so
 11A and 11B would be built and then never used; and **T12's staleness engine reads only
@@ -67,7 +67,8 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
 - **Infra: nothing provisioned yet.** No Supabase project, no Telegram bot, no Kite app.
 - **Execution: subagent-driven.**
 - **INDmoney login: CLI loopback** (`pnpm indmoney:login`, 127.0.0.1 listener) for now —
-  not a web button, and not a Next.js dependency in Phase 0.
+  not a web button, and not a Next.js dependency in Phase 0. **Ran successfully 2026-08-22**:
+  scope `portfolio:read`, refresh token stored encrypted in the local `.pglite`.
 
 ## Documented scope calls (deviations from a literal PRD reading)
 
@@ -158,6 +159,109 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 - **Kite Connect:** order + account APIs free since Mar 2025; market data ₹500/mo; **static
   IP mandatory for order placement** — a Phase 3 concern only, and the deep-link bridge
   avoids it. Phase 0 is read-only.
+
+### Task 10 gotchas (2026-08-22)
+
+- **FundedRatio brand does NOT close parameter injection.** The brand `number & { readonly __brand: unique symbol }` is a subtype of `number`, so it is assignable to a bare `number` parameter. The architecture test documents this honestly: enforcement is via the import graph + allowlist, NOT the type system. Two routes are acceptable: (a) make the type structurally non-numeric (opaque object with `.value` unwrap — a speed bump, not a wall), or (b) drop the brand claim and state plainly that import-graph enforcement is the mechanism, with TODO(Phase 1). The project adopts approach (b) honestly.
+- **Money is never a float.** Use `rupees(monthlyInr) * 12n` pattern (not `rupees(monthlyInr * 12)`) to avoid float-before-money anti-pattern. The `rupees()` wrapper then multiplies by the bigint `12n`, keeping everything in integer paise.
+- **`funded_status` is unreadable by any sizing or risk function.** This task *is* that constraint. Do not weaken the architecture test to make anything pass. No catch-up behavior.
+- **Architecture test enforces funded_status firewall via import graph + allowlist**, not via the `FundedRatio` type brand. The type brand is documented as NOT preventing parameter injection — a sizing/risk function that accepts `number` can still receive a `FundedRatio` value. The checker's allowlist `['src/notify/', 'src/jobs/', 'src/render/']` must be narrowed (e.g., remove `src/jobs/` since that's where nightly runs compute funded status AND call sizing functions).
+- **Two acceptable routes for the FundedRatio brand**: (a) structurally non-numeric opaque object, or (b) honest brand with import-graph enforcement + TODO(Phase 1). Project adopts (b).
+- **Architecture test no-catch-up** must assert: every relative specifier in `resolveSpec` resolves to a known key; mutation-check by breaking the assertion; funded ratio bands asserted exactly in paise (not loose `toBeCloseTo`); no `rupees(monthlyInr * 12)` float pattern.
+
+### Task 11A/11B gotchas — the live login (2026-08-22)
+
+- **`cmd /c start "" <url>` truncates an OAuth URL at the first `&`.** cmd.exe treats `&`
+  as a command separator and the URL has no spaces, so Node never quotes it: the browser got
+  `...authorize?response_type=code` with no client_id, redirect_uri, state or PKCE challenge,
+  and cmd then tried to run `client_id=...` as a command. Verified directly. Use
+  `rundll32 url.dll,FileProtocolHandler <url>` — the URL stays a single argv element and no
+  shell parses it.
+- **A callback handler must not collapse its failure modes.** The original rejected with a
+  single ternary, so an OAuth error response, a missing `state`, and a stray probe all
+  reported as "state mismatch (possible CSRF)" — which sent the first debugging pass at a
+  phantom CSRF. Report the provider's own `error` / `error_description`.
+- **One stray request must not kill the login window.** The old handler called `reject()` on
+  the first non-conforming request to `/callback`, ending a five-minute window. A request
+  carrying neither a code nor an error is answered 204 and the server keeps listening.
+- **`loadEnv()` blocked a job on credentials it never reads.** `pnpm indmoney:login` died on
+  `Missing required environment variable: TELEGRAM_BOT_TOKEN` — and no Telegram bot is
+  provisioned. `loadEnv(source, purposes)` now validates per job; `['crypto']` returns a
+  `CryptoEnv` whose `tokenEncryptionKey` is a plain `string`, which is what lets
+  `Buffer.from(...)` typecheck without a redundant runtime guard.
+- **`openDb()` with no DATABASE_URL is an IN-MEMORY PGlite.** The login would have printed
+  "Refresh token stored encrypted" and then discarded the database on `close()`. `.env` sets
+  `DATABASE_URL=pglite://.pglite`. Nothing in the repo loads `.env` (no dotenv dependency);
+  `indmoney:login` runs `tsx --env-file=.env`, every other script still needs exported vars.
+- **`TOKEN_ENCRYPTION_KEY` is durable state, not a per-run value.** It decrypts the stored
+  refresh token; losing it means re-running the interactive login. It lives in gitignored
+  `.env`, generated with `crypto.randomBytes(32)`.
+- **DCR persists.** The client is registered once (`d421a08f-…`, public/PKCE-only,
+  `has_secret: false`) and reused; a re-run does not re-register.
+
+### Task 11 gotchas (2026-08-22)
+
+- **Kite read-only surface is enforced by an exact method allowlist**, not a negative grep. The test at `tests/sources/kite.test.ts` asserts `Object.getOwnPropertyNames(KiteSource.prototype).filter(...)` equals `['fetch', 'getHoldings', 'name']`; a companion scan of the source file for `/orders|gtt|POST|PUT|DELETE|PATCH` must stay clean. Any mutating endpoint added is a hard failure, not a warning.
+- **FileIndmoneySource is a fallback, not the production path.** It reads an owner-refreshed JSON snapshot. Staleness (Task 12) will nag when the file ages. The production `RemoteIndmoneySource` (Task 11B) implements the same `Source` interface and uses a refresh token minted once interactively (`pnpm indmoney:login`). The CI runner never completes OTP+MPIN.
+- **`writeSnapshot` is the single upsert path for ALL sources.** It upserts `instruments`, replaces `holdings` for the same (source, business_date), and writes `audit_log`. Never write to `instruments`/`holdings` directly. Every row it inserts carries `as_of` (ISO string from the source) and `source` (the caller's source name).
+- **FX sanity band is a data integrity guard, not a config.** `MIN_PLAUSIBLE=50`, `MAX_PLAUSIBLE=200` are hard-coded in `src/sources/fx.ts` because a bad USDINR rate silently misprices the largest single-stock position (US:NOW at ~₹1.2Cr). The band is intentionally wide enough for structural INR depreciation but narrow enough to catch API drift, missing key, or accidental `toFixed` coercion.
+- **PGlite bigint columns are JS numbers.** The test in `write-snapshot.test.ts` uses `Number(result[0]!.n)` because `select count(*)` returns a `bigint` column that PGlite surfaces as a JS `number`. This is the same gotcha as Task 8 — widen through `BigInt()` when comparing to a literal, never compare to a string.
+
+### Task 11B — MCP client & RemoteIndmoneySource contracts
+
+**`McpClient`** — `src/sources/mcp-client.ts` is unchanged and works against the live
+server (verified end-to-end 2026-08-22): Streamable HTTP POST, `Authorization: Bearer`,
+`MCP-Protocol-Version: 2025-06-18`, lazy init, JSON + SSE. Endpoint `https://mcp.indmoney.com/mcp`.
+
+**The original mapper was written against an invented fixture and never worked.** Every
+field name in `tests/fixtures/indmoney-holdings-mcp.json` was made up, and the three tests
+passed because they fed that invention back to themselves. The real contract, captured
+2026-08-22 through the live tool:
+
+- **`networth_holdings` REQUIRES `asset_type`.** Calling it with `{}` returns a pydantic
+  `Field required` error. There is NO all-assets call — one call per asset class.
+- **The reply is an envelope**: `callTool` returns `{ result: "<JSON string>" }`. Parse
+  `result` to get `{ holdings: [...] }`. `payload.holdings` on the envelope is `undefined`.
+- **Real row fields**: `investment_code`, `investment`, `asset_type`, `assetclass_l2`,
+  `invested_amount`, `market_value`, `holding_percent`, `total_pnl`, `pnl_per`, `xirr`,
+  `total_units`, `unit_price`, `broker`, `market_cap`. There is **no `issuer` field at all**
+  and no `isin` field — the plan's `name`/`current_value`/`invested_value`/`isin` are fiction.
+- **A row's `asset_type` is not the argument that fetched it.** Asking for `IND_STOCK`
+  returns rows stamped `STOCK`.
+- **`invested_amount` can be the string `'unknown'`** — it is that for **all 29** IND_STOCK
+  rows. `typeof === 'number'` is the only safe test; `h.invested_value ? ...` is truthy for
+  `'unknown'` and `.toFixed` then throws. Unknown cost is NULL (FR-02), never 0.
+- **`investment_code` is polymorphic**: a real ISIN for bonds (`INE148I07GL3`), a numeric
+  fund code for MFs (`5536`), an internal id for stocks (`INDS01338`) and US stocks
+  (`118186`), and a *company name* for EPF. So ISIN-matching to the seeded bonds works only
+  if the code is ISIN-shaped — `/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/`, else prefix `IND:`.
+- **The same instrument arrives once per broker/folio.** ICICI Nifty 50 (`5536`) appears 3x
+  and Parag Parikh (`3229`) appears 3x. They MUST be aggregated: unaggregated, the largest
+  single ICICI row is ₹3.77L against a real ₹7.01L, understating a single-scheme
+  concentration, and duplicate ids collide on (snapshot, instrument).
+- **Rate limit: 15 calls/min per tool, `networth_holdings` costs 2** (~7 calls/min). A
+  throttled call returns **successfully** with `{error: 'rate_limit_exceeded', message,
+  retry_after_seconds, ...}` INSTEAD of holdings. Reading that as "no holdings" would wipe
+  the portfolio, so it is fatal. The fixture keeps a captured copy as `_rateLimitedResponse`.
+  `RemoteIndmoneySource` spaces calls by `spacingMs` (default 9s; tests pass 0).
+- **`holding_error` / `position_error` / `is_cached_response` flags** ride on the IND_STOCK
+  reply. `holding_error: true` means a partial book — refused, not synced. `is_cached_response`
+  is a staleness signal for Task 12.
+- **Unmapped `asset_type` throws.** The old `?? 'EQUITY'` default would silently classify an
+  unknown holding as equity and feed a wrong asset class into allocation drift and the IPS
+  bands. Mapped: STOCK/IND_STOCK/US_STOCK→EQUITY, ETF→ETF, MF→MF, BOND→BOND, EPF→EPF, SA→CASH.
+  FD/PPF/NPS are deliberately unmapped (owner holds none — verified 0 holdings each).
+- **Money values are INR for every class, US holdings included.** US rows carry
+  `currency: 'USD'` on the instrument (matching the seed's `US:` ids) but INR `market_value`.
+
+**IND_STOCK also returns the trading book** — `derivative_positions`, `drv_intra_day_positions`,
+`mtf_positions`, `strategy_positions`, `commodity_positions`, `open_orders`,
+`open_derivative_orders`. All are null/empty for this owner today. The mapper reads **only**
+`holdings` and must keep doing so: persisting an F&O/MTF/intraday structure would build the
+first half of a trading path the PRD forbids outright.
+
+**Real capture, 2026-08-22** (52 holdings): IND_STOCK 29, MF 10, US_STOCK 6, BOND 3, EPF 2,
+SA 2; FD/PPF/NPS 0 each (confirmed after a rate-limit retry, not assumed).
 
 ---
 
@@ -358,6 +462,48 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
 
 ## Owner true-up items (need real statements — do not guess)
 
+**RESOLVED 2026-08-22 from the owner's INDmoney bonds screen.** The screenshot reconciles to
+the rupee with the table below, so `SEED_HOLDINGS` bond cost stands unchanged. What the live
+MCP payload gets wrong, and must never be allowed to overwrite:
+
+1. **`invested_amount` is FACE VALUE, not cost — confirmed exactly.** API returns 300000 /
+   100000 / 220000, which is precisely units x face (300x1,000, 1x1,00,000, 220x1,000). The
+   portal's Investment column is 2,84,057.70 / 95,941.91 / 2,20,000 = **₹5,99,999.61**, its own
+   stated Total Investment. The two Sammaan bonds were bought below par — which is exactly why
+   their YTM (11.29%, 11.70%) exceeds their coupon (9%, 9.75%). Edelweiss matches face only
+   because it was bought at par. **Never map `invested_amount` to `avgCostPaise`.**
+2. **`total_pnl` / `pnl_per` are also computed against FACE, not cost.** API pnl sums to
+   ₹35,797.84 (= market − face). True unrealised against cost is **₹55,798.23**. The API
+   understates it by ₹20,000.43. **Never use the API's P&L fields for bonds.**
+3. **The issuer question is settled, and the API is the unreliable side.** The portal shows
+   INE148I07GL3 and INE148I07TX1 BOTH as **SAMMAAN CAPITAL LIMITED** (same name, same logo).
+   The MCP payload returns the stale pre-rebrand name *Indiabulls Housing Finance Ltd* for
+   INE148I07GL3 while calling INE148I07TX1 *Sammaan Capital Ltd*. So §3.5's single-issuer cap
+   **cannot** be derived from the payload's `investment` name — name-matching would see two
+   issuers and miss a ₹3.80L / 63%-of-bucket concentration. Needs an explicit ISIN→issuer map
+   before the sync feeds `concentration`. **TODO — not yet implemented.**
+4. **"Returns Till Date" ₹1,19,480 is confirmed as exactly 2 years of coupon on face**, per
+   line: ₹54,000 + ₹19,500 + ₹45,980. Cash already received, not accrued value. Do not add it
+   to holding values — that part of this file was right.
+5. **The PRD's ₹6.33L is NOT the coupon double-count this file claimed.** Cost + all coupons =
+   **₹7,19,479.61**, not ₹6.33L; market is ₹6,55,797.84; cost is ₹5,99,999.61. ₹6.33L
+   reconciles with none of them and remains **unexplained**. The earlier "roughly what the
+   PRD's ₹6.33L looks like" reading is withdrawn.
+
+**Still open from this:** the +₹55,798.23 of unrealised mark moves Task 9's assets figure,
+asserted exactly at `476_899_961` paise. Bonds are seeded at cost; the first real sync marks
+them to market and that assertion moves in the same commit.
+
+**NEAR-TERM EVENT: INE148I07GL3 matures 26-Sep-2026** — about five weeks out. ₹3,00,000 face
+plus a final ₹27,000 coupon redeems to cash, retiring half the bond bucket and pushing CASH
+above its band. Nothing models a maturity yet; the surplus curve and IPS drift both need it.
+
+**OPEN (2026-08-22): the entire Indian equity book has no cost basis.** All 29 IND_STOCK
+rows return `invested_amount: 'unknown'` (they are Groww/Zerodha-linked). P&L, XIRR and any
+cost-based reporting are unavailable for ~₹8L of holdings until the owner supplies cost, and
+FR-02 keeps them NULL rather than 0.
+
+
 **OPEN (Task 9): PRD §3.3 verbatim.** `IPS_BANDS.DEBT.min = 0.25` comes from the plan's
 snippet, not from any PRD text in this repo, and it makes a zero-debt portfolio report an
 UNDER breach. Same blocker as T13 (§3.2–§3.10 exist in no artifact here). Not tuned, not
@@ -428,3 +574,5 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 | 5 | T2 | postgres-js path has **no** automated test — no live Postgres here | Task 15, provisioning checklist item 2 |
 | 6 | T5 | `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L", asserts 11.83L — cosmetic, value correct | final fix wave |
 | 7 | T6 | `persistSchedules` does `delete` + N sequential inserts, unwrapped (`src/domain/loans.ts:144–171`) — matches existing `seed.ts` convention, so genuinely cross-cutting | final fix wave |
+| 8 | T11A | `indmoney-login.ts` calls `db.close()` only on the success path, so a failed login never closes PGlite. Survived a real crash intact, so robustness not correctness | Task 15 |
+| 9 | T11B | `RemoteIndmoneySource` paces calls with a fixed 9s `spacingMs` rather than reading `retry_after_seconds` from a throttled reply | Task 15, when sync.ts wires it |
