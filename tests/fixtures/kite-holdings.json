@@ -1,0 +1,20 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "tradingsymbol": "NIFTYBEES", "exchange": "NSE", "isin": "INF204KB14I2",
+      "quantity": 380, "average_price": 245.5, "last_price": 250.0, "close_price": 249.0,
+      "pnl": 1710.0, "product": "CNC"
+    },
+    {
+      "tradingsymbol": "GOLDBEES", "exchange": "NSE", "isin": "INF204KB17I5",
+      "quantity": 2616, "average_price": 22.0, "last_price": 24.08, "close_price": 24.0,
+      "pnl": 5441.28, "product": "CNC"
+    },
+    {
+      "tradingsymbol": "TATASTEEL", "exchange": "NSE", "isin": "INE081A01020",
+      "quantity": 100, "average_price": 0, "last_price": 155.0, "close_price": 154.0,
+      "pnl": 0, "product": "CNC"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "asOf": "2026-08-12T18:30:00+05:30",
+  "holdings": [
+    { "instrumentId": "MF:PPFC", "kind": "MF", "name": "Parag Parikh Flexi Cap Direct",
+      "currency": "INR", "quantity": 1, "valueInr": 241000, "avgCostInr": 180000 },
+    { "instrumentId": "BOND:SAMMAAN-2026", "kind": "BOND", "name": "Sammaan Capital 9% 26-Sep-2026",
+      "currency": "INR", "issuer": "Sammaan Capital", "quantity": 1, "valueInr": 284000, "avgCostInr": null },
+    { "instrumentId": "NSE:NIFTYBEES", "kind": "ETF", "name": "Nippon Nifty BeES",
+      "currency": "INR", "quantity": 380, "valueInr": 95000, "avgCostInr": 0 }
+  ]
+}
