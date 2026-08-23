@@ -13,6 +13,10 @@ export interface Env {
  * What a job actually reads. A job must not be blocked on credentials it never
  * touches: `pnpm indmoney:login` needs the encryption key, and Telegram is
  * unprovisioned in Phase 0.
+ *
+ * The default is `[]` — demand nothing. An over-demanding default crashed both
+ * scheduled jobs on startup over vars neither reads. A job that genuinely needs a
+ * credential must name its purpose, which is also how it gets the narrowed type.
  */
 export type Purpose = 'crypto' | 'telegram' | 'all';
 
@@ -63,7 +67,7 @@ export function loadEnv(
 ): Env;
 export function loadEnv(
   source: Record<string, string | undefined> = process.env,
-  purposes: Purpose[] = ['all'],
+  purposes: Purpose[] = [],
 ): Env {
   const need = demanded(purposes);
   return {

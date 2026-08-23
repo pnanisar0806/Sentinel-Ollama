@@ -15,6 +15,11 @@ export interface Db {
  * Identical SQL runs on both — migrations must stay portable.
  */
 export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
+  // An unset GitHub secret interpolates to '', not undefined. Treating that as
+  // "use the embedded PGlite" gave a confident Rs 0 digest and exit 0.
+  if (url !== undefined && url.trim() === '') {
+    throw new Error('DATABASE_URL is set but empty — refusing to fall back to embedded PGlite');
+  }
   if (!url || url.startsWith('pglite://')) {
     const dataDir = url ? url.slice('pglite://'.length) : undefined;
     const pg = dataDir ? new PGlite(dataDir) : new PGlite();

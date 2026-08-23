@@ -4,6 +4,7 @@ import {
   SEED_BUCKETS, SEED_HOLDINGS, SEED_INSTRUMENTS, SEED_LOANS,
   SEED_MILESTONES, SEED_RSU_GRANTS,
 } from './seed-data.js';
+import { isMainModule } from '../util/main-module.js';
 
 const SOURCE = 'manual-seed';
 
@@ -103,7 +104,7 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
   return { snapshotId };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const db = await openDb();
   await runMigrations(db);
   const { snapshotId } = await seed(db);

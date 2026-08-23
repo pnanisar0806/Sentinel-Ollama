@@ -9,6 +9,15 @@ import { FileIndmoneySource } from '../sources/indmoney.js';
 import { KiteSource } from '../sources/kite.js';
 import { assessStaleness, raiseIncidents } from '../sources/staleness.js';
 import { writeSnapshot, type Source } from '../sources/types.js';
+import { isMainModule } from '../util/main-module.js';
+import type { Purpose } from '../config/env.js';
+
+/**
+ * This job reads DATABASE_URL, INDMONEY_SNAPSHOT_PATH and the optional Kite pair.
+ * It messages nobody and decrypts nothing, so it demands no purpose. Wiring
+ * RemoteIndmoneySource (which reads stored OAuth tokens) adds 'crypto' here.
+ */
+export const ENV_PURPOSES: Purpose[] = [];
 
 export async function runSync(
   db: Db,
@@ -72,8 +81,8 @@ export async function runSync(
   return { synced, failed };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const env = loadEnv();
+if (isMainModule(import.meta.url)) {
+  const env = loadEnv(process.env, ENV_PURPOSES);
   const db = await openDb(env.databaseUrl);
   await runMigrations(db);
   await installIps(db);

@@ -21,9 +21,10 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 | File | Exports / role |
 |---|---|
 | `src/config/assumptions.ts` | `ASSUMPTIONS` — the only place PRD §15.2 planning constants live |
-| `src/config/env.ts` | `loadEnv(source?, purposes?)`, `Purpose`, `CryptoEnv` — validates **per job**: `['crypto']` demands only TOKEN_ENCRYPTION_KEY (and narrows it to `string`), `['telegram']` only the two TELEGRAM vars, default `['all']` both. A job must not be blocked on credentials it never reads |
-| `src/db/client.ts` | `Db` interface (4 methods), `openDb(url?)` — PGlite or postgres-js |
+| `src/config/env.ts` | `loadEnv(source?, purposes?)`, `Purpose`, `CryptoEnv` — validates **per job**: `['crypto']` demands only TOKEN_ENCRYPTION_KEY (and narrows it to `string`), `['telegram']` only the two TELEGRAM vars, **default `[]` — demand nothing** (the old `['all']` default crashed both scheduled jobs on startup over credentials neither reads); `['all']` still demands everything when asked. Each job module exports `ENV_PURPOSES` |
+| `src/db/client.ts` | `Db` interface (4 methods), `openDb(url?)` — PGlite or postgres-js. A **blank-but-present** `DATABASE_URL` throws rather than silently falling back to embedded PGlite (an unset GitHub secret interpolates to `''`) |
 | `src/db/migrate.ts` | `runMigrations(db, dir?)` — each unapplied file in one transaction; also a CLI |
+| `src/util/main-module.ts` | `isMainModule(metaUrl, argv1?)` — routes argv[1] through `pathToFileURL`. The hand-rolled `import.meta.url === 'file://' + argv[1]` guard NEVER matched on Windows, so every CLI entrypoint was a silent no-op that exited 0 |
 | `src/money/paise.ts` | `Paise`, `Cents`, `rupees`, `paise`, `dollars`, `cents`, `addP`, `subP`, `mulP`, `pctOf`, `formatInr` |
 | `src/money/fx.ts` | `rateMicros`, `usdToInr` |
 | `src/seed/seed-data.ts` | `SEED_INSTRUMENTS`, `SEED_HOLDINGS`, `SEED_LOANS`, `SEED_BUCKETS`, `SEED_MILESTONES`, `SEED_RSU_GRANTS` — the owner's real balance sheet. All loan and bond figures are owner-verified against lender/broker portals; see `MEMORY.md`. `InstrumentSeed` carries optional `isin` (populated for the three bonds; Task 11B matches on it) |
@@ -44,7 +45,7 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 | `src/notify/digest.ts` | `buildDigestInput(db, now)`, `composeDigest(input)`, `DigestInput` interface — pure daily digest composer (FR-50). Net worth incl. NOW/EPF, day-change, 4 buckets + 2 milestones, IPS drift + concentration breaches, staleness badges, next RSU vest, funded status. |
 | `src/jobs/sync.ts` | `runSync(db, now)` — syncs INDmoney (OAuth/file), Kite (read-only), FX; writes snapshots, persists loan schedules + projected RSU vests, raises staleness incidents per PRD §8.2 failure contract (records failing source, does not abort healthy ones, escalates to BLOCK after 2 consecutive failures) |
 | `src/jobs/digest.ts` | CLI entrypoint — `pnpm digest`. Loads `['telegram']` env, runs migrations + IPS install, composes pure digest, sends via Telegram (dry-run supported) |
-| `src/jobs/keepalive.ts` | CLI entrypoint — weekly ping to keep Supabase free tier awake (POST /rest/v1/ with prefer=head) |
+| `src/jobs/keepalive.ts` | CLI entrypoint — weekly `audit_log` insert to keep the Supabase free tier awake (it is a DB write, not an HTTP ping) |
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
 
 ## Migrations

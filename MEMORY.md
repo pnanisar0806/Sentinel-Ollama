@@ -158,6 +158,20 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
   on different connections. Transactions must go through `sql.begin()`.
 - **Postgres does not fire DELETE triggers on TRUNCATE.** Append-only needs its own
   `before truncate ... for each statement` trigger or the audit trail can be wiped.
+- **`import.meta.url === "file://" + process.argv[1]` NEVER matches on Windows.** argv[1] is
+  a drive path (`D:.ts`), the URL is `file:///D:/a/b.ts`. Every CLI entrypoint guarded
+  that way was a silent no-op that exited 0 — `pnpm migrate` reported success against an
+  empty database. Use `isMainModule()` from `src/util/main-module.ts`, never a hand-rolled
+  comparison.
+- **An unset GitHub Actions secret interpolates to `''`, not `undefined`.** `openDb` read
+  that as "use the embedded PGlite" and produced a confident ₹0 net-worth digest at exit 0.
+  A blank-but-present `DATABASE_URL` now throws. Apply the same reasoning to any env read
+  that has a "sensible default" — in CI the default fires on a typo, not on absence.
+- **`loadEnv` demands nothing by default** (it used to default to `['all']`, which crashed
+  both scheduled jobs on startup over credentials neither reads). A job must name its
+  purpose, which is also the only way it gets the narrowed `CryptoEnv` / `TelegramEnv` type.
+  Each job module exports `ENV_PURPOSES`, and `tests/jobs/workflow-env.test.ts` derives the
+  environment from the real workflow YAML and asserts the job starts under it.
 - **A NOT NULL test can test nothing.** If the row omits *other* NOT NULL columns, Postgres
   rejects on those first and the test passes regardless. Use real parent fixtures, omit
   exactly one column per negative case, and include a positive control.

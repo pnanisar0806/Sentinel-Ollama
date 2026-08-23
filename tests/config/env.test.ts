@@ -17,11 +17,11 @@ describe('env', () => {
   });
 
   it('names the missing key rather than failing obscurely', () => {
-    expect(() => loadEnv({})).toThrow(/TELEGRAM_BOT_TOKEN/);
+    expect(() => loadEnv({}, ['all'])).toThrow(/TELEGRAM_BOT_TOKEN/);
   });
 
   it('names the missing TOKEN_ENCRYPTION_KEY', () => {
-    expect(() => loadEnv({ TELEGRAM_BOT_TOKEN: 't', TELEGRAM_OWNER_CHAT_ID: '1' }))
+    expect(() => loadEnv({ TELEGRAM_BOT_TOKEN: 't', TELEGRAM_OWNER_CHAT_ID: '1' }, ['all']))
       .toThrow(/TOKEN_ENCRYPTION_KEY/);
   });
 
@@ -49,8 +49,16 @@ describe('env', () => {
     expect(env.tokenEncryptionKey).toBeUndefined();
   });
 
-  it('defaults to demanding both, so existing callers keep their guarantees', () => {
-    expect(() => loadEnv({ TOKEN_ENCRYPTION_KEY: MINIMAL.TOKEN_ENCRYPTION_KEY }))
+  // The default was ['all'], which crashed both scheduled jobs on startup over
+  // credentials neither reads. Demanding nothing by default is safe because a job
+  // that needs a credential must name its purpose to get the narrowed type at all.
+  it('demands nothing by default', () => {
+    expect(() => loadEnv({})).not.toThrow();
+    expect(loadEnv({}).telegramBotToken).toBeUndefined();
+  });
+
+  it("['all'] still demands every purpose's keys", () => {
+    expect(() => loadEnv({ TOKEN_ENCRYPTION_KEY: MINIMAL.TOKEN_ENCRYPTION_KEY }, ['all']))
       .toThrow(/TELEGRAM_BOT_TOKEN/);
   });
 });

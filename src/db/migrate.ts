@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Db } from './client.js';
 import { openDb } from './client.js';
+import { isMainModule } from '../util/main-module.js';
 
 const DEFAULT_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
 
@@ -33,7 +34,7 @@ export async function runMigrations(db: Db, dir = DEFAULT_DIR): Promise<string[]
   return newlyApplied;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const db = await openDb();
   try {
     const applied = await runMigrations(db);
