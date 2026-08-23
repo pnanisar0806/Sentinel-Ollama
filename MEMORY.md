@@ -75,6 +75,16 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
 
 ## Owner decisions (do not re-litigate)
 
+- **Fixture PII: accepted, repo stays private (decided 2026-08-23).**
+  `tests/fixtures/indmoney-holdings-mcp.json` is a real capture — INDmoney internal user
+  id, masked account tails, employer legal entity, exact balances. No credentials, so not
+  a secrets violation. The owner is the only user and the repo is private, so it stays as
+  captured; several tests derive their expectations from it and redacting would either
+  break them or require invented values.
+  **Revisit trigger: if this is ever turned into an app for anyone else.** At that point
+  the whole security model changes (multi-tenancy, RLS policies with real roles, secret
+  handling, this fixture) — treat it as a redesign, not a patch.
+
 - **Runtime: TypeScript everywhere.** One package. Next.js UI + jobs as TS scripts. vitest.
 - **Infra: nothing provisioned yet.** No Supabase project, no Telegram bot, no Kite app.
 - **Execution: subagent-driven.**
