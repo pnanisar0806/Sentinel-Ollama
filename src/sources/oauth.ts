@@ -27,14 +27,74 @@ export class ReauthRequired extends Error {
 const b64url = (buf: Buffer): string =>
   buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+/**
+ * RFC 8414 discovery, validated rather than merely parsed.
+ *
+ * This used to fetch a URL and cast the body. Every endpoint in that document is a
+ * place we later send the authorization code, the PKCE verifier and the client secret,
+ * so a document that redirects them elsewhere is a credential leak. RFC 8414 section
+ * 3.3 requires the issuer to match; the origin and https checks are what stop the
+ * endpoints wandering off it.
+ */
 export async function discoverMetadata(
   issuer: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<AsMetadata> {
-  const url = `${issuer.replace(/\/$/, '')}/.well-known/oauth-authorization-server`;
-  const res = await fetchImpl(url);
+  const base = issuer.replace(/\/$/, '');
+  if (!base.startsWith('https://')) {
+    throw new Error(`OAuth issuer must be https, got ${issuer}`);
+  }
+
+  const res = await fetchImpl(`${base}/.well-known/oauth-authorization-server`);
   if (!res.ok) throw new Error(`OAuth discovery failed for ${issuer}: HTTP ${res.status}`);
-  return (await res.json()) as AsMetadata;
+  const md = (await res.json()) as AsMetadata;
+
+  // Compared with trailing slashes stripped from both sides. The security property is
+  // "this document is for the issuer we asked about", not byte-equality — real servers
+  // vary on the trailing slash and rejecting on that alone is a false positive.
+  if ((md.issuer ?? '').replace(/\/$/, '') !== base) {
+    throw new Error(
+      `OAuth issuer mismatch: document declares '${md.issuer}', requested '${base}' (RFC 8414 §3.3)`,
+    );
+  }
+
+  const origin = new URL(base).origin;
+  const sameOrigin = (name: keyof AsMetadata, required: boolean): void => {
+    const value = md[name];
+    if (value === undefined) {
+      if (required) throw new Error(`OAuth metadata for ${base} has no ${name}`);
+      return;
+    }
+    if (typeof value !== 'string' || !value.startsWith('https://') || new URL(value).origin !== origin) {
+      throw new Error(`OAuth ${name} must be https on the issuer's origin (${origin}), got '${String(value)}'`);
+    }
+  };
+  sameOrigin('authorization_endpoint', true);
+  sameOrigin('token_endpoint', true);
+  sameOrigin('registration_endpoint', false);
+
+  return md;
+}
+
+/**
+ * The granted scope must not exceed what was asked for.
+ *
+ * MEMORY recorded "read-only is enforced by the token's scope", but nothing ever
+ * compared the two. A provider that upgrades the grant — or a client id that turns out
+ * to be bound to a broader scope — went unnoticed, and the only thing standing between
+ * this agent and a write-capable token is that comparison.
+ *
+ * A NARROWER grant is fine: the provider may always give less.
+ */
+export function assertGrantedScope(granted: string, requested: readonly string[]): void {
+  const asked = new Set(requested);
+  const extra = granted.split(/\s+/).filter((s) => s.length > 0 && !asked.has(s));
+  if (extra.length > 0) {
+    throw new Error(
+      `OAuth grant exceeds the requested scope: got [${extra.join(', ')}] ` +
+      `beyond [${requested.join(', ')}]. Refusing a token with more authority than asked for.`,
+    );
+  }
 }
 
 /** RFC 7591 dynamic client registration — INDmoney exposes this, so no manual app setup. */
@@ -210,7 +270,12 @@ const SKEW_MS = 60_000;
 export async function ensureAccessToken(
   db: Db,
   provider: string,
-  opts: { md: AsMetadata; clientId: string; clientSecret?: string; key: Buffer; fetchImpl?: typeof fetch },
+  opts: {
+    md: AsMetadata; clientId: string; clientSecret?: string; key: Buffer;
+    fetchImpl?: typeof fetch;
+    /** Scopes this provider is permitted. A refresh that widens the grant is refused. */
+    allowedScopes?: readonly string[];
+  },
 ): Promise<string> {
   const stored = await loadTokens(db, provider, opts.key);
   if (!stored) throw new ReauthRequired(provider, 'no stored credentials');
@@ -229,6 +294,9 @@ export async function ensureAccessToken(
   } catch (error) {
     throw new ReauthRequired(provider, error instanceof Error ? error.message : String(error));
   }
+
+  // A refresh must not widen the grant. Checked before the new token is stored.
+  if (opts.allowedScopes) assertGrantedScope(refreshed.scope, opts.allowedScopes);
 
   // Servers may rotate the refresh token; keep the old one if none was returned.
   await saveTokens(db, provider, {

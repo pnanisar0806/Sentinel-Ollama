@@ -5,6 +5,7 @@ import { openDb } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv } from '../config/env.js';
 import {
+  assertGrantedScope,
   authorizeUrl, discoverMetadata, exchangeCode, loadClientSecret, pkcePair, registerClient, saveTokens, saveClientSecret,
 } from '../sources/oauth.js';
 
@@ -125,6 +126,10 @@ const tokens = await exchangeCode(md, {
   code, clientId, redirectUri: REDIRECT_URI, verifier,
   ...(clientSecret ? { clientSecret } : {}),
 });
+// Before it is stored: a token carrying more authority than we asked for is refused
+// outright rather than encrypted and kept. Read-only is only "enforced by scope" if
+// something actually checks the scope.
+assertGrantedScope(tokens.scope, SCOPES);
 await saveTokens(db, 'indmoney', tokens, key);
 await db.query(
   `insert into audit_log (entity, entity_id, action, actor, payload)
