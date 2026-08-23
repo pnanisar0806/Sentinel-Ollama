@@ -638,6 +638,62 @@ and an import allowlist anchored on `funded-status.ts` cannot be sidestepped thr
 Dropped as dead: `isInBand` (hard-coded all three arguments in its only test, no production
 caller) and `fiCorpusTargetPaise` (a verbatim alias of `computeFICorpusBand`).
 
+## C-A — seed/sync double count, and the full instrument reconciliation
+
+**Reproduced 2026-08-23 exactly:** seed alone = `476_899_961n` (₹47,68,999.61); after ONE
+INDmoney sync of the real capture = `910_277_209n` (₹91,02,772.09). Inflation ₹43,33,772.48
+over 47 synced rows. Matches the review's independent measurement to the paise.
+
+Two live causes (the third, `isin` missing from the instruments insert, is **fixed** in
+`8346b24`):
+
+1. **Id namespaces do not meet.** Only the **3 bonds** carry an ISIN. Everything else uses
+   INDmoney's internal code — `INDS01338`, `3229`, `118186` — or free text for EPF/savings.
+   An ISIN-only reconciliation covers 3 of 47 rows.
+2. **No supersession rule.** `loadPositions` does `distinct on (s.source)`, merging the
+   latest snapshot from *every* source. Nothing ever retires `manual-seed`.
+
+**Owner decision (2026-08-23):** live source wins per `(canonicalInstrumentId, account)`;
+the seed still supplies what no live source can see; a holding a live source stops
+reporting **falls back to the seed row** rather than vanishing (safer against a partial API
+reply; staleness already flags the source).
+
+### The reconciliation, derived by value — every bucket ties out
+
+| seed instrument | seed ₹ | live code(s) | live ₹ |
+|---|---|---|---|
+| `EPF:ANIRBAN` | 13,54,000 | 2 × EPF (ServiceNow) | 13,53,592 |
+| `MF:ICICI-NIFTY50-IDX` (3 rows) | 6,96,000 | `5536` | 7,01,062 |
+| `MF:PPFC` | 2,41,000 | `3229` (×2 brokers) | 2,47,987 |
+| `MF:ICICI-LARGECAP` | 2,03,000 | `2995` | 2,01,410 |
+| `MF:HDFC-MIDCAP` | 19,000 | `3097` | 22,386 |
+| `MF:BANDHAN-SMALLCAP` | 18,000 | `1005544` | 20,077 |
+| `MF:MOTILAL-MIDCAP` | 6,000 | `3113` | 6,225 |
+| `NSE:NIFTYBEES` | 95,000 | `INDS19182` | 94,652 |
+| `NSE:GOLDBEES` | 63,000 | `INDS29570` *(named "Zerodha Gold ETF")* | 65,426 |
+| `NSE:LIQUIDBEES` | 16,000 | `INDS28892` *(named "Zerodha Nifty 1D Rate Liquid ETF")* | 16,183 |
+| `NSE:RPOWER` | 2,600 | `INDS01338` | 2,650 |
+| `NSE:SMALLCASE-RESIDUE` | 6,55,400 | **the other 24 IND_STOCK rows** | 6,45,905 |
+| `CASH:SAVINGS` | 1,63,000 | 2 × SA (Federal ₹10, HDFC 1,63,336) | 1,63,346 |
+| `US:INDMONEY-BASKET` | 1,37,000 | **the 6 US_STOCK rows** | 1,37,070 |
+| `BOND:*` ×3 | 5,99,999.61 | the 3 ISINs | 6,55,797.84 |
+| `US:NOW` | 5,00,000 | *(none — Fidelity, invisible to INDmoney)* | — |
+
+Bucket totals tie to MEMORY's own stated figures: MF live 11,99,148 vs seeded 11,83,000;
+IND_STOCK live 8,24,816 vs seeded 8,32,000. **This is a derivation, not a guess** — but it
+is the owner's balance sheet, so it needs confirmation before being hard-coded.
+
+**Two open items this CLOSES once implemented:**
+- *Basket decomposition* — `NSE:SMALLCASE-RESIDUE` decomposes into 24 named live stock
+  rows, so the 13.74% "single-stock" breach it reports today is a **false positive**, and
+  the largest real single-stock line is Tata Motors at ~₹47,255 (~1%). Same for
+  `US:INDMONEY-BASKET` → 6 named US holdings.
+- *Sector coverage* — 10.54% today; the decomposed rows are what lift it.
+
+**Expect the exact assertions to move.** `476_899_961n` in `networth.test.ts` and the breach
+set in `allocation.test.ts` are pinned to the seed at cost. Marking to market moves both, in
+the same commit, as MEMORY already anticipated for bonds (+₹55,798.23).
+
 ## Deferred minors (tracked, not blocking)
 
 **Fix-on-touch**: if the task you are running edits one of these files, fix the minor in
