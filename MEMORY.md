@@ -564,10 +564,15 @@ cost-based reporting are unavailable for ~₹8L of holdings until the owner supp
 FR-02 keeps them NULL rather than 0.
 
 
-**OPEN (Task 9): PRD §3.3 verbatim.** `IPS_BANDS.DEBT.min = 0.25` comes from the plan's
-snippet, not from any PRD text in this repo, and it makes a zero-debt portfolio report an
-UNDER breach. Same blocker as T13 (§3.2–§3.10 exist in no artifact here). Not tuned, not
-removed — flagged.
+**OPEN (Task 9 → fix wave item 30): two IPS bands have NO PRD source.** The earlier note
+here said PRD §3.3 verbatim was "still outstanding" — **stale**. The PRD is in the repo and
+§3.3 reads in full: *"Debt/EPF/cash: remainder; EPF counts as debt-like."* A remainder is an
+identity, not a band. So `IPS_BANDS.DEBT.min = 0.25` is an **invented floor** (it makes a
+zero-debt portfolio report an UNDER breach the PRD never asks for) and `CASH.max = 0.20` has
+**no source at all**. `EQUITY.max ~60%` and `GOLD 5–10%` ARE verbatim and are not in doubt.
+Neither number was tuned or removed — that is the owner's call. Both are now named in
+`UNSOURCED_BANDS` and the digest prints `UNSOURCED_BAND_CAVEAT` under the allocation table.
+**Owner decision needed: confirm both, or set them to the PRD's residual reading.**
 
 **OPEN (Task 9): basket decomposition.** `NSE:SMALLCASE-RESIDUE` (₹6,55,400) and
 `US:INDMONEY-BASKET` (₹1,37,000) are baskets held as single EQUITY lines. Until Task 11B

@@ -1,5 +1,5 @@
 import type { Db } from '../db/client.js';
-import { allocationDrift, concentration, type DriftRow } from '../domain/allocation.js';
+import { allocationDrift, concentration, UNSOURCED_BAND_CAVEAT, type DriftRow } from '../domain/allocation.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../domain/buckets.js';
 import { fundedStatus } from '../domain/funded-status.js';
 import { escapeMarkdown } from './telegram.js';
@@ -130,6 +130,7 @@ export function composeDigest(d: DigestInput): string {
     const flag = row.breach ? ` ⚠️ ${escapeMarkdown(row.breach)} by ${formatInr(row.driftPaise, { compact: true })}` : '';
     lines.push(`• ${row.assetClass}: ${pct(row.actual)} (band ${pct(row.min)}–${pct(row.max)})${flag}`);
   }
+  lines.push(`_${UNSOURCED_BAND_CAVEAT}_`);
   lines.push('');
 
   if (d.breaches.length) {

@@ -4,10 +4,20 @@ import type { AssetClass, Position } from './networth.js';
 /**
  * PRD 3.3 strategic allocation. Equity is a ceiling; gold is a band.
  *
- * NOTE: `DEBT.min = 0.25` comes from the plan's snippet, not from any PRD text held in
- * this repo — PRD 3.3 verbatim is still outstanding (it blocks Task 13 too). It means a
- * portfolio holding no debt reports an UNDER breach, which is a defensible reading of
- * "remainder debt/cash" but is not verified. Flagged as an owner true-up in MEMORY.md.
+ * **Two of these rails have NO PRD source.** The earlier note here said PRD 3.3 was
+ * "still outstanding" — that is stale. The PRD is in this repo now and 3.3 reads, in
+ * full: "Debt/EPF/cash: remainder; EPF counts as debt-like." A remainder is an
+ * identity, not a band, so:
+ *
+ *   - `DEBT.min = 0.25` is an invented floor. It makes a zero-debt portfolio report an
+ *     UNDER breach, which the PRD does not ask for.
+ *   - `CASH.max = 0.20` has no source at all.
+ *
+ * EQUITY.max (~60%) and the GOLD 5-10% band ARE verbatim from 3.3 and are not in doubt.
+ *
+ * Both unsourced numbers are left as they are rather than tuned or removed — that is
+ * the owner's call, not a code change — but they are flagged wherever they are shown.
+ * See MEMORY.md § owner true-up items.
  */
 export const IPS_BANDS: Record<AssetClass, { min: number; max: number }> = {
   EQUITY: { min: 0.00, max: 0.60 },
@@ -15,6 +25,16 @@ export const IPS_BANDS: Record<AssetClass, { min: number; max: number }> = {
   DEBT: { min: 0.25, max: 1.00 },
   CASH: { min: 0.00, max: 0.20 },
 };
+
+/** The bands above that the PRD does not state, keyed by asset class and bound. */
+export const UNSOURCED_BANDS = ['DEBT.min', 'CASH.max'] as const;
+
+/**
+ * Shown beside the allocation table. A rail the owner is being held to must not read as
+ * policy when no policy states it.
+ */
+export const UNSOURCED_BAND_CAVEAT =
+  'DEBT floor 25% and CASH ceiling 20% are not stated in PRD 3.3 ("Debt/EPF/cash: remainder") — pending owner confirmation.';
 
 /** PRD 3.5 hard concentration caps. Every one of these is enforced by `concentration`. */
 export const CAPS = {
