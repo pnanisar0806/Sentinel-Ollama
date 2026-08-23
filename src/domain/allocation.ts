@@ -2,39 +2,27 @@ import { addP, mulP, pctOf, subP, type Paise } from '../money/paise.js';
 import type { AssetClass, Position } from './networth.js';
 
 /**
- * PRD 3.3 strategic allocation. Equity is a ceiling; gold is a band.
+ * PRD §3.3 strategic allocation — **only the rails the PRD actually states**.
  *
- * **Two of these rails have NO PRD source.** The earlier note here said PRD 3.3 was
- * "still outstanding" — that is stale. The PRD is in this repo now and 3.3 reads, in
- * full: "Debt/EPF/cash: remainder; EPF counts as debt-like." A remainder is an
- * identity, not a band, so:
+ * §3.3 in full: "Equity ceiling ~60% ... Gold: 5–10% band ... Debt/EPF/cash: remainder;
+ * EPF counts as debt-like." A remainder is an identity, not a band, so debt and cash
+ * carry no bound here. The earlier `DEBT.min = 0.25` and `CASH.max = 0.20` were
+ * invented, and the PRD preamble binds every recommendation to "cite the IPS clause(s)
+ * it serves" — a breach of an invented band can cite nothing.
  *
- *   - `DEBT.min = 0.25` is an invented floor. It makes a zero-debt portfolio report an
- *     UNDER breach, which the PRD does not ask for.
- *   - `CASH.max = 0.20` has no source at all.
+ * The debt floor was also actively wrong for this owner: EPF is 68.7% of the debt
+ * bucket and is passive, so a debt-percentage floor is really an EPF floor. His only
+ * CHOSEN debt is bonds (₹6.16L, 12.9%, halving when Sammaan matures 26-Sep-2026), so a
+ * 25% floor would have nagged him permanently to buy debt he has decided against.
  *
- * EQUITY.max (~60%) and the GOLD 5-10% band ARE verbatim from 3.3 and are not in doubt.
- *
- * Both unsourced numbers are left as they are rather than tuned or removed — that is
- * the owner's call, not a code change — but they are flagged wherever they are shown.
- * See MEMORY.md § owner true-up items.
+ * The cash ceiling survives as an OWNER rail — see `src/domain/rails.ts`.
  */
 export const IPS_BANDS: Record<AssetClass, { min: number; max: number }> = {
-  EQUITY: { min: 0.00, max: 0.60 },
-  GOLD: { min: 0.05, max: 0.10 },
-  DEBT: { min: 0.25, max: 1.00 },
-  CASH: { min: 0.00, max: 0.20 },
+  EQUITY: { min: 0.00, max: 0.60 }, // PRD §3.3, verbatim
+  GOLD: { min: 0.05, max: 0.10 },   // PRD §3.3, verbatim
+  DEBT: { min: 0.00, max: 1.00 },   // "remainder" — unbounded by design
+  CASH: { min: 0.00, max: 1.00 },   // "remainder" — see rails.ts for the owner ceiling
 };
-
-/** The bands above that the PRD does not state, keyed by asset class and bound. */
-export const UNSOURCED_BANDS = ['DEBT.min', 'CASH.max'] as const;
-
-/**
- * Shown beside the allocation table. A rail the owner is being held to must not read as
- * policy when no policy states it.
- */
-export const UNSOURCED_BAND_CAVEAT =
-  'DEBT floor 25% and CASH ceiling 20% are not stated in PRD 3.3 ("Debt/EPF/cash: remainder") — pending owner confirmation.';
 
 /** PRD 3.5 hard concentration caps. Every one of these is enforced by `concentration`. */
 export const CAPS = {

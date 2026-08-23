@@ -5,6 +5,7 @@ import {
   SEED_MILESTONES, SEED_RSU_GRANTS,
 } from './seed-data.js';
 import { isMainModule } from '../util/main-module.js';
+import { DEFAULT_OWNER_RAILS } from '../domain/rails.js';
 
 const SOURCE = 'manual-seed';
 
@@ -95,6 +96,16 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
   }
 
   // Append audit log entry on every run by design (audit trail records each seeding; this is not an idempotency issue)
+  // Owner rails (settings_rails), distinct from the IPS. Idempotent: an existing rail
+  // keeps its value, because the owner may have changed it through the cooling-off.
+  for (const [key, value] of Object.entries(DEFAULT_OWNER_RAILS)) {
+    await db.query(
+      `insert into settings_rails (key, value) values ($1, $2::jsonb)
+       on conflict (key) do nothing`,
+      [key, JSON.stringify(value)],
+    );
+  }
+
   await db.query(
     `insert into audit_log (entity, entity_id, action, actor, payload)
      values ('seed', $1, 'SEEDED', 'system', $2::jsonb)`,

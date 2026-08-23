@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
-import { allocationDrift, concentration, UNSOURCED_BAND_CAVEAT, type DriftRow } from '../domain/allocation.js';
+import { allocationDrift, concentration, type DriftRow } from '../domain/allocation.js';
+import { evaluateRails, loadOwnerRails, type RailBreach } from '../domain/rails.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../domain/buckets.js';
 import { fundedStatus } from '../domain/funded-status.js';
 import { escapeMarkdown } from './telegram.js';
@@ -19,6 +20,8 @@ export interface DigestInput {
   byAccount: [string, Paise][];
   drift: DriftRow[];
   breaches: string[];
+  /** Owner's own rules. Reported apart from IPS breaches — he can change these. */
+  railBreaches: RailBreach[];
   buckets: BucketStatus[];
   milestones: MilestoneStatus[];
   staleness: StalenessRow[];
@@ -89,6 +92,7 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     byAccount: [...nw.byAccount.entries()],
     drift: allocationDrift(nw.byAssetClass, nw.assetsPaise),
     breaches: concentration(positions).breaches,
+    railBreaches: evaluateRails(await loadOwnerRails(db), nw.byAssetClass, nw.assetsPaise),
     buckets: await bucketStatuses(db),
     milestones: await milestoneStatuses(db, businessDate),
     staleness: await assessStaleness(db, now),
@@ -130,8 +134,16 @@ export function composeDigest(d: DigestInput): string {
     const flag = row.breach ? ` ⚠️ ${escapeMarkdown(row.breach)} by ${formatInr(row.driftPaise, { compact: true })}` : '';
     lines.push(`• ${row.assetClass}: ${pct(row.actual)} (band ${pct(row.min)}–${pct(row.max)})${flag}`);
   }
-  lines.push(`_${UNSOURCED_BAND_CAVEAT}_`);
   lines.push('');
+
+  if (d.railBreaches.length) {
+    // Deliberately its own section. An owner rail must never read as an IPS clause:
+    // he is entitled to change these, and the IPS he is held to at a -20% drawdown
+    // is not something he can change in a drawdown.
+    lines.push('*Your own rails (not IPS)*');
+    for (const b of d.railBreaches) lines.push(`• ⚠️ ${escapeMarkdown(b.message)}`);
+    lines.push('');
+  }
 
   if (d.breaches.length) {
     lines.push('*Concentration breaches (IPS §3.5)*');
