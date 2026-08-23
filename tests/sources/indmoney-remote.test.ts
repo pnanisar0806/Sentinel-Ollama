@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { McpClient } from '../../src/sources/mcp-client.js';
 import { RemoteIndmoneySource, ASSET_TYPES } from '../../src/sources/indmoney.js';
+import { SEED_INSTRUMENTS } from '../../src/seed/seed-data.js';
 import { rupees } from '../../src/money/paise.js';
 
 interface FixtureHolding {
@@ -128,9 +129,30 @@ describe('RemoteIndmoneySource', () => {
       .rejects.toThrow(/could not parse/i);
   });
 
-  it('prefixes a real ISIN as ISIN: so it matches the seeded bonds', async () => {
+  // This claimed the ids "match the seeded bonds" while never importing SEED_INSTRUMENTS:
+  // both sides of the comparison were the mapper's own convention, so it would have
+  // passed under any naming scheme at all. It is the test that would have caught the
+  // seed/sync double count (review C-A). It now reads the real seed.
+  //
+  // NOTE: the assertion below is that the ISINs AGREE, not that the ids do. They do not
+  // yet — the seed uses 'BOND:SAMMAAN-2026' while the mapper mints 'ISIN:INE148I07GL3',
+  // which is exactly cause (1) of C-A and is still open pending the owner's instrument
+  // map. Pinning the ISIN correspondence is what makes that reconciliation checkable.
+  it('mints ISIN ids that correspond to the ISINs the seed actually carries', async () => {
     const { rows } = await source(stubOnce(capture('BOND')), ['BOND']).fetch();
-    expect(rows.map((r) => r.instrumentId)).toContain('ISIN:INE148I07GL3');
+
+    const seededIsins = SEED_INSTRUMENTS
+      .map((i) => i.isin)
+      .filter((x): x is string => typeof x === 'string');
+    expect(seededIsins.length).toBeGreaterThan(0);
+
+    const mappedIsins = rows
+      .map((r) => /^ISIN:(.+)$/.exec(r.instrumentId)?.[1])
+      .filter((x): x is string => typeof x === 'string');
+
+    // Derived from the seed, not restated: every bond the seed knows an ISIN for is
+    // present in the live capture under that same ISIN.
+    expect([...mappedIsins].sort()).toEqual([...seededIsins].sort());
   });
 
   it('does not label a non-ISIN investment_code as an ISIN', async () => {

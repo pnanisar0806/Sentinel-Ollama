@@ -41,14 +41,43 @@ describe('sync job', () => {
     expect(Number(open[0]!.n)).toBe(1);
   });
 
+  // The escalation test alone never pinned the FIRST severity, so hard-coding
+  // severity = 'BLOCK' in runSync stayed green and the WARN->BLOCK ladder was untested.
+  it('records the FIRST failure as WARN, not BLOCK', async () => {
+    await runSync(db, { now: '2026-08-12T17:30:00+05:30', sources: [failing] });
+    const rows = await db.query<{ severity: string }>(
+      `select severity from incidents where kind = 'SYNC_FAILURE' order by opened_at`,
+    );
+    expect(rows.map((r) => r.severity)).toEqual(['WARN']);
+  });
+
   it('escalates to BLOCK severity after two consecutive failures (PRD 8.2)', async () => {
     const opts = { now: '2026-08-12T17:30:00+05:30', sources: [failing] };
     await runSync(db, opts);
     await runSync(db, { ...opts, now: '2026-08-13T17:30:00+05:30' });
     const rows = await db.query<{ severity: string }>(
-      `select severity from incidents where kind = 'SYNC_FAILURE' and resolved_at is null`,
+      `select severity from incidents where kind = 'SYNC_FAILURE' order by opened_at`,
     );
-    expect(rows.some((r) => r.severity === 'BLOCK')).toBe(true);
+    // The whole ladder, in order — not merely "a BLOCK exists somewhere".
+    expect(rows.map((r) => r.severity)).toEqual(['WARN', 'BLOCK']);
+  });
+
+  it('de-escalates: a recovered source resolves its incident', async () => {
+    const opts = { now: '2026-08-12T17:30:00+05:30', sources: [failing] };
+    await runSync(db, opts);
+
+    const healthy = {
+      name: failing.name,
+      fetch: async () => ({ rows: [], asOf: '2026-08-13T00:00:00Z' }),
+    };
+    await runSync(db, { now: '2026-08-13T17:30:00+05:30', sources: [healthy] });
+
+    const open = await db.query<{ n: string }>(
+      `select count(*) as n from incidents
+        where kind = 'SYNC_FAILURE' and subject = $1 and resolved_at is null`,
+      [failing.name],
+    );
+    expect(Number(open[0]!.n)).toBe(0);
   });
 
   it('refreshes loan schedules and projected vests as part of the sync', async () => {

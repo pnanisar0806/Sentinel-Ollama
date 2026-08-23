@@ -33,8 +33,12 @@ describe('phase 0 schema', () => {
     await expect(db.query(`truncate audit_log`)).rejects.toThrow();
   });
 
-  it('refuses truncate on snapshots', async () => {
-    await expect(db.query(`truncate snapshots`)).rejects.toThrow();
+  // Dropping the snapshots_append_only trigger kept this green, because TRUNCATE on a
+  // table with an inbound FK errors on the FK before any trigger fires. The exhaustive
+  // per-table coverage now lives in tests/db/immutability.test.ts, which uses CASCADE so
+  // the trigger is what rejects; this one keeps a cheap smoke check next to the schema.
+  it('refuses truncate on snapshots — and for the right reason', async () => {
+    await expect(db.query(`truncate snapshots cascade`)).rejects.toThrow(/append-only/);
   });
 
   it('requires as_of and source on every holdings row', async () => {
