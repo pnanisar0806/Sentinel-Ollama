@@ -8,29 +8,55 @@ export const IPS_V1_TEXT = readFileSync(
 );
 
 /** Versioned and append-only in spirit: a new version is a new row, never an edit. */
+/**
+ * Installs the current IPS text as a new version if it differs from the tip.
+ *
+ * Runs in ONE transaction. The two inserts used to be unwrapped, and `audit_log`
+ * refuses UPDATE — since migration 0004 so does `ips_versions` — so a failure between
+ * them left a policy version with no provenance record that could never be corrected:
+ * not back-filled in place, not deleted. This is the text shown to the owner at a -20%
+ * drawdown, so it is all-or-nothing.
+ *
+ * `on conflict (version) do nothing` covers the race: every job start calls this, and
+ * two jobs starting together both read the same tip and compute the same next version.
+ */
 export async function installIps(
   db: Db,
   opts: { effectiveAt?: string } = {},
 ): Promise<{ version: number; created: boolean }> {
-  const existing = await db.query<{ version: number; full_text: string }>(
-    'select version, full_text from ips_versions order by version desc limit 1',
-  );
+  return db.withTransaction(async (tx) => {
+    const tip = async () => (await tx.query<{ version: number; full_text: string }>(
+      'select version, full_text from ips_versions order by version desc limit 1',
+    ))[0];
 
-  if (existing[0]?.full_text === IPS_V1_TEXT) {
-    return { version: Number(existing[0].version), created: false };
-  }
+    const existing = await tip();
+    if (existing?.full_text === IPS_V1_TEXT) {
+      return { version: Number(existing.version), created: false };
+    }
 
-  const version = existing[0] ? Number(existing[0].version) + 1 : 1;
-  await db.query(
-    'insert into ips_versions (version, full_text, effective_at) values ($1,$2,$3)',
-    [version, IPS_V1_TEXT, opts.effectiveAt ?? new Date().toISOString()],
-  );
-  await db.query(
-    `insert into audit_log (entity, entity_id, action, actor, payload)
-     values ('ips', $1, 'INSTALLED', 'owner', $2::jsonb)`,
-    [String(version), JSON.stringify({ version })],
-  );
-  return { version, created: true };
+    // A revert to older text is a genuine new version, not a no-op, so the comparison
+    // is deliberately against the TIP rather than against every version ever written.
+    const version = existing ? Number(existing.version) + 1 : 1;
+    const inserted = await tx.query<{ version: number }>(
+      `insert into ips_versions (version, full_text, effective_at) values ($1,$2,$3)
+       on conflict (version) do nothing
+       returning version`,
+      [version, IPS_V1_TEXT, opts.effectiveAt ?? new Date().toISOString()],
+    );
+
+    if (inserted.length === 0) {
+      // Another install won the race and wrote this version. Report theirs.
+      const winner = await tip();
+      return { version: Number(winner!.version), created: false };
+    }
+
+    await tx.query(
+      `insert into audit_log (entity, entity_id, action, actor, payload)
+       values ('ips', $1, 'INSTALLED', 'owner', $2::jsonb)`,
+      [String(version), JSON.stringify({ version })],
+    );
+    return { version, created: true };
+  });
 }
 
 export async function currentIps(

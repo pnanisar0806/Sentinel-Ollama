@@ -27,7 +27,18 @@ export interface MilestoneStatus {
   name: string;
   spec: string;
   completedOn: string | null;
-  daysOutstanding: number;
+  /**
+   * NULL always, for now. `milestones` has no `raised_on` column, so for an OPEN
+   * milestone there is genuinely nothing to measure from — the previous value counted
+   * from a hard-coded '2026-01-01' that appears in no assumption, no seed row and no
+   * PRD line, and was shown to the owner as a fact.
+   *
+   * TODO(owner true-up): add `raised_on` to `milestones`, seeded from the date the
+   * owner actually set each protection goal, and this becomes derivable.
+   */
+  daysOutstanding: number | null;
+  /** Days from completion to the business date. NULL while the milestone is open. */
+  daysSinceCompleted: number | null;
 }
 
 /**
@@ -216,21 +227,31 @@ export async function bucketStatuses(db: Db): Promise<BucketStatus[]> {
  * Uses the database's completed_on column; falls back to the static MILESTONES for in-memory defaults.
  */
 export async function milestoneStatuses(db: Db, businessDate: string): Promise<MilestoneStatus[]> {
-  const milestoneRows = await db.query<{ id: 'M1' | 'M2'; name: string; spec: string; completed_on: string | null }>(
-    'select id, name, spec, completed_on from milestones',
-  );
-  const base = new Date(businessDate + 'T00:00:00');
+  const milestoneRows = await db.query<{
+    id: 'M1' | 'M2'; name: string; spec: string; completed_on: string | Date | null;
+  }>('select id, name, spec, completed_on from milestones');
+
+  const base = Date.parse(`${businessDate}T00:00:00Z`);
+
   return milestoneRows.map((row) => {
-    const completedOn = row.completed_on ?? null;
-    const daysOutstanding = completedOn
-      ? Math.floor((base.getTime() - new Date(completedOn + 'T00:00:00').getTime()) / 86400000)
-      : Math.floor((base.getTime() - new Date('2026-01-01T00:00:00').getTime()) / 86400000);
+    // PGlite hands a `date` column back as a Date, postgres-js as a string (MEMORY.md).
+    const completedOn = row.completed_on === null
+      ? null
+      : row.completed_on instanceof Date
+        ? row.completed_on.toISOString().slice(0, 10)
+        : String(row.completed_on).slice(0, 10);
+
     return {
       id: row.id,
       name: row.name,
       spec: row.spec,
       completedOn,
-      daysOutstanding,
+      // Nothing records when a milestone was raised, so this is unknown — not zero, and
+      // not counted from an invented epoch.
+      daysOutstanding: null,
+      daysSinceCompleted: completedOn === null
+        ? null
+        : Math.floor((base - Date.parse(`${completedOn}T00:00:00Z`)) / 86_400_000),
     };
   });
 }

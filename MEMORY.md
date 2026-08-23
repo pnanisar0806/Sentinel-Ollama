@@ -543,6 +543,13 @@ MCP payload gets wrong, and must never be allowed to overwrite:
    reconciles with none of them and remains **unexplained**. The earlier "roughly what the
    PRD's ₹6.33L looks like" reading is withdrawn.
 
+**OPEN (fix wave, item 27): `milestones` has no `raised_on` column.** `daysOutstanding`
+used to be counted from a hard-coded `'2026-01-01'` that appears in no assumption, no seed
+row and no PRD line — a fabricated figure shown to the owner as fact. It is now `null` for
+an open milestone, and the digest omits the count. To restore it, add `raised_on` to
+`milestones` and seed it from the date the owner actually set each protection goal.
+`daysSinceCompleted` is separate and IS derivable.
+
 **Still open from this:** the +₹55,798.23 of unrealised mark moves Task 9's assets figure,
 asserted exactly at `476_899_961` paise. Bonds are seeded at cost; the first real sync marks
 them to market and that assertion moves in the same commit.
