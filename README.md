@@ -30,6 +30,18 @@ four bucket balances, both open milestone nags, next projected RSU vest, and a f
 2. **Supabase** — create a free project, copy the *pooler* connection string into
    `DATABASE_URL`, run `pnpm migrate` once against it, then `pnpm seed`.
 
+   `DATABASE_URL` must be the **service role / owner** connection string. Migration
+   `0004` enables row level security on every table with no policies, so the `anon` and
+   `authenticated` keys are denied outright; the owner role bypasses RLS and the jobs
+   keep working. Confirm after migrating:
+
+   ```sql
+   select tablename, rowsecurity from pg_tables where schemaname = 'public';
+   ```
+
+   Every row must read `t`. There is a test for this (`tests/db/immutability.test.ts`),
+   but it runs against PGlite — confirm it on the real project too.
+
 3. **Kite Connect (optional in Phase 0)** — create a Personal app at developers.kite.trade.
    Order APIs are free; market data is ₹500/month and Phase 0 does not need it.
    Static-IP registration is required only for order placement (Phase 3).

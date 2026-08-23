@@ -162,6 +162,18 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
   be `on conflict ... do nothing` + select, never `do update ... returning`. Since `0003` it
   also carries `unique (business_date, source)` — writeSnapshot's select-then-insert was
   check-then-act, and two racing syncs would each insert and double-count the portfolio.
+- **Append-only now covers four tables, and `lots` is a special case.** `audit_log`,
+  `snapshots`, `ips_versions` and `bucket_flows` refuse UPDATE, DELETE and TRUNCATE.
+  `lots` cannot be blanket append-only — closing a lot on disposal is a legitimate
+  UPDATE of `closed_on` — so `sentinel_lots_immutable()` refuses DELETE/TRUNCATE and
+  allows an UPDATE only when every column except `closed_on` is unchanged.
+- **RLS is enabled on all 18 tables in `0004`, with no policies.** That denies `anon` and
+  `authenticated` outright while the owner/service role bypasses, which is the right
+  posture for a single-user agent. **Not** `force row level security` — that applies to
+  the owner too and would lock the jobs out. `DATABASE_URL` must therefore be the
+  service-role/owner string. The PRD constraint was triggers *plus* RLS, and RLS had
+  existed only as a comment saying it would be added at provisioning — migrations are the
+  only path to Supabase, so it would never have been applied.
 - **A curated instrument row beats the payload.** `writeSnapshot`'s `on conflict (id)` used
   to `set name = excluded.name`, which overwrote the owner-verified "Sammaan Capital Limited"
   with the API's stale pre-rebrand "Indiabulls Housing Finance Ltd". It now enriches only

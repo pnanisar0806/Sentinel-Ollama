@@ -56,6 +56,7 @@ docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do
 | `migrations/0001_phase0.sql` | 16 Phase 0 tables + append-only triggers (~30 statements). `rsu_vests` carries `unique (grant_id, vest_on)` — load-bearing for FR-03's ON CONFLICT |
 | `migrations/0002_oauth.sql` | `oauth_clients` (provider, issuer, client_id, client_secret_enc, redirect_uri, registered_on), `oauth_tokens` (provider, access_token_enc, refresh_token_enc, scope, expires_at, rotated_at). AES-256-GCM encryption; client_secret_enc + refresh_token_enc never stored plaintext |
 | `migrations/0003_snapshot_uniqueness.sql` | `unique (business_date, source)` on `snapshots` — without it writeSnapshot's select-then-insert is check-then-act and two racing syncs double-count the portfolio |
+| `migrations/0004_immutability_and_rls.sql` | append-only triggers on `ips_versions` + `bucket_flows`; `sentinel_lots_immutable()` on `lots` (DELETE/TRUNCATE refused, UPDATE allowed **only** for `closed_on` — closing a lot is the FIFO disposal lifecycle); **RLS enabled on all 18 tables**, no policies, so anon/authenticated are denied and the owner role bypasses |
 
 ## Tests
 
