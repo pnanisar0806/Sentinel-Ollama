@@ -2,6 +2,7 @@ import type { Db } from '../db/client.js';
 import { allocationDrift, concentration, type DriftRow } from '../domain/allocation.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../domain/buckets.js';
 import { fundedStatus } from '../domain/funded-status.js';
+import { escapeMarkdown } from './telegram.js';
 import { currentIps } from '../domain/ips.js';
 import { loadPositions, netWorth, outstandingLiabilities } from '../domain/networth.js';
 import { projectVests, type VestEvent } from '../domain/rsu.js';
@@ -97,21 +98,22 @@ export function composeDigest(d: DigestInput): string {
 
   lines.push('*Allocation vs IPS §3.3*');
   for (const row of d.drift) {
-    const flag = row.breach ? ` ⚠️ ${row.breach} by ${formatInr(row.driftPaise, { compact: true })}` : '';
+    const flag = row.breach ? ` ⚠️ ${escapeMarkdown(row.breach)} by ${formatInr(row.driftPaise, { compact: true })}` : '';
     lines.push(`• ${row.assetClass}: ${pct(row.actual)} (band ${pct(row.min)}–${pct(row.max)})${flag}`);
   }
   lines.push('');
 
   if (d.breaches.length) {
     lines.push('*Concentration breaches (IPS §3.5)*');
-    for (const b of d.breaches) lines.push(`• ⚠️ ${b}`);
+    // Breach strings carry instrument, issuer and scheme names straight from the DB.
+    for (const b of d.breaches) lines.push(`• ⚠️ ${escapeMarkdown(b)}`);
     lines.push('');
   }
 
   lines.push('*Buckets*');
   for (const b of d.buckets) {
     const funded = b.fundedRatio === null ? b.targetNote : `${pct(b.fundedRatio)} of ${formatInr(b.targetPaise!, { compact: true })}`;
-    lines.push(`• ${b.name}: ${formatInr(b.balancePaise, { compact: true })} — ${funded}`);
+    lines.push(`• ${escapeMarkdown(b.name)}: ${formatInr(b.balancePaise, { compact: true })} — ${escapeMarkdown(funded)}`);
   }
   lines.push('');
 
@@ -119,7 +121,7 @@ export function composeDigest(d: DigestInput): string {
   if (openMilestones.length) {
     lines.push('*Protection milestones — still open*');
     for (const m of openMilestones) {
-      lines.push(`• ❗ ${m.name}: ${m.spec} _(${m.daysOutstanding} days outstanding)_`);
+      lines.push(`• ❗ ${escapeMarkdown(m.name)}: ${escapeMarkdown(m.spec)} _(${m.daysOutstanding} days outstanding)_`);
     }
     lines.push('');
   }
