@@ -17,5 +17,8 @@ jobs:
       - run: pnpm sync
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # The live INDmoney path decrypts the stored OAuth refresh token.
+          # Without it sync silently falls back to the file snapshot.
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
           KITE_API_KEY: ${{ secrets.KITE_API_KEY }}
           KITE_ACCESS_TOKEN: ${{ secrets.KITE_ACCESS_TOKEN }}
