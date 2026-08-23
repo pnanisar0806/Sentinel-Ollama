@@ -2,12 +2,10 @@
 
 **Owner:** Anirban Sarkar
 **Effective:** 2026-08-12
-**Binding:** Every recommendation must cite the clause(s) it serves. Changes require
-explicit owner action outside a drawdown and take effect after a 48-hour cooling-off.
+This is the binding document. Every recommendation must cite the IPS clause(s) it serves. The IPS is versioned in the database; changes require explicit owner action outside a drawdown and take effect after the 48-hour cooling-off (Section 11). Annual review is a scheduled agent task.
 
 ## 3.1 Philosophy
-Long-term, tax-aware, evidence-based investing for a specific household's goals. The owner
-is an investor, not a trader. Activity is a cost. The default action is no action.
+Long-term, tax-aware, evidence-based investing for a specific household's goals. The owner is an investor, not a trader. Activity is a cost. The default action is no action.
 
 ## 3.2 Objective function
 Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constraint. Funded-status vs the FI band is a REPORTING metric reviewed annually; it must never increase risk-taking after underperformance ("catch-up" behavior is prohibited by construction).
