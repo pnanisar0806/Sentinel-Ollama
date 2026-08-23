@@ -90,6 +90,18 @@ reachers of `src/domain/funded-status.ts` are exactly `domain/buckets.ts`, `noti
 and `jobs/digest.ts`. Adding a fourth reader of funded status is a deliberate act — put it on
 the allowlist there, or the suite goes red.
 
+### Workflows
+
+| File | Schedule (UTC) | Notes |
+|---|---|---|
+| `.github/workflows/ci.yml` | on push + PR | `tsc --noEmit` then `pnpm test`. Nothing enforced the suite before |
+| `.github/workflows/sync.yml` | `0 12 * * *` — **daily** | Weekday-only left the Monday digest reading Friday's data, 63.25h against a 36h limit |
+| `.github/workflows/digest.yml` | `15 3 * * 1-5` | Now at most ~15h behind a sync |
+| `.github/workflows/keepalive.yml` | `0 4 * * 0` | Largely subsumed by the daily sync; kept as a belt-and-braces Supabase ping |
+
+None of them pin a pnpm `version:` — `package.json`'s `packageManager` is the single
+source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
+
 ## Scripts
 
 `pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `ips` · `indmoney:login`

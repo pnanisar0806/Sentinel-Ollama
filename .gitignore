@@ -4,3 +4,9 @@ dist/
 .pglite/
 *.local.json
 run-claude.ps1
+
+# The owner's real holdings. .env.example names this exact path as the default
+# snapshot, so dropping a live export here would otherwise stage the whole portfolio
+# for commit. The .example file beside it is the one that is tracked.
+data/indmoney-snapshot.json
+data/*.snapshot.json
