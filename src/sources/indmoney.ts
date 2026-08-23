@@ -183,7 +183,17 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
 
     const id = instrumentIdFor(h);
     // A non-numeric invested_amount ('unknown') is FR-02 unknown cost, never zero.
-    const cost = typeof h.invested_amount === 'number' && h.invested_amount > 0
+    //
+    // For BONDS `invested_amount` is FACE VALUE, not cost — confirmed exactly against
+    // the owner's portal (MEMORY.md § Owner true-up item 1). The API returns 300000 /
+    // 100000 / 220000, which is precisely units x face; the real cost is 2,84,057.70 /
+    // 95,941.91 / 2,20,000.00. The two Sammaan bonds were bought below par, which is
+    // why their YTM exceeds their coupon. This source simply does not know bond cost,
+    // and FR-02 says an unknown is NULL — never the number that happens to be to hand.
+    // (`total_pnl` / `pnl_per` are computed against face too, so they are unusable here
+    // for the same reason.)
+    const cost = kind === 'BOND' ? null
+      : typeof h.invested_amount === 'number' && h.invested_amount > 0
       ? rupees(h.invested_amount.toFixed(2))
       : null;
     const existing = byId.get(id);

@@ -515,7 +515,11 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
 the rupee with the table below, so `SEED_HOLDINGS` bond cost stands unchanged. What the live
 MCP payload gets wrong, and must never be allowed to overwrite:
 
-1. **`invested_amount` is FACE VALUE, not cost — confirmed exactly.** API returns 300000 /
+1. **`invested_amount` is FACE VALUE, not cost — confirmed exactly.** **ENFORCED IN CODE
+   2026-08-23:** `aggregate()` in `src/sources/indmoney.ts` returns `avgCostPaise = null`
+   for every `kind === 'BOND'` row. The shipped mapper wrote the face value straight into
+   cost; three tests in `tests/sources/indmoney-bond-cost.test.ts` now hold the line,
+   derived from the real capture. API returns 300000 /
    100000 / 220000, which is precisely units x face (300x1,000, 1x1,00,000, 220x1,000). The
    portal's Investment column is 2,84,057.70 / 95,941.91 / 2,20,000 = **₹5,99,999.61**, its own
    stated Total Investment. The two Sammaan bonds were bought below par — which is exactly why
