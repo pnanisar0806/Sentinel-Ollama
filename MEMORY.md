@@ -75,6 +75,22 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
 
 ## Owner decisions (do not re-litigate)
 
+- **EPF: passive, not a target (decided 2026-08-23).** The ₹13.54L is mandatory ServiceNow
+  payroll EPF and ServiceNow keeps contributing. The owner adds **nothing further** — no VPF,
+  no FDs. It stays in net worth and counts as DEBT per PRD §3.3 ("EPF counts as debt-like"),
+  but it is **not a lever**: never propose adding to it, and never let it satisfy a debt goal.
+  It is 68.7% of the debt bucket, so any debt-percentage rail is really an EPF rail.
+- **Bonds are the owner's ONLY chosen debt (decided 2026-08-23).** No EPF top-ups, no FDs.
+  Consequence: chosen debt is ₹6.16L = 12.9% of the portfolio, and it **halves** when
+  Sammaan matures 26-Sep-2026.
+- **IPS bands: DEBT floor DROPPED, cash ceiling becomes an OWNER RAIL (decided 2026-08-23).**
+  PRD §3.3 says "Debt/EPF/cash: remainder", so `DEBT.min = 0.25` was an invented floor that
+  would have nagged the owner to buy debt he has explicitly decided against — permanently,
+  since chosen debt sits at 12.9%. `IPS_BANDS` now carries **only PRD-verbatim rails**
+  (EQUITY ≤60%, GOLD 5–10%), so every IPS breach can cite a clause, as the PRD preamble
+  requires. The 20% cash ceiling is kept as an explicit **owner rail in `settings_rails`**,
+  reported separately from "Allocation vs IPS §3.3" and subject to the 48h cooling-off.
+
 - **Fixture PII: accepted, repo stays private (decided 2026-08-23).**
   `tests/fixtures/indmoney-holdings-mcp.json` is a real capture — INDmoney internal user
   id, masked account tails, employer legal entity, exact balances. No credentials, so not
