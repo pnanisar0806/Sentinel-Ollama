@@ -15,34 +15,37 @@ import { rupees, type Paise } from '../money/paise.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 
 /**
- * FI corpus band derived from assumptions.
+ * FI corpus band derived from assumptions, at one safe withdrawal rate.
  *
- * Floor:  fiIncomeFloorMonthlyInr * 12 / swrFloor
- * Stretch: fiIncomeStretchMonthlyInr * 12 / swrOptimistic
+ * PRD: "At a 3.5% safe withdrawal rate (appropriate for Indian inflation; 4% carried
+ * as optimistic sensitivity), this implies a corpus of Rs 10.3 Cr (floor) to Rs 17.1 Cr
+ * (stretch) in today's money (Rs 9-15 Cr at 4% SWR)."
  *
- * Both computed as integer paise via exact division to avoid float-before-money.
+ * So the band varies the INCOME and the SWR is a separate sensitivity axis:
+ *   floor   = fiIncomeFloorMonthlyInr   x 12 / swr
+ *   stretch = fiIncomeStretchMonthlyInr x 12 / swr
  *
- * Derivation (verified):
- *   floor:  300_000/mo × 12 = 3_600_000/yr / 0.035 = 102_857_142.857... rupees
- *          = 10_285_714_285n paise  (Rs 10.2857 Cr)
- *   stretch: 500_000/mo × 12 = 6_000_000/yr / 0.04 = 150_000_000.000... rupees
- *          = 17_142_857_142n paise  (Rs 17.1428 Cr)
+ * All four PRD figures reproduce exactly:
+ *   swr 3.5% -> 10_285_714_285n (Rs 10.2857 Cr) .. 17_142_857_142n (Rs 17.1428 Cr)
+ *   swr 4.0% ->  9_000_000_000n (Rs  9.00   Cr) .. 15_000_000_000n (Rs 15.00   Cr)
+ *
+ * This function previously took ONE income and varied only the SWR, so `stretch` came
+ * back as the floor income at the optimistic rate — Rs 9.00 Cr, which is Rs 1.29 Cr BELOW
+ * the floor target. Every ratio against it read better than the ratio against the floor,
+ * telling the owner he was better funded against the harder goal.
+ *
+ * Integer paise throughout: exact division through basis points, never a float.
  */
 export function computeFICorpusBand(
-  monthlyInr: number, // rupees (not paise) - caller provides monthly income in rupees
-  swrFloor: number = ASSUMPTIONS.swrFloor,
-  swrOptimistic: number = ASSUMPTIONS.swrOptimistic,
+  swr: number = ASSUMPTIONS.swrFloor,
 ): { floorPaise: Paise; stretchPaise: Paise } {
-  // Use rupees() then multiply by 12n to avoid float-before-money anti-pattern
-  const monthlyRupees = rupees(monthlyInr);
-  const annualRupees = monthlyRupees * 12n;
-  // swrFloor = 0.035 = 350 bps, swrOptimistic = 0.04 = 400 bps
-  // Exact integer micros division: annualRupees * 10_000 / swr_bps
-  const floorBps = Math.round(swrFloor * 10_000); // 350
-  const stretchBps = Math.round(swrOptimistic * 10_000); // 400
-  const floorPaise = (annualRupees * 10_000n / BigInt(floorBps)) as Paise;
-  const stretchPaise = (annualRupees * 10_000n / BigInt(stretchBps)) as Paise;
-  return { floorPaise, stretchPaise };
+  const bps = BigInt(Math.round(swr * 10_000)); // 0.035 -> 350
+  const corpus = (monthlyInr: number): Paise =>
+    ((rupees(monthlyInr) * 12n * 10_000n) / bps) as Paise;
+  return {
+    floorPaise: corpus(ASSUMPTIONS.fiIncomeFloorMonthlyInr),
+    stretchPaise: corpus(ASSUMPTIONS.fiIncomeStretchMonthlyInr),
+  };
 }
 
 /**
@@ -65,15 +68,18 @@ export function fundedRatio(
 /**
  * Report the funded status for B1 (FI corpus).
  *
- * Returns { ratio, floorRatio, stretchRatio, corpusPaise, band } where:
- *   ratio   = investable / corpus (using the corpus target passed in)
- *   floorRatio = investable / floorCorpus (the floor band from assumptions)
- *   stretchRatio = investable / stretchCorpus (the stretch band from assumptions)
- *   corpusPaise = the specific corpus target used for the ratio
- *   band = 'floor' | 'stretch' | 'none' indicating which band the ratio is against
+ *   ratio        = investable / the target actually used
+ *   floorRatio   = investable / floor corpus   (3L/mo income at the floor SWR)
+ *   stretchRatio = investable / stretch corpus (5L/mo income at the floor SWR)
+ *   corpusPaise  = the target actually used
+ *   band         = which target that was
  *
- * The ratio is purely informational — it must not flow into any sizing or risk
- * function.  The architecture test verifies this constraint.
+ * `band` used to be `corpusPaise !== undefined ? 'floor' : 'none'` — inverted (an
+ * explicit caller-supplied target was labelled 'floor' while the assumption-derived
+ * floor was labelled 'none') and 'stretch' was unreachable.
+ *
+ * The ratio is purely informational. It must not flow into any sizing or risk
+ * function — see tests/architecture/no-catch-up.test.ts.
  */
 export function reportFundedStatus(
   investablePaise: Paise,
@@ -83,41 +89,23 @@ export function reportFundedStatus(
   floorRatio: number;
   stretchRatio: number;
   corpusPaise: Paise;
-  band: 'floor' | 'stretch' | 'none';
+  band: 'floor' | 'stretch' | 'explicit';
 } {
-  // Use the assumption-derived floor income (300_000 rupees/month) for the floor band
-  const floorBand = computeFICorpusBand(ASSUMPTIONS.fiIncomeFloorMonthlyInr);
-  // When corpusPaise is provided (e.g. from a specific projection), use it.
-  // Otherwise fall back to the assumption-derived floor band.
-  const target = corpusPaise ?? floorBand.floorPaise;
-  const ratio = Number(investablePaise) / Number(target);
-  const floorRatio = Number(investablePaise) / Number(floorBand.floorPaise);
-  const stretchRatio = Number(investablePaise) / Number(floorBand.stretchPaise);
+  const { floorPaise, stretchPaise } = computeFICorpusBand();
+  const target = corpusPaise ?? floorPaise;
 
-  const band: 'floor' | 'stretch' | 'none' =
-    corpusPaise !== undefined ? 'floor' : 'none';
+  const band: 'floor' | 'stretch' | 'explicit' =
+    corpusPaise === undefined ? 'floor'
+    : corpusPaise === stretchPaise ? 'stretch'
+    : 'explicit';
 
-  return { ratio, floorRatio, stretchRatio, corpusPaise: target, band };
-}
-
-/**
- * Derive the FI corpus target paise from the given monthly income and SWR rates.
- * This is the exact derivation the architecture test validates.
- */
-export function fiCorpusTargetPaise(
-  monthlyInr: number, // rupees (not paise) - caller provides monthly income in rupees
-  swrFloor: number = ASSUMPTIONS.swrFloor,
-  swrOptimistic: number = ASSUMPTIONS.swrOptimistic,
-): { floorPaise: Paise; stretchPaise: Paise } {
-  return computeFICorpusBand(monthlyInr, swrFloor, swrOptimistic);
-}
-
-/**
- * Verify that a given funded ratio is within the expected band.
- * Returns true if the ratio is within [floorRatio, stretchRatio].
- */
-export function isInBand(ratio: number, floorRatio: number, stretchRatio: number): boolean {
-  return ratio >= floorRatio && ratio <= stretchRatio;
+  return {
+    ratio: Number(investablePaise) / Number(target),
+    floorRatio: Number(investablePaise) / Number(floorPaise),
+    stretchRatio: Number(investablePaise) / Number(stretchPaise),
+    corpusPaise: target,
+    band,
+  };
 }
 
 /**
@@ -127,8 +115,9 @@ export function isInBand(ratio: number, floorRatio: number, stretchRatio: number
 export function fundedStatus(
   investablePaise: Paise,
 ): { floorRatio: number; stretchRatio: number } {
-  const floorBand = computeFICorpusBand(ASSUMPTIONS.fiIncomeFloorMonthlyInr);
-  const floorRatio = Number(investablePaise) / Number(floorBand.floorPaise);
-  const stretchRatio = Number(investablePaise) / Number(floorBand.stretchPaise);
-  return { floorRatio, stretchRatio };
+  const { floorPaise, stretchPaise } = computeFICorpusBand();
+  return {
+    floorRatio: Number(investablePaise) / Number(floorPaise),
+    stretchRatio: Number(investablePaise) / Number(stretchPaise),
+  };
 }

@@ -13,7 +13,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { rupees } from '../../src/money/paise.js';
-import { fiCorpusTargetPaise } from '../../src/domain/funded-status.js';
 
 /**
  * FundedRatio brand type - used to document that the brand does NOT prevent
@@ -165,43 +164,6 @@ describe('Architecture — no-catch-up funded_status firewall', () => {
       }
       // The assertion below will be RED if a key is missing; keep it GREEN.
       expect(allResolved).toBe(true);
-    });
-  });
-
-describe('Funded ratio bands asserted exactly in paise', () => {
-    it('floor band uses exact integer micros division', () => {
-      const monthlyInr = ASSUMPTIONS.fiIncomeFloorMonthlyInr;
-      const { floorPaise } = fiCorpusTargetPaise(
-        monthlyInr,
-        ASSUMPTIONS.swrFloor,
-        ASSUMPTIONS.swrOptimistic,
-      );
-      // Exact: annualRupees * 10_000 / BigInt(floorBps) — no float round-trip.
-      const expected = rupees(monthlyInr) * 12n * 10_000n / BigInt(Math.round(ASSUMPTIONS.swrFloor * 10_000));
-      expect(floorPaise).toBe(expected);
-    });
-
-    it('stretch band uses exact integer micros division', () => {
-      const monthlyInr = ASSUMPTIONS.fiIncomeStretchMonthlyInr;
-      const { stretchPaise } = fiCorpusTargetPaise(
-        monthlyInr,
-        ASSUMPTIONS.swrFloor,
-        ASSUMPTIONS.swrOptimistic,
-      );
-      const expected = rupees(monthlyInr) * 12n * 10_000n / BigInt(Math.round(ASSUMPTIONS.swrOptimistic * 10_000));
-      expect(stretchPaise).toBe(expected);
-    });
-
-    it('avoids the rupees(monthlyInr * 12) float anti-pattern', () => {
-      // The pattern `rupees(monthlyInr * 12)` introduces a float-before-money
-      // anti-pattern. The correct pattern is `rupees(monthlyInr) * 12n`.
-      const monthlyInr = ASSUMPTIONS.fiIncomeFloorMonthlyInr; // number (rupees)
-      const correct = rupees(monthlyInr) * 12n; // bigint multiplication, no float
-      const incorrect = rupees(monthlyInr * 12); // float before rupees() wrapper
-      // The correct pattern produces an exact bigint; the incorrect one may lose precision.
-      expect(typeof correct).toBe('bigint');
-      // The incorrect pattern should NOT be used — this test documents the anti-pattern.
-      expect(typeof incorrect).toBe('bigint'); // rupees() always returns bigint
     });
   });
 });

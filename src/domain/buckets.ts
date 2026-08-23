@@ -1,4 +1,5 @@
 import { rupees, type Paise } from '../money/paise.js';
+import { computeFICorpusBand, fundedRatio } from './funded-status.js';
 import type { Db } from '../db/client.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import type { HoldingSeed } from '../seed/seed-data.js';
@@ -65,43 +66,11 @@ export interface Milestone {
  */
 
 /**
- * Compute the FI corpus band (floor/stretch) from assumptions.
- * Floor: fiIncomeFloorMonthlyInr * 12 / swrFloor
- * Stretch: fiIncomeStretchMonthlyInr * 12 / swrOptimistic
- * Both expressed as integer paise.
+ * The FI corpus model lives in ONE place. These were duplicated verbatim here, so
+ * fixing funded-status.ts left this copy wrong — and an import allowlist anchored on
+ * funded-status.ts is bypassed by importing buckets.fundedRatio. Re-export, never copy.
  */
-export function computeFICorpusBand(
-  monthlyInr: number, // rupees (not paise) - caller provides monthly income in rupees
-  swrFloor: number = ASSUMPTIONS.swrFloor,
-  swrOptimistic: number = ASSUMPTIONS.swrOptimistic,
-  targetAge: number = ASSUMPTIONS.fiTargetAge,
-): { floorPaise: Paise; stretchPaise: Paise } {
-  // Use rupees() then multiply by 12n to avoid float-before-money anti-pattern
-  const monthlyRupees = rupees(monthlyInr);
-  const annualRupees = monthlyRupees * 12n;
-  // Exact integer micros division: annualRupees * 10_000 / swr_bps
-  // swrFloor = 0.035 = 350 bps, swrOptimistic = 0.04 = 400 bps
-  const floorBps = Math.round(swrFloor * 10_000); // 350
-  const stretchBps = Math.round(swrOptimistic * 10_000); // 400
-  const floorPaise = (annualRupees * 10_000n / BigInt(floorBps)) as Paise;
-  const stretchPaise = (annualRupees * 10_000n / BigInt(stretchBps)) as Paise;
-  return { floorPaise, stretchPaise };
-}
-
-/**
- * Derive the funded ratio for B1 (FI corpus) — reporting only.
- * fundedRatio = investablePaise / corpusTargetPaise,
- * where corpusTarget is the floor or stretch value derived from assumptions.
- * Returns { ratio, floorPaise, stretchPaise }.
- * The ratio is a plain number in [0, ∞) — callers must interpret it against the bands.
- */
-export function fundedRatio(
-  investablePaise: Paise,
-  corpusPaise: Paise,
-): { ratio: number } {
-  const ratio = Number(investablePaise) / Number(corpusPaise);
-  return { ratio };
-}
+export { computeFICorpusBand, fundedRatio };
 
 /**
  * Buzzle: check whether a bucket is "in range" based on its target.
@@ -116,7 +85,7 @@ export function bucketStatus(
 ): { met: boolean; progressPaise: Paise; targetPaise: Paise | null } {
   if (bucket.id === 'B1') {
     // B1 target is derived from assumptions (floor band)
-    const band = computeFICorpusBand(ASSUMPTIONS.fiIncomeFloorMonthlyInr);
+    const band = computeFICorpusBand();
     const { ratio } = fundedRatio(currentPaise, band.floorPaise);
     // B1 is "met" if ratio >= 1.0 at the floor level
     const met = ratio >= 1.0;

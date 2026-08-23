@@ -608,6 +608,32 @@ cover it, both mutation-checked.
 - **Holdings total is exact at ₹47.69L** — EPF 13.54L, MF 11.83L, stocks/ETFs 8.32L,
   bonds 6.00L, savings 1.63L, US basket 1.37L, Fidelity NOW 5.00L.
 
+## FI corpus band — PRD-derived, settled 2026-08-23
+
+PRD: *"At a 3.5% safe withdrawal rate (appropriate for Indian inflation; 4% carried as
+optimistic sensitivity), this implies a corpus of ₹10.3 Cr (floor) to ₹17.1 Cr (stretch)
+in today's money (₹9–15 Cr at 4% SWR)."*
+
+So the **band varies the INCOME** (floor ₹3L/mo → stretch ₹5L/mo) at one SWR, and the SWR
+is a **separate sensitivity axis**. `computeFICorpusBand(swr = swrFloor)` reproduces all
+four PRD figures exactly:
+
+| swr | floor | stretch |
+|---|---|---|
+| 3.5% | `10_285_714_285n` (₹10.2857 Cr) | `17_142_857_142n` (₹17.1428 Cr) |
+| 4.0% | `9_000_000_000n` (₹9.00 Cr) | `15_000_000_000n` (₹15.00 Cr) |
+
+The shipped code took **one** income and varied only the SWR, so `stretch` came back as
+the floor income at 4% — ₹9.00 Cr, **₹1.29 Cr below the floor target**. `stretchRatio`
+therefore exceeded `floorRatio` for every possible input: the owner read as *better funded
+against the harder goal*. `computeFICorpusBand` and `fundedRatio` were also duplicated
+verbatim in `buckets.ts`; `buckets.ts` now re-exports them, so there is exactly one model
+and an import allowlist anchored on `funded-status.ts` cannot be sidestepped through
+`buckets.fundedRatio`. A test asserts the two exports are the *same function object*.
+
+Dropped as dead: `isInBand` (hard-coded all three arguments in its only test, no production
+caller) and `fiCorpusTargetPaise` (a verbatim alias of `computeFICorpusBand`).
+
 ## Deferred minors (tracked, not blocking)
 
 **Fix-on-touch**: if the task you are running edits one of these files, fix the minor in
