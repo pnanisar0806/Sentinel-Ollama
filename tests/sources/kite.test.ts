@@ -53,12 +53,49 @@ describe('KiteSource', () => {
   // If you are here because you added a legitimate read method and this test failed:
   // that is the test working. Add it to the list deliberately, and only after checking it
   // cannot mutate broker state.
-  it('exposes exactly the read-only surface and nothing else', () => {
+  //
+  // The prototype-only version of this check was ITSELF defeatable. `private get =
+  // async <T>(path) => {...}` is a class FIELD, so it lives on the instance, not the
+  // prototype - which is precisely why the old assertion could read ['fetch',
+  // 'getHoldings'] while a third callable existed. A `placeOrder = async () => {...}`
+  // written in the same style as the code already here would have been invisible.
+  // The allowlist therefore covers the prototype AND the instance, every property
+  // regardless of type.
+  const READ_ONLY_SURFACE =
+    ['accessToken', 'apiKey', 'fetch', 'fetchImpl', 'get', 'getHoldings', 'name'];
+
+  const surfaceOf = (o: object): string[] => {
+    const names = new Set([
+      ...Object.getOwnPropertyNames(Object.getPrototypeOf(o)),
+      ...Object.getOwnPropertyNames(o),
+    ]);
+    names.delete('constructor');
+    return [...names].sort();
+  };
+
+  it('exposes exactly the read-only surface - instance fields included', () => {
     const src = new KiteSource({ apiKey: 'k', accessToken: 'a' });
-    const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(src))
-      .filter((m) => m !== 'constructor')
-      .sort();
-    expect(methods).toEqual(['fetch', 'getHoldings'].sort());
+    expect(surfaceOf(src)).toEqual([...READ_ONLY_SURFACE].sort());
+  });
+
+  // Proves the allowlist above actually sees instance fields. If this ever fails, the
+  // check has regressed to prototype-only and the guard is worthless again.
+  it('would see a write method added as a class field', () => {
+    class Rogue extends KiteSource {
+      placeOrder = async () => 'order-id';
+    }
+    const rogue = new Rogue({ apiKey: 'k', accessToken: 'a' });
+    expect(typeof (rogue as unknown as { placeOrder: unknown }).placeOrder).toBe('function');
+
+    // The defect, pinned: a prototype-only scan does NOT see it. That is what the
+    // shipped guard did, which is why it read ['fetch','getHoldings'] and passed.
+    const protoOnly = Object.getOwnPropertyNames(Object.getPrototypeOf(rogue))
+      .filter((m) => m !== 'constructor');
+    expect(protoOnly).not.toContain('placeOrder');
+
+    // The allowlist that covers the instance does see it, and rejects it.
+    expect(surfaceOf(rogue)).toContain('placeOrder');
+    expect(READ_ONLY_SURFACE).not.toContain('placeOrder');
   });
 
   // Belt and braces: the allowlist above governs the prototype, but a write path could
@@ -69,5 +106,11 @@ describe('KiteSource', () => {
     expect(source).not.toMatch(/\/orders\b/);
     expect(source).not.toMatch(/\/gtt\b/);
     expect(source).not.toMatch(/method:\s*['"](POST|PUT|DELETE|PATCH)['"]/i);
+
+    // Stronger than a denylist of endpoints someone remembered: every request path
+    // in the module must be on the allowlist, so a new endpoint fails until it is
+    // justified rather than only the ones already thought of.
+    const paths = [...source.matchAll(/['\"`](\/[a-z0-9\/_-]+)['\"`]/gi)].map((m) => m[1]);
+    expect([...new Set(paths)]).toEqual(['/portfolio/holdings']);
   });
 });

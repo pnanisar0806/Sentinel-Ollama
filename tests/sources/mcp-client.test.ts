@@ -11,8 +11,13 @@ const rpc = (result: unknown): typeof fetch =>
     );
   }) as unknown as typeof fetch;
 
-const client = (impl: typeof fetch) =>
-  new McpClient({ url: 'https://mcp.indmoney.com/mcp', getToken: async () => 'AT', fetchImpl: impl });
+// `allowedTools` is required: the client may name only these tools. See
+// tests/sources/mcp-allowlist.test.ts for why that is not optional.
+const client = (impl: typeof fetch, allowedTools: readonly string[] = ['networth_holdings']) =>
+  new McpClient({
+    url: 'https://mcp.indmoney.com/mcp', getToken: async () => 'AT',
+    fetchImpl: impl, allowedTools,
+  });
 
 describe('McpClient', () => {
   it('initializes once, then calls tools', async () => {
@@ -74,6 +79,8 @@ describe('McpClient', () => {
       }), { status: 200 });
     }) as unknown as typeof fetch;
 
-    await expect(client(failing).callTool('nope', {})).rejects.toThrow(/unknown tool/);
+    // 'nope' is allowlisted here on purpose: this test is about the SERVER rejecting a
+    // tool, which must still surface. The allowlist guard has its own test file.
+    await expect(client(failing, ['nope']).callTool('nope', {})).rejects.toThrow(/unknown tool/);
   });
 });

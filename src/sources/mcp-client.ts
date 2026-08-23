@@ -12,15 +12,38 @@ interface ToolResult {
   isError?: boolean;
 }
 
-/** Minimal MCP client over Streamable HTTP — enough for authenticated tools/call. */
+/**
+ * Minimal MCP client over Streamable HTTP — enough for authenticated tools/call.
+ *
+ * `allowedTools` is REQUIRED and enforced before any request leaves the process. This
+ * is the one component that can invoke a named remote tool, so without it a URL change
+ * is enough to reach `place_order` on a broker's MCP server. CLAUDE.md: trading paths
+ * are absent code paths, not disabled features — a client that *could* name an order
+ * tool is a trading path.
+ */
 export class McpClient {
   private nextId = 1;
   private sessionId: string | undefined;
   private initialized = false;
+  private readonly allowedTools: ReadonlySet<string>;
 
   constructor(
-    private readonly opts: { url: string; getToken: () => Promise<string>; fetchImpl?: typeof fetch },
-  ) {}
+    private readonly opts: {
+      url: string;
+      getToken: () => Promise<string>;
+      fetchImpl?: typeof fetch;
+      /** Exhaustive list of tools this client may invoke. Must be non-empty. */
+      allowedTools: readonly string[];
+    },
+  ) {
+    if (!opts.allowedTools?.length) {
+      throw new Error(
+        'McpClient requires a non-empty allowedTools: name every tool this client may ' +
+        'invoke. An empty list reads as "deny all" and gets widened rather than fixed.',
+      );
+    }
+    this.allowedTools = new Set(opts.allowedTools);
+  }
 
   private async rpc<T>(method: string, params: unknown, notify = false): Promise<T> {
     const impl = this.opts.fetchImpl ?? fetch;
@@ -63,6 +86,13 @@ export class McpClient {
   }
 
   async callTool<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    // Before ensureInitialized, so a refused tool never opens a session either.
+    if (!this.allowedTools.has(name)) {
+      throw new Error(
+        `MCP tool '${name}' is not on the allowlist for ${this.opts.url}. ` +
+        `Permitted: ${[...this.allowedTools].join(', ')}.`,
+      );
+    }
     await this.ensureInitialized();
     const result = await this.rpc<ToolResult>('tools/call', { name, arguments: args });
     if (result.isError) {
