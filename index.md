@@ -82,6 +82,14 @@ One deliberate exception: `tests/domain/surplus.test.ts` asserts ₹82,124 / ₹
 exactly. A stale literal there fails **loudly**, which is the point — the rule exists to
 stop literals that make a test *vacuous*, not ones that make it break when the seed moves.
 
+### Architecture test
+
+`tests/architecture/no-catch-up.test.ts` is the `funded_status` firewall and it is a REAL
+checker: it walks `src/**/*.ts` off disk, builds the import graph, and asserts the transitive
+reachers of `src/domain/funded-status.ts` are exactly `domain/buckets.ts`, `notify/digest.ts`
+and `jobs/digest.ts`. Adding a fourth reader of funded status is a deliberate act — put it on
+the allowlist there, or the suite goes red.
+
 ## Scripts
 
 `pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `ips` · `indmoney:login`
