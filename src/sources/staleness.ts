@@ -18,16 +18,30 @@ const LIMIT_BY_SOURCE: Record<string, number> = {
   screener: FRESHNESS_HOURS.fundamentals!,
 };
 
+/** Sentinel value for a source that has never produced a row. */
+const NEVER = '1970-01-01T00:00:00.000Z';
+
 /** Sources that are expected to have data in the current schema. */
 const KNOWN_PORTFOLIO_SOURCES = ['manual-seed', 'kite', 'indmoney', 'composite'] as const;
 const KNOWN_FX_SOURCES = ['frankfurter'] as const;
 const KNOWN_MARKET_SOURCES = ['amfi', 'bhavcopy', 'screener'] as const;
+
+/**
+ * `unimplemented` is deliberately NOT `stale`. amfi/bhavcopy/screener have no
+ * ingestion path in Phase 0, so calling them stale printed red warnings after a
+ * SUCCESSFUL sync and kept a BLOCK incident permanently open — which trains the owner
+ * to ignore the loudest safety signal in the product. An unbuilt feature and rotten
+ * data are different problems and must read differently.
+ */
+export type SourceState = 'fresh' | 'stale' | 'unimplemented';
 
 export interface StalenessRow {
   source: string;
   asOf: string;
   ageHours: number;
   limitHours: number;
+  state: SourceState;
+  /** Convenience mirror of `state === 'stale'`. Never true for an unimplemented source. */
   stale: boolean;
 }
 
@@ -78,52 +92,43 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
 
   const results: StalenessRow[] = [];
 
-  // Portfolio sources from holdings
-  for (const source of [...KNOWN_PORTFOLIO_SOURCES, ...holdingsMap.keys()]) {
-    const asOf = holdingsMap.get(source);
-    const limitHours = LIMIT_BY_SOURCE[source] ?? FRESHNESS_HOURS.portfolio!;
-    if (asOf) {
-      const ageHours = (nowMs - Date.parse(asOf)) / 3_600_000;
-      results.push({ source, asOf, ageHours, limitHours, stale: ageHours > limitHours });
-    } else {
-      // Source known but no data yet — treat as stale
-      results.push({
-        source,
-        asOf: '1970-01-01T00:00:00.000Z',
-        ageHours: Infinity,
-        limitHours,
-        stale: true,
-      });
+  const assess = (
+    source: string,
+    asOf: string | undefined,
+    defaultLimit: number,
+  ): StalenessRow => {
+    const limitHours = LIMIT_BY_SOURCE[source] ?? defaultLimit;
+    if (asOf === undefined) {
+      return {
+        source, asOf: NEVER, ageHours: Infinity, limitHours,
+        state: 'stale', stale: true,
+      };
     }
+    const ageHours = (nowMs - Date.parse(asOf)) / 3_600_000;
+    const stale = ageHours > limitHours;
+    return { source, asOf, ageHours, limitHours, state: stale ? 'stale' : 'fresh', stale };
+  };
+
+  // A source can be BOTH in the known list and present in the data. Iterating
+  // `[...KNOWN, ...map.keys()]` as a list emitted it twice; the tests used .find(),
+  // so the duplicates were invisible.
+  for (const source of new Set([...KNOWN_PORTFOLIO_SOURCES, ...holdingsMap.keys()])) {
+    results.push(assess(source, holdingsMap.get(source), FRESHNESS_HOURS.portfolio!));
   }
 
-  // FX sources from fx_rates
-  for (const source of [...KNOWN_FX_SOURCES, ...fxMap.keys()]) {
-    const asOf = fxMap.get(source);
-    const limitHours = LIMIT_BY_SOURCE[source] ?? FRESHNESS_HOURS.fx!;
-    if (asOf) {
-      const ageHours = (nowMs - Date.parse(asOf)) / 3_600_000;
-      results.push({ source, asOf, ageHours, limitHours, stale: ageHours > limitHours });
-    } else {
-      results.push({
-        source,
-        asOf: '1970-01-01T00:00:00.000Z',
-        ageHours: Infinity,
-        limitHours,
-        stale: true,
-      });
-    }
+  for (const source of new Set([...KNOWN_FX_SOURCES, ...fxMap.keys()])) {
+    results.push(assess(source, fxMap.get(source), FRESHNESS_HOURS.fx!));
   }
 
-  // Market data sources (no tables yet) — always reported, stale if no data
+  // No table, no ingestion path: report the gap honestly rather than as rotten data.
   for (const source of KNOWN_MARKET_SOURCES) {
-    const limitHours = LIMIT_BY_SOURCE[source]!;
     results.push({
       source,
-      asOf: '1970-01-01T00:00:00.000Z',
+      asOf: NEVER,
       ageHours: Infinity,
-      limitHours,
-      stale: true,
+      limitHours: LIMIT_BY_SOURCE[source]!,
+      state: 'unimplemented',
+      stale: false,
     });
   }
 
@@ -171,12 +176,33 @@ export async function raiseIncidents(db: Db, rows: StalenessRow[]): Promise<numb
   return opened;
 }
 
-/** FR-31: instruments whose data is stale may not feed recommendation generation. */
+/**
+ * FR-31: an instrument may not feed recommendation generation while any input needed
+ * to value it is stale.
+ *
+ * This used to intersect stale sources with `positions.map(p => p.source)` — which is
+ * always a PORTFOLIO source — so stale FX, NAVs or prices could never block anything.
+ * The half of FR-31 that actually gates recommendations was blind, and the suite
+ * encoded the false negative as expected behaviour.
+ *
+ * Two inputs are checked today:
+ *   - the portfolio source that supplied the position
+ *   - FX, for any position not denominated in INR (without a rate it has no rupee value)
+ *
+ * NAV and price sources are `unimplemented` in Phase 0, so they do not block. When an
+ * ingestion path exists they become `stale`-capable and belong here too.
+ */
 export function blockedInstruments(rows: StalenessRow[], positions: Position[]): string[] {
   const staleSources = new Set(rows.filter((r) => r.stale).map((r) => r.source));
+  const fxStale = rows.some((r) => r.stale && FX_SOURCE_NAMES.has(r.source));
+
   return [
     ...new Set(
-      positions.filter((p) => staleSources.has(p.source)).map((p) => p.instrumentId),
+      positions
+        .filter((p) => staleSources.has(p.source) || (fxStale && p.currency !== 'INR'))
+        .map((p) => p.instrumentId),
     ),
   ].sort();
 }
+
+const FX_SOURCE_NAMES = new Set<string>(KNOWN_FX_SOURCES);

@@ -61,13 +61,17 @@ describe('staleness engine', () => {
 
   it('opens exactly one incident per stale source and does not duplicate on re-run', async () => {
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
-    // All 8 sources are stale: manual-seed, kite, indmoney, composite, frankfurter, amfi, bhavcopy, screener
-    expect(await raiseIncidents(db, rows)).toBe(8);
+    // Derived, not restated: amfi/bhavcopy/screener are `unimplemented`, not stale, so
+    // they raise nothing. Hard-coding 8 here is how this went stale when that changed.
+    const expected = rows.filter((r) => r.stale).length;
+    expect(expected).toBe(5); // manual-seed, kite, indmoney, composite, frankfurter
+
+    expect(await raiseIncidents(db, rows)).toBe(expected);
     expect(await raiseIncidents(db, rows)).toBe(0);
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
     );
-    expect(Number(open[0]!.n)).toBe(8);
+    expect(Number(open[0]!.n)).toBe(expected);
   });
 
   it('opens incidents for multiple stale sources (portfolio + FX)', async () => {
@@ -75,25 +79,33 @@ describe('staleness engine', () => {
       `insert into fx_rates (pair, as_of, rate_micros, source) values ('USD/INR', '2026-08-10', 95300000, 'frankfurter')`,
     );
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
-    // Portfolio sources (4) + frankfurter (1, stale) + market sources (3) = 8 stale
-    const opened = await raiseIncidents(db, rows);
-    expect(opened).toBe(8);
+    // Portfolio sources (4) + frankfurter (stale at 5 days) = 5. Market sources are
+    // unimplemented and raise nothing.
+    const expected = rows.filter((r) => r.stale).length;
+    expect(expected).toBe(5);
+
+    expect(await raiseIncidents(db, rows)).toBe(expected);
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
     );
-    expect(Number(open[0]!.n)).toBe(8);
+    expect(Number(open[0]!.n)).toBe(expected);
   });
 
   it('resolves the incident once the source is fresh again', async () => {
     await raiseIncidents(db, await assessStaleness(db, '2026-08-15T18:00:00+05:30'));
-    await raiseIncidents(db, await assessStaleness(db, '2026-08-12T18:00:00+05:30'));
-    // Only manual-seed has data and becomes fresh. kite, indmoney, composite have no data (stale).
-    // frankfurter has no data (stale). Market sources (3) have no data (stale).
-    // Total stale: kite, indmoney, composite, frankfurter, amfi, bhavcopy, screener = 7
+
+    const fresher = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
+    await raiseIncidents(db, fresher);
+
+    // manual-seed recovers; kite/indmoney/composite/frankfurter still have no data at all.
+    const expected = fresher.filter((r) => r.stale).length;
+    expect(expected).toBe(4);
+    expect(fresher.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
+
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
     );
-    expect(Number(open[0]!.n)).toBe(7);
+    expect(Number(open[0]!.n)).toBe(expected);
   });
 
   it('resolves FX incident when FX becomes fresh', async () => {
@@ -105,14 +117,19 @@ describe('staleness engine', () => {
     await db.query(
       `insert into fx_rates (pair, as_of, rate_micros, source) values ('USD/INR', '2026-08-15', 95300000, 'frankfurter')`,
     );
-    await raiseIncidents(db, await assessStaleness(db, '2026-08-15T18:00:00+05:30'));
-    // At 2026-08-15T18:00:00+05:30: manual-seed is 90h old (stale > 36h), frankfurter is fresh (12.5h < 48h).
-    // kite, indmoney, composite have no data (stale). Market sources (3) have no data (stale).
-    // Total stale: manual-seed, kite, indmoney, composite, amfi, bhavcopy, screener = 7
+    const after = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
+    await raiseIncidents(db, after);
+
+    // frankfurter recovers (12.5h < 48h); manual-seed is 90h old and stays stale, as do
+    // the three portfolio sources that have never produced a row.
+    expect(after.find((r) => r.source === 'frankfurter')!.stale).toBe(false);
+    const expected = after.filter((r) => r.stale).length;
+    expect(expected).toBe(4);
+
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
     );
-    expect(Number(open[0]!.n)).toBe(7);
+    expect(Number(open[0]!.n)).toBe(expected);
   });
 
   it('names every instrument whose recommendations must be blocked (FR-31)', async () => {
@@ -122,23 +139,34 @@ describe('staleness engine', () => {
     expect(blocked.length).toBeGreaterThan(5);
   });
 
-  it('blocks nothing when every source is fresh', async () => {
+  // This test used to assert `toEqual([])` at an instant when FX was 100% ABSENT, and
+  // it passed - which is exactly the false negative the review named. blockedInstruments
+  // could only ever see portfolio sources, so a missing exchange rate blocked nothing
+  // and USD holdings were reported as if they had a rupee value.
+  it('blocks USD holdings while FX is missing, even with a fresh portfolio', async () => {
     const rows = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
-    expect(blockedInstruments(rows, await loadPositions(db))).toEqual([]);
+    expect(rows.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
+    expect(rows.find((r) => r.source === 'frankfurter')!.stale).toBe(true);
+
+    const positions = await loadPositions(db);
+    const blocked = blockedInstruments(rows, positions);
+
+    // Derived from the positions themselves, so a currency mapping change moves it.
+    const usd = [...new Set(positions.filter((p) => p.currency !== 'INR').map((p) => p.instrumentId))].sort();
+    expect(usd.length).toBeGreaterThan(0);
+    expect(blocked).toEqual(usd);
   });
 
-  it('reports sources with no data as stale (amfi, bhavcopy, screener)', async () => {
+  // amfi/bhavcopy/screener have no ingestion path in Phase 0. Reporting them as STALE
+  // printed red warnings after a SUCCESSFUL sync and held a BLOCK incident open forever.
+  // An unbuilt feature and rotten data are different problems.
+  it('reports sources with no ingestion path as unimplemented, not stale', async () => {
     const rows = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
-    const amfi = rows.find((r) => r.source === 'amfi');
-    const bhavcopy = rows.find((r) => r.source === 'bhavcopy');
-    const screener = rows.find((r) => r.source === 'screener');
-    // These sources have no data, so they should be reported as stale (or at least present)
-    expect(amfi).toBeDefined();
-    expect(bhavcopy).toBeDefined();
-    expect(screener).toBeDefined();
-    // With no data, ageHours should be very large (Infinity or a large number), so stale = true
-    expect(amfi!.stale).toBe(true);
-    expect(bhavcopy!.stale).toBe(true);
-    expect(screener!.stale).toBe(true);
+    for (const source of ['amfi', 'bhavcopy', 'screener']) {
+      const row = rows.find((r) => r.source === source);
+      expect(row, `${source} must still be reported`).toBeDefined();
+      expect(row!.state).toBe('unimplemented');
+      expect(row!.stale).toBe(false);
+    }
   });
 });

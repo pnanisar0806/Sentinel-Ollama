@@ -22,6 +22,8 @@ export interface Position {
   issuer: string | null;
   /** PRD 3.5 single-sector cap. NULL where the instrument carries no sector. */
   sector: string | null;
+  /** FR-31: a non-INR position cannot be valued in rupees while FX is stale. */
+  currency: string;
   isEmployer: boolean;
   asOf: string;
   source: string;
@@ -58,6 +60,7 @@ interface HoldingRow {
   /** PGlite hands bigint columns back as JS numbers, not strings (MEMORY.md). */
   value_paise: string | number | bigint;
   avg_cost_paise: string | number | bigint | null;
+  currency: string;
   issuer: string | null;
   sector: string | null;
   is_employer: boolean;
@@ -82,7 +85,7 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
        order by s.source, s.business_date desc, s.taken_at desc
      )
      select h.instrument_id, i.kind, i.name, h.account, h.value_paise, h.avg_cost_paise,
-            i.issuer, i.sector, i.is_employer, h.as_of, h.source
+            i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source
      from holdings h
      join latest l on l.id = h.snapshot_id
      join instruments i on i.id = h.instrument_id`,
@@ -96,6 +99,7 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
     valuePaise: toPaise(r.value_paise),
     avgCostPaise: r.avg_cost_paise === null ? null : toPaise(r.avg_cost_paise),
     assetClass: classify(r.kind, r.instrument_id, r.name),
+    currency: r.currency,
     issuer: r.issuer,
     sector: r.sector,
     isEmployer: r.is_employer,
