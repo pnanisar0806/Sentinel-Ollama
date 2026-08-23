@@ -10,7 +10,12 @@ import type { RsuGrantSeed } from '../seed/seed-data.js';
 export interface BucketStatus {
   id: BucketId;
   name: string;
-  balancePaise: Paise;
+  /**
+   * NULL = no bucket_flows exist, so the bucket has not been allocated yet. That is
+   * NOT a zero balance. CLAUDE.md: unknown is NULL, never 0, and an unknown is never
+   * rendered as Rs 0 — "FI corpus: Rs 0 - 0.0%" against Rs 47.69L of assets is a lie.
+   */
+  balancePaise: Paise | null;
   targetPaise: Paise | null;
   targetNote: string;
   fundedRatio: number | null;
@@ -188,10 +193,11 @@ export async function bucketStatuses(db: Db): Promise<BucketStatus[]> {
   return Object.values(BUCKETS)
     .filter((b) => b.active)
     .map((bucket) => {
-      const balance = balanceMap.get(bucket.id) ?? (0n as Paise);
-      const { met: _met, targetPaise } = bucketStatus(bucket, balance);
+      const balance = balanceMap.get(bucket.id) ?? null;
+      const { met: _met, targetPaise } = bucketStatus(bucket, balance ?? (0n as Paise));
       let fundedRatio: number | null = null;
-      if (targetPaise !== null && targetPaise > 0n) {
+      // No balance means no ratio. Reporting 0.0% funded is a claim we cannot make.
+      if (balance !== null && targetPaise !== null && targetPaise > 0n) {
         fundedRatio = Number(balance) / Number(targetPaise);
       }
       return {

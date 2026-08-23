@@ -27,6 +27,35 @@ export interface DigestInput {
   funded: { floorRatio: number; stretchRatio: number };
 }
 
+/**
+ * Net worth on the most recent business date STRICTLY before this one.
+ *
+ * This was hard-coded `null` with a comment saying day-change "lights up on day two" —
+ * so "day-over-day starts tomorrow" printed every day forever and tomorrow never came.
+ * Returns null only when there genuinely is no earlier snapshot.
+ *
+ * Liabilities are held at today's figure deliberately: the comparison is of the asset
+ * side moving, and re-deriving a past month's loan schedule would report a change that
+ * is really just amortisation.
+ */
+async function previousNet(
+  db: Db,
+  businessDate: string,
+  liabilitiesPaise: Paise,
+): Promise<Paise | null> {
+  const [row] = await db.query<{ business_date: string | Date }>(
+    `select max(business_date) as business_date from snapshots where business_date < $1`,
+    [businessDate],
+  );
+  const raw = row?.business_date;
+  if (!raw) return null;
+  const previousDate = raw instanceof Date ? raw.toISOString().slice(0, 10) : String(raw).slice(0, 10);
+
+  const positions = await loadPositions(db, previousDate);
+  if (positions.length === 0) return null;
+  return netWorth(positions, liabilitiesPaise).netPaise;
+}
+
 export async function buildDigestInput(db: Db, now: string): Promise<DigestInput> {
   const businessDate = now.slice(0, 10);
   const positions = await loadPositions(db);
@@ -56,7 +85,7 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     assetsPaise: nw.assetsPaise,
     liabilitiesPaise: nw.liabilitiesPaise,
     netPaise: nw.netPaise,
-    previousNetPaise: null, // Phase 0 seeds a single snapshot; day-change lights up on day two.
+    previousNetPaise: await previousNet(db, businessDate, nw.liabilitiesPaise),
     byAccount: [...nw.byAccount.entries()],
     drift: allocationDrift(nw.byAssetClass, nw.assetsPaise),
     breaches: concentration(positions).breaches,
@@ -112,8 +141,14 @@ export function composeDigest(d: DigestInput): string {
 
   lines.push('*Buckets*');
   for (const b of d.buckets) {
-    const funded = b.fundedRatio === null ? b.targetNote : `${pct(b.fundedRatio)} of ${formatInr(b.targetPaise!, { compact: true })}`;
-    lines.push(`• ${escapeMarkdown(b.name)}: ${formatInr(b.balancePaise, { compact: true })} — ${escapeMarkdown(funded)}`);
+    const funded = b.fundedRatio === null
+      ? b.targetNote
+      : `${pct(b.fundedRatio)} of ${formatInr(b.targetPaise!, { compact: true })}`;
+    // An unallocated bucket says so. It never reports Rs 0.
+    const balance = b.balancePaise === null
+      ? 'not yet allocated'
+      : formatInr(b.balancePaise, { compact: true });
+    lines.push(`• ${escapeMarkdown(b.name)}: ${balance} — ${escapeMarkdown(funded)}`);
   }
   lines.push('');
 

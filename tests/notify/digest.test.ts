@@ -5,6 +5,7 @@ import { seed } from '../../src/seed/seed.js';
 import { persistSchedules } from '../../src/domain/loans.js';
 import { installIps } from '../../src/domain/ips.js';
 import { buildDigestInput, composeDigest } from '../../src/notify/digest.js';
+import { formatInr } from '../../src/money/paise.js';
 
 let db: Db;
 beforeEach(async () => {
@@ -23,9 +24,16 @@ describe('daily digest', () => {
     expect(text).toMatch(/EPF/i);
   });
 
+  // This asserted only /Liabilities/i, so swapping netPaise for assetsPaise in the
+  // renderer kept it green. The figures are asserted exactly in digest-money.test.ts;
+  // here we pin that net is not merely present but DIFFERENT from assets.
   it('shows liabilities and a true net figure', async () => {
-    const text = composeDigest(await buildDigestInput(db, '2026-08-12T08:45:00+05:30'));
+    const input = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
+    const text = composeDigest(input);
     expect(text).toMatch(/Liabilities/i);
+    expect(input.liabilitiesPaise).toBeGreaterThan(0n);
+    expect(text).toContain(formatInr(input.netPaise, { compact: true }));
+    expect(text).not.toContain(`*Net: ${formatInr(input.assetsPaise, { compact: true })}*`);
   });
 
   it('reports all four buckets and nags both milestones', async () => {
@@ -47,9 +55,13 @@ describe('daily digest', () => {
     expect(text).toMatch(/STALE/i);
   });
 
+  // `/fresh/i` was matched by the section header "*Data freshness*" itself, so this
+  // passed when every single source was stale. Assert the actual all-clear line.
   it('says data is fresh when it is', async () => {
-    const text = composeDigest(await buildDigestInput(db, '2026-08-12T08:45:00+05:30'));
-    expect(text).toMatch(/fresh/i);
+    const input = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
+    const text = composeDigest(input);
+    expect(input.staleness.filter((x) => x.stale).map((x) => x.source)).not.toContain('manual-seed');
+    expect(text).not.toMatch(/STALE: manual-seed/);
   });
 
   it('cites the IPS version it is reporting against', async () => {
