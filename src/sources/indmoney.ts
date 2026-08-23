@@ -86,6 +86,27 @@ const KIND_BY_ASSET_TYPE: Record<string, InstrumentSeed['kind']> = {
 
 const CURRENCY_BY_ASSET_TYPE: Record<string, 'INR' | 'USD'> = { US_STOCK: 'USD' };
 
+/**
+ * The payload stamps EVERY Indian ETF with asset_type 'STOCK', so the 'ETF' entry above
+ * is unreachable from a real capture and there is no 'GOLD' asset_type at all. Left
+ * alone, gold and liquid ETFs land as EQUITY — which erases the one allocation
+ * recommendation this portfolio actually has (GOLD 1.32% against a 5% floor) and
+ * overstates equity against its IPS band.
+ *
+ * Name-based, because the payload gives us nothing else to go on. Narrow on purpose:
+ * only a row the provider already called a share is reconsidered.
+ */
+const GOLD_HINT = /\bgold\b/i;
+const ETF_HINT = /\bETFs?\b|BeES\b/i;
+
+function kindFor(assetType: string, name: string): InstrumentSeed['kind'] | undefined {
+  const base = KIND_BY_ASSET_TYPE[assetType];
+  if (base !== 'EQUITY') return base;
+  if (GOLD_HINT.test(name)) return 'GOLD';
+  if (ETF_HINT.test(name)) return 'ETF';
+  return base;
+}
+
 const ISIN = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/;
 
 /** Money values arrive as INR for every asset class, US holdings included. */
@@ -170,7 +191,7 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
 
   for (const h of holdings) {
     const assetType = h.asset_type ?? '';
-    const kind = KIND_BY_ASSET_TYPE[assetType];
+    const kind = kindFor(assetType, h.investment ?? '');
     if (!kind) {
       throw new Error(
         `unmapped INDmoney asset_type '${assetType}' on '${h.investment ?? '(unnamed)'}' — ` +
