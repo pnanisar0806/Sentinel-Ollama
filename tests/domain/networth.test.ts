@@ -159,10 +159,21 @@ describe('loadPositions snapshot selection', () => {
     expect(new Set(positions.map((p) => p.source))).toEqual(new Set(['manual-seed', 'kite']));
   });
 
-  it('breaks a same-day tie on taken_at', async () => {
-    await addSnapshot('manual-seed', SEED_DATE, '2999-01-01T00:00:00Z', 'NSE:NIFTYBEES', 333_33n);
+  /**
+   * This used to assert that a SECOND same-day snapshot for the same source won on
+   * `taken_at`. Migration 0003 makes that state impossible: `snapshots` now carries
+   * `unique (business_date, source)`, because the select-then-insert in writeSnapshot
+   * was check-then-act and two racing syncs could double-count the portfolio.
+   * The stronger property is that the ambiguity cannot arise at all. The `order by
+   * taken_at desc` in loadPositions stays as defence in depth.
+   */
+  it('cannot have a same-day tie to break: the schema refuses the duplicate', async () => {
+    await expect(
+      addSnapshot('manual-seed', SEED_DATE, '2999-01-01T00:00:00Z', 'NSE:NIFTYBEES', 333_33n),
+    ).rejects.toThrow();
+
     const positions = await loadPositions(db);
-    expect(positions.map((p) => p.valuePaise)).toEqual([333_33n]);
+    expect(positions.map((p) => p.valuePaise)).not.toContain(333_33n);
   });
 
   it('honours the businessDate cutoff', async () => {

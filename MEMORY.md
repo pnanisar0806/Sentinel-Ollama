@@ -158,6 +158,14 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
   on different connections. Transactions must go through `sql.begin()`.
 - **Postgres does not fire DELETE triggers on TRUNCATE.** Append-only needs its own
   `before truncate ... for each statement` trigger or the audit trail can be wiped.
+- **`snapshots` refuses UPDATE and DELETE** (append-only trigger), so an upsert on it must
+  be `on conflict ... do nothing` + select, never `do update ... returning`. Since `0003` it
+  also carries `unique (business_date, source)` — writeSnapshot's select-then-insert was
+  check-then-act, and two racing syncs would each insert and double-count the portfolio.
+- **A curated instrument row beats the payload.** `writeSnapshot`'s `on conflict (id)` used
+  to `set name = excluded.name`, which overwrote the owner-verified "Sammaan Capital Limited"
+  with the API's stale pre-rebrand "Indiabulls Housing Finance Ltd". It now enriches only
+  columns the curated row left NULL (`isin`, `sector`, `issuer`) and never touches `name`.
 - **`import.meta.url === "file://" + process.argv[1]` NEVER matches on Windows.** argv[1] is
   a drive path (`D:.ts`), the URL is `file:///D:/a/b.ts`. Every CLI entrypoint guarded
   that way was a silent no-op that exited 0 — `pnpm migrate` reported success against an
