@@ -20,7 +20,7 @@ Phase 0 is **not a website you host**. It is a headless agent made of four piece
 | Pull request | ✅ [#1](https://github.com/pnanisar0806/Sentinel-Ollama/pull/1): `phase-0` → `main` |
 | Merge PR | ✅ Merged 2026-08-24 — `main` is live, schedules active |
 | Telegram bot | ✅ Created, delivery verified 2026-08-24 |
-| Supabase project | ⬜ Not created |
+| Supabase project | ✅ Created 2026-08-24 — `sentinel` (ref `uqzbocoujennfhdqppdl`, Mumbai), migrated + seeded, RLS verified on all 18 tables |
 | INDmoney OAuth against production DB | ⬜ Token currently lives only in local `.pglite` |
 | GitHub Actions secrets | ⬜ Not added |
 
