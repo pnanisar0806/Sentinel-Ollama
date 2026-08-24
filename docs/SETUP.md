@@ -18,8 +18,8 @@ Phase 0 is **not a website you host**. It is a headless agent made of four piece
 | Code (17 tasks + whole-branch review fix wave) | ✅ Done — 387/387 tests green, tsc clean |
 | GitHub repo | ✅ Private: [pnanisar0806/Sentinel-Ollama](https://github.com/pnanisar0806/Sentinel-Ollama) |
 | Pull request | ✅ [#1](https://github.com/pnanisar0806/Sentinel-Ollama/pull/1): `phase-0` → `main` |
-| Merge PR | ⬜ You decide, after CI is green |
-| Telegram bot | ⬜ **Deferred** (owner limitation) — see "No Telegram yet?" below; everything except digest delivery works without it |
+| Merge PR | ✅ Merged 2026-08-24 — `main` is live, schedules active |
+| Telegram bot | ✅ Created, delivery verified 2026-08-24 |
 | Supabase project | ⬜ Not created |
 | INDmoney OAuth against production DB | ⬜ Token currently lives only in local `.pglite` |
 | GitHub Actions secrets | ⬜ Not added |
@@ -29,12 +29,12 @@ Your local `.env` (gitignored) already holds `DATABASE_URL=pglite://.pglite` and
 
 > **Gotcha that bites everyone:** nothing auto-loads `.env` — there is no dotenv
 > dependency. Only `pnpm indmoney:login` uses `tsx --env-file=.env`. Every other script
-> sees only variables exported in your shell. This is why `pnpm digest` throws
-> `Missing required environment variable: TELEGRAM_BOT_TOKEN` until Step 3 is done.
+> sees only variables exported in your shell. This is why `pnpm digest` used to throw
+> `Missing required environment variable: TELEGRAM_BOT_TOKEN` before the bot was set up.
 
 ---
 
-## Step 1 — Sanity-check locally (5 min)
+## Step 1 — Sanity-check locally (5 min) — ✅ DONE
 
 ```powershell
 $env:DATABASE_URL = "pglite://.pglite"
@@ -45,34 +45,20 @@ pnpm migrate; pnpm seed; pnpm digest
 Expected: the full daily digest prints to your terminal and sends nothing (`DRY_RUN=1`
 never calls Telegram, so placeholder creds are fine).
 
-## Step 2 — Merge PR #1
+## Step 2 — Merge PR #1 — ✅ DONE (merged 2026-08-24)
 
-CI runs on every push, so watch the checks on the PR first.
+CI ran green and the PR is merged: `main` now carries the full Phase 0 implementation,
+and the three scheduled workflows are **live** (they fire on cron from `main`).
 
-```powershell
-gh pr checks 1          # confirm green
-gh pr merge 1 --merge   # or merge in the browser after reviewing
-```
+> Heads-up: until Steps 4–6 supply the secrets, the scheduled `sync` / `digest` /
+> `keepalive` runs will fail with red ✗ in the Actions tab. That is expected — they
+> go green once the secrets exist.
 
-**Why this matters:** GitHub only executes *scheduled* (cron) workflows from the default
-branch. Until `phase-0` lands in `main`, the three schedules stay inert even if you add
-secrets today.
+## Step 3 — Create the Telegram bot (~10 min) — ✅ DONE
 
-## No Telegram yet?
-
-Telegram can be deferred — most of Sentinel works without it:
-
-- **Works today:** Supabase setup (Step 4), INDmoney login (Step 5), `sync` +
-  `keepalive` workflows and their secrets, local digests via
-  `DRY_RUN=1 pnpm digest` (prints to stdout).
-- **Blocked until the bot exists:** real digest *delivery* (the digest job refuses to
-  start without the Telegram pair) and the interactive `pnpm telegram:bot`. Just don't
-  enable/trigger the `digest` workflow until then — its runs would fail on missing
-  secrets.
-- Everything else in this guide is unchanged; when you can create the bot, do Step 3,
-  add the two secrets, and enable `digest`.
-
-## Step 3 — Create the Telegram bot (~10 min, DEFERRED)
+Bot created; digest delivery verified end-to-end on 2026-08-24. Values are in your local
+shell history / GitHub secrets to be. (Chat ID lives in the getUpdates reply; never
+commit it or the token.)
 
 1. Message **@BotFather** in Telegram → `/newbot` → follow prompts → copy the token.
    That token is `TELEGRAM_BOT_TOKEN`.
