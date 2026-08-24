@@ -122,7 +122,7 @@ export async function runSync(
  * the last file snapshot (which the staleness engine then ages) rather than abort the
  * whole sync, but it says so on stderr rather than switching silently.
  */
-async function indmoneySource(
+export async function indmoneySource(
   db: Db,
   env: { indmoneySnapshotPath: string; tokenEncryptionKey: string | undefined },
 ): Promise<Source> {

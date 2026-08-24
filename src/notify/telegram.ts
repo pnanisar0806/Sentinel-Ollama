@@ -12,10 +12,10 @@ export const escapeMarkdown = (text: string): string =>
   text.replace(/([_*`[])/g, '\\$1');
 
 export class Telegram {
-  private readonly botToken: string;
-  private readonly ownerChatId: string;
-  private readonly dryRun: boolean;
-  private readonly fetchImpl: typeof fetch;
+  public readonly botToken: string;
+  public readonly ownerChatId: string;
+  public readonly dryRun: boolean;
+  public readonly fetchImpl: typeof fetch;
 
   constructor(opts: {
     botToken: string; ownerChatId: string; dryRun?: boolean; fetchImpl?: typeof fetch;
