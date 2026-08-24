@@ -47,6 +47,7 @@ export class FileIndmoneySource implements Source {
       instrument: {
         id: h.instrumentId, kind: h.kind, name: h.name,
         currency: h.currency, ...(h.issuer ? { issuer: h.issuer } : {}),
+        canonicalId: INDMONEY_TO_CANONICAL[h.instrumentId] ?? undefined,
       },
     }));
     return { rows, asOf: parsed.asOf };
@@ -116,6 +117,32 @@ function instrumentIdFor(h: RemoteHolding): string {
   if (code) return `IND:${code}`;
   return `IND:${(h.investment ?? 'UNNAMED').replace(/\s+/g, '-').toUpperCase()}`;
 }
+
+/** Map INDmoney's internal codes to our canonical IDs (C-A reconciliation).
+ *  From the owner's reconciliation table in MEMORY.md. */
+const INDMONEY_TO_CANONICAL: Record<string, string> = {
+  // MFs
+  '5536': 'MF:5536',      // ICICI Nifty 50 Index
+  '3229': 'MF:3229',      // Parag Parikh Flexi Cap
+  '2995': 'MF:2995',      // ICICI Large Cap
+  '3097': 'MF:3097',      // HDFC Mid Cap
+  '3113': 'MF:3113',      // Motilal Midcap
+  '1005544': 'MF:1005544', // Bandhan Small Cap
+  // Stocks/ETFs
+  'INDS19182': 'NSE:INDS19182',  // NIFTYBEES
+  'INDS29570': 'NSE:INDS29570',  // GOLDBEES
+  'INDS28892': 'NSE:INDS28892',  // LIQUIDBEES
+  'INDS01338': 'NSE:INDS01338',  // RPOWER
+  // Bonds (by ISIN)
+  'INE148I07GL3': 'ISIN:INE148I07GL3',  // Sammaan 2026
+  'INE148I07TX1': 'ISIN:INE148I07TX1',  // Sammaan 2029
+  'INE532F07EK1': 'ISIN:INE532F07EK1',  // Edelweiss 2033
+  // EPF / Savings - owner-specific
+  'SERVICE_NOW_EPF': 'EPF:SERVICE_NOW',
+  'SAVINGS_HDFC_FEDERAL': 'CASH:SAVINGS_HDFC_FEDERAL',
+  // US stocks
+  '118186': 'US:INDMONEY-BASKET',  // US fractional basket code
+};
 
 export class RemoteIndmoneySource implements Source {
   readonly name = 'indmoney';
@@ -229,6 +256,7 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
         instrument: {
           id, kind, name: h.investment ?? id,
           currency: CURRENCY_BY_ASSET_TYPE[assetType] ?? 'INR',
+          canonicalId: INDMONEY_TO_CANONICAL[id] ?? (kind === 'BOND' && ISIN.test(id.replace('ISIN:', '')) ? id : undefined),
         },
       });
       continue;

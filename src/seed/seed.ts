@@ -20,13 +20,13 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
 
   for (const i of SEED_INSTRUMENTS) {
     await db.query(
-      `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer)
-       values ($1,$2,$3,$4,$5,$6,$7,$8)
+      `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer, canonical_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
        on conflict (id) do update set name = excluded.name, isin = excluded.isin,
          sector = excluded.sector, issuer = excluded.issuer,
-         is_employer = excluded.is_employer`,
+         is_employer = excluded.is_employer, canonical_id = excluded.canonical_id`,
       [i.id, i.kind, i.name, i.currency, i.isin ?? null, i.sector ?? null, i.issuer ?? null,
-       i.isEmployer ?? false],
+       i.isEmployer ?? false, i.canonicalId ?? null],
     );
   }
 

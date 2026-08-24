@@ -42,15 +42,17 @@ export async function writeSnapshot(
       // curated row left NULL are enriched from the source — `isin` above all,
       // which was omitted from the column list entirely, leaving every synced
       // instrument unmappable by the PRD 3.5 single-issuer cap.
+      // canonical_id: seeded value wins (owner-curated); live source never overwrites.
       await tx.query(
-        `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer)
-         values ($1,$2,$3,$4,$5,$6,$7,$8)
+        `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer, canonical_id)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          on conflict (id) do update set
-           isin   = coalesce(instruments.isin,   excluded.isin),
-           sector = coalesce(instruments.sector, excluded.sector),
-           issuer = coalesce(instruments.issuer, excluded.issuer)`,
+           isin         = coalesce(instruments.isin,   excluded.isin),
+           sector       = coalesce(instruments.sector, excluded.sector),
+           issuer       = coalesce(instruments.issuer, excluded.issuer),
+           canonical_id = coalesce(instruments.canonical_id, excluded.canonical_id)`,
         [i.id, i.kind, i.name, i.currency, i.isin ?? null,
-         i.sector ?? null, i.issuer ?? null, i.isEmployer ?? false],
+         i.sector ?? null, i.issuer ?? null, i.isEmployer ?? false, i.canonicalId ?? null],
       );
     }
 

@@ -7,10 +7,15 @@ export interface InstrumentSeed {
   kind: 'EQUITY' | 'ETF' | 'MF' | 'BOND' | 'CASH' | 'EPF' | 'RSU' | 'GOLD';
   name: string;
   currency: 'INR' | 'USD';
-  isin?: string;
-  sector?: string;
-  issuer?: string;
-  isEmployer?: boolean;
+  isin?: string | undefined;
+  sector?: string | undefined;
+  issuer?: string | undefined;
+  isEmployer?: boolean | undefined;
+  /** Canonical instrument ID for cross-source reconciliation (C-A).
+   *  Live source wins per (canonical_id, account); seed fills gaps;
+   *  fallback to seed when live stops reporting.
+   *  Bonds: ISIN. MFs/ETFs/Stocks: stable code the owner defines. */
+  canonicalId?: string | undefined;
 }
 
 export interface HoldingSeed {
@@ -43,24 +48,24 @@ export interface RsuGrantSeed {
 }
 
 export const SEED_INSTRUMENTS: InstrumentSeed[] = [
-  { id: 'EPF:ANIRBAN', kind: 'EPF', name: 'Employees Provident Fund', currency: 'INR' },
-  { id: 'MF:ICICI-NIFTY50-IDX', kind: 'MF', name: 'ICICI Pru Nifty 50 Index Direct', currency: 'INR' },
-  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR' },
-  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR' },
-  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR' },
-  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR' },
-  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR' },
-  { id: 'NSE:NIFTYBEES', kind: 'ETF', name: 'Nippon Nifty BeES', currency: 'INR' },
-  { id: 'NSE:GOLDBEES', kind: 'GOLD', name: 'Gold ETF', currency: 'INR' },
-  { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR' },
-  { id: 'NSE:SMALLCASE-RESIDUE', kind: 'EQUITY', name: 'Smallcase residue (unallocated; cleanup queue)', currency: 'INR' },
-  { id: 'NSE:RPOWER', kind: 'EQUITY', name: 'Reliance Power (Groww - manual closure)', currency: 'INR', sector: 'Power' },
-  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07GL3' },
-  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% 23-Jul-2029', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07TX1' },
-  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% 26-Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial', isin: 'INE532F07EK1' },
-  { id: 'CASH:SAVINGS', kind: 'CASH', name: 'Savings account', currency: 'INR' },
-  { id: 'US:INDMONEY-BASKET', kind: 'EQUITY', name: 'US fractional basket (AAPL/GOOGL/AMZN/MSFT/TSLA/VOO)', currency: 'USD' },
-  { id: 'US:NOW', kind: 'RSU', name: 'ServiceNow (NOW) - vested, Fidelity', currency: 'USD', sector: 'Technology', issuer: 'ServiceNow', isEmployer: true },
+  { id: 'EPF:ANIRBAN', kind: 'EPF', name: 'Employees Provident Fund', currency: 'INR', canonicalId: 'EPF:SERVICE_NOW' },
+  { id: 'MF:ICICI-NIFTY50-IDX', kind: 'MF', name: 'ICICI Pru Nifty 50 Index Direct', currency: 'INR', canonicalId: 'MF:5536' },
+  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR', canonicalId: 'MF:3229' },
+  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR', canonicalId: 'MF:2995' },
+  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR', canonicalId: 'MF:3097' },
+  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR', canonicalId: 'MF:3113' },
+  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR', canonicalId: 'MF:1005544' },
+  { id: 'NSE:NIFTYBEES', kind: 'ETF', name: 'Nippon Nifty BeES', currency: 'INR', canonicalId: 'NSE:INDS19182' },
+  { id: 'NSE:GOLDBEES', kind: 'GOLD', name: 'Gold ETF', currency: 'INR', canonicalId: 'NSE:INDS29570' },
+  { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR', canonicalId: 'NSE:INDS28892' },
+  { id: 'NSE:SMALLCASE-RESIDUE', kind: 'EQUITY', name: 'Smallcase residue (unallocated; cleanup queue)', currency: 'INR', canonicalId: 'NSE:SMALLCASE-RESIDUE' },
+  { id: 'NSE:RPOWER', kind: 'EQUITY', name: 'Reliance Power (Groww - manual closure)', currency: 'INR', sector: 'Power', canonicalId: 'NSE:INDS01338' },
+  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07GL3', canonicalId: 'ISIN:INE148I07GL3' },
+  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% 23-Jul-2029', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07TX1', canonicalId: 'ISIN:INE148I07TX1' },
+  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% 26-Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial', isin: 'INE532F07EK1', canonicalId: 'ISIN:INE532F07EK1' },
+  { id: 'CASH:SAVINGS', kind: 'CASH', name: 'Savings account', currency: 'INR', canonicalId: 'CASH:SAVINGS_HDFC_FEDERAL' },
+  { id: 'US:INDMONEY-BASKET', kind: 'EQUITY', name: 'US fractional basket (AAPL/GOOGL/AMZN/MSFT/TSLA/VOO)', currency: 'USD', canonicalId: 'US:INDMONEY-BASKET' },
+  { id: 'US:NOW', kind: 'RSU', name: 'ServiceNow (NOW) - vested, Fidelity', currency: 'USD', sector: 'Technology', issuer: 'ServiceNow', isEmployer: true, canonicalId: 'US:NOW' },
 ];
 
 export const SEED_HOLDINGS: HoldingSeed[] = [

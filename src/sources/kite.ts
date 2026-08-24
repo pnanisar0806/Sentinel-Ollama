@@ -14,6 +14,15 @@ interface KiteHolding {
   close_price: number;
 }
 
+/** Map Kite's EXCHANGE:TRADINGSYMBOL to our canonical IDs (C-A reconciliation). */
+const KITE_TO_CANONICAL: Record<string, string> = {
+  'NSE:NIFTYBEES': 'NSE:INDS19182',
+  'NSE:GOLDBEES': 'NSE:INDS29570',
+  'NSE:LIQUIDBEES': 'NSE:INDS28892',
+  'NSE:RPOWER': 'NSE:INDS01338',
+  // Bonds by ISIN — Kite provides ISIN, so we use ISIN:... as canonical
+};
+
 const toPaise = (rupeeValue: number): Paise =>
   BigInt(Math.round(rupeeValue * 100)) as Paise;
 
@@ -77,6 +86,8 @@ export class KiteSource {
           : 'EQUITY',
         name: h.tradingsymbol,
         currency: 'INR',
+        isin: h.isin || undefined,
+        canonicalId: KITE_TO_CANONICAL[instrumentId] ?? (h.isin ? `ISIN:${h.isin}` : undefined),
       };
       return {
         instrumentId,

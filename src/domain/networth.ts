@@ -67,13 +67,32 @@ interface HoldingRow {
   /** timestamptz comes back as a Date from PGlite, as a string from postgres-js. */
   as_of: string | Date;
   source: string;
+  canonical_id: string | null;
 }
 
 const toPaise = (v: string | number | bigint): Paise => BigInt(v) as Paise;
 
 /**
- * One position set = the latest snapshot from each source, merged. A stale source
- * still contributes its last-known rows; the staleness engine (Task 12) is what
+ * Reconciliation key: (canonical_id, account). If canonical_id is null, fall back to instrument_id.
+ * This is the C-A supersession rule: live source wins per canonical key; seed fills gaps;
+ * fallback to seed when live stops reporting.
+ */
+function reconcileKey(row: HoldingRow): string {
+  return `${row.canonical_id ?? row.instrument_id}|${row.account}`;
+}
+
+/**
+ * One position set = the latest snapshot from each source, merged with C-A reconciliation.
+ *
+ * Reconciliation rules (owner decision 2026-08-23):
+ * 1. Live source (kite, indmoney) wins per (canonical_id, account) when present.
+ * 2. Seed (manual-seed) fills gaps for instruments no live source reports.
+ * 3. If a live source previously reported an instrument but stops, fall back to seed.
+ *
+ * Within a single source, NO deduplication — each source manages its own aggregation
+ * (INDmoney aggregates in RemoteIndmoneySource, Kite returns one row per holding).
+ *
+ * A stale source still contributes its last-known rows; the staleness engine (Task 12)
  * flags them — silently dropping them would understate net worth.
  */
 export async function loadPositions(db: Db, businessDate?: string): Promise<Position[]> {
@@ -85,27 +104,45 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
        order by s.source, s.business_date desc, s.taken_at desc
      )
      select h.instrument_id, i.kind, i.name, h.account, h.value_paise, h.avg_cost_paise,
-            i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source
+            i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source, i.canonical_id
      from holdings h
      join latest l on l.id = h.snapshot_id
      join instruments i on i.id = h.instrument_id`,
     [businessDate ?? null],
   );
 
-  return rows.map((r) => ({
-    instrumentId: r.instrument_id,
-    kind: r.kind,
-    account: r.account,
-    valuePaise: toPaise(r.value_paise),
-    avgCostPaise: r.avg_cost_paise === null ? null : toPaise(r.avg_cost_paise),
-    assetClass: classify(r.kind, r.instrument_id, r.name),
-    currency: r.currency,
-    issuer: r.issuer,
-    sector: r.sector,
-    isEmployer: r.is_employer,
-    asOf: r.as_of instanceof Date ? r.as_of.toISOString() : String(r.as_of),
-    source: r.source,
-  }));
+  // First pass: collect all live source keys (non-manual-seed)
+  const liveKeys = new Set<string>();
+  for (const r of rows) {
+    if (r.source !== 'manual-seed') {
+      liveKeys.add(reconcileKey(r));
+    }
+  }
+
+  // Second pass: include all rows, but skip seed rows whose key is covered by a live source
+  const positions: Position[] = [];
+  for (const r of rows) {
+    const key = reconcileKey(r);
+    if (r.source === 'manual-seed' && liveKeys.has(key)) {
+      continue; // seed row superseded by live source
+    }
+    positions.push({
+      instrumentId: r.instrument_id,
+      kind: r.kind,
+      account: r.account,
+      valuePaise: toPaise(r.value_paise),
+      avgCostPaise: r.avg_cost_paise === null ? null : toPaise(r.avg_cost_paise),
+      assetClass: classify(r.kind, r.instrument_id, r.name),
+      currency: r.currency,
+      issuer: r.issuer,
+      sector: r.sector,
+      isEmployer: r.is_employer,
+      asOf: r.as_of instanceof Date ? r.as_of.toISOString() : String(r.as_of),
+      source: r.source,
+    });
+  }
+
+  return positions;
 }
 
 export interface NetWorth {
