@@ -19,7 +19,7 @@ Phase 0 is **not a website you host**. It is a headless agent made of four piece
 | GitHub repo | ✅ Private: [pnanisar0806/Sentinel-Ollama](https://github.com/pnanisar0806/Sentinel-Ollama) |
 | Pull request | ✅ [#1](https://github.com/pnanisar0806/Sentinel-Ollama/pull/1): `phase-0` → `main` |
 | Merge PR | ⬜ You decide, after CI is green |
-| Telegram bot | ⬜ Not created |
+| Telegram bot | ⬜ **Deferred** (owner limitation) — see "No Telegram yet?" below; everything except digest delivery works without it |
 | Supabase project | ⬜ Not created |
 | INDmoney OAuth against production DB | ⬜ Token currently lives only in local `.pglite` |
 | GitHub Actions secrets | ⬜ Not added |
@@ -58,7 +58,21 @@ gh pr merge 1 --merge   # or merge in the browser after reviewing
 branch. Until `phase-0` lands in `main`, the three schedules stay inert even if you add
 secrets today.
 
-## Step 3 — Create the Telegram bot (~10 min)
+## No Telegram yet?
+
+Telegram can be deferred — most of Sentinel works without it:
+
+- **Works today:** Supabase setup (Step 4), INDmoney login (Step 5), `sync` +
+  `keepalive` workflows and their secrets, local digests via
+  `DRY_RUN=1 pnpm digest` (prints to stdout).
+- **Blocked until the bot exists:** real digest *delivery* (the digest job refuses to
+  start without the Telegram pair) and the interactive `pnpm telegram:bot`. Just don't
+  enable/trigger the `digest` workflow until then — its runs would fail on missing
+  secrets.
+- Everything else in this guide is unchanged; when you can create the bot, do Step 3,
+  add the two secrets, and enable `digest`.
+
+## Step 3 — Create the Telegram bot (~10 min, DEFERRED)
 
 1. Message **@BotFather** in Telegram → `/newbot` → follow prompts → copy the token.
    That token is `TELEGRAM_BOT_TOKEN`.
