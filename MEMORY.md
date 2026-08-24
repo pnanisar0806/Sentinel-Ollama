@@ -1,6 +1,7 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-22. Branch `phase-0`, Task 11 shipped.
+Last updated: 2026-08-24. Phase 0 complete through the whole-branch fix wave + scoped
+re-review (387/387 green). Pushed to GitHub; PR #1 open (`phase-0` → `main`).
 Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
@@ -33,6 +34,21 @@ Per-task ledger: `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md`.
 
 After task 15: whole-branch review (most capable model) → one fix wave → scoped
 re-review → delete SDD workspace → `superpowers:finishing-a-development-branch`.
+
+## Post-fix-wave additions (2026-08-24)
+
+- **Telegram command bot** (commit `d3e45ab`; written in an earlier session, sat untracked
+  until then — no dedicated review round yet). `TelegramBot` in `src/notify/telegram-bot.ts`
+  is a long-polling `getUpdates` loop answering `/sync`, `/status`, `/help`,
+  owner-locked via `Telegram.isOwner`; sync sources built via exported `indmoneySource`
+  + optional Kite. CLI entrypoint `src/jobs/telegram-bot.ts`, script `pnpm telegram:bot`;
+  needs `['telegram']` AND `['crypto']` env (all four vars). Known wart, strike on touch:
+  `notify/telegram-bot.ts` carries a redundant inline main-module entrypoint duplicating
+  the jobs one.
+- **Repo pushed**: private `github.com/pnanisar0806/Sentinel-Ollama`. `main` =
+  plan-only `ab91f87` and IS the default branch; `phase-0` tracks origin; PR #1 open.
+  Scheduled workflows run ONLY from the default branch — they stay inert until the PR
+  merges.
 
 ---
 
