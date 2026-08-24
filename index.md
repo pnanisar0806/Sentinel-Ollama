@@ -13,6 +13,7 @@ migrations/    numbered .sql, applied in name order
 src/           implementation
 tests/         vitest, mirrors src/ layout
 docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do not read whole)
+docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflows)
 .superpowers/sdd/2026-08-12-sentinel-phase-0/           SDD workspace: briefs, review diffs, progress.md
 ```
 
