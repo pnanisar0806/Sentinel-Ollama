@@ -1,0 +1,45 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Db } from './client.js';
+import { openDb } from './client.js';
+import { isMainModule } from '../util/main-module.js';
+
+const DEFAULT_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
+
+/** Applies every unapplied .sql file in name order. Returns names newly applied. */
+export async function runMigrations(db: Db, dir = DEFAULT_DIR): Promise<string[]> {
+  await db.query(
+    `create table if not exists schema_migrations (
+       name text primary key,
+       applied_at timestamptz not null default now())`,
+  );
+
+  const applied = new Set(
+    (await db.query<{ name: string }>('select name from schema_migrations')).map((r) => r.name),
+  );
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.sql')).sort();
+  const newlyApplied: string[] = [];
+
+  for (const file of files) {
+    if (applied.has(file)) continue;
+    const sql = await readFile(join(dir, file), 'utf8');
+    // Wrap migration apply + bookkeeping in a transaction for atomicity
+    await db.withTransaction(async (tx) => {
+      await tx.exec(sql);
+      await tx.query('insert into schema_migrations (name) values ($1)', [file]);
+    });
+    newlyApplied.push(file);
+  }
+  return newlyApplied;
+}
+
+if (isMainModule(import.meta.url)) {
+  const db = await openDb();
+  try {
+    const applied = await runMigrations(db);
+    console.log(applied.length ? `Applied: ${applied.join(', ')}` : 'Already up to date.');
+  } finally {
+    await db.close();
+  }
+}

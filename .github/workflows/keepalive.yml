@@ -1,0 +1,21 @@
+name: keepalive
+on:
+  schedule:
+    - cron: '0 4 * * 0'
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:` here - package.json's packageManager is the single source
+      # of truth. Specifying both makes the action fail with "Multiple versions
+      # of pnpm specified", which would break every workflow at setup.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx src/jobs/keepalive.ts
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

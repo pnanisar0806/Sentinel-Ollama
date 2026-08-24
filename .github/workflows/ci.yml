@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:` here — package.json's packageManager is the single source of truth.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      # The entire safety argument for this branch is "the suite is green and tsc is
+      # clean". Nothing enforced that on push until now.
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm test

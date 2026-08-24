@@ -1,0 +1,29 @@
+name: sync
+on:
+  schedule:
+    # Daily, not Mon-Fri. With a weekday-only sync the Monday 03:15 digest read
+    # Friday's data - 63.25h against a 36h freshness limit - so one digest in five
+    # was a guaranteed false staleness alarm. The band is right; the schedule was wrong.
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `version:` here - package.json's packageManager is the single source
+      # of truth. Specifying both makes the action fail with "Multiple versions
+      # of pnpm specified", which would break every workflow at setup.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm sync
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # The live INDmoney path decrypts the stored OAuth refresh token.
+          # Without it sync silently falls back to the file snapshot.
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          KITE_API_KEY: ${{ secrets.KITE_API_KEY }}
+          KITE_ACCESS_TOKEN: ${{ secrets.KITE_ACCESS_TOKEN }}
