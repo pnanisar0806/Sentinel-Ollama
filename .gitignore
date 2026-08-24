@@ -10,3 +10,5 @@ run-claude.ps1
 # for commit. The .example file beside it is the one that is tracked.
 data/indmoney-snapshot.json
 data/*.snapshot.json
+
+data/screenshots/
