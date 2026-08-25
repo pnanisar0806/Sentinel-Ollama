@@ -9,8 +9,10 @@ import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
 import { assessStaleness } from '../sources/staleness.js';
 import { parseCostCommand, insertOwnerCostLot, saveStatementPhoto } from '../sources/owner-ingest.js';
-import { loadPositions } from '../domain/networth.js';
+import { extractHoldingsFromImage, type LlmProposal } from '../sources/llm-extract.js';
+import { loadPositions, type Position } from '../domain/networth.js';
 import { formatInr } from '../money/paise.js';
+import { readFile } from 'node:fs/promises';
 import { Telegram, escapeMarkdown } from './telegram.js';
 import { isMainModule } from '../util/main-module.js';
 
@@ -23,6 +25,8 @@ const COMMANDS = {
   sync: 'Trigger an on-demand portfolio sync (Kite + INDmoney + FX)',
   holdings: 'List open positions with their /cost line numbers',
   cost: 'Record a holding\u2019s total cost from a statement: /cost <n> <inr> [YYYY-MM-DD]',
+  confirm: 'Write LLM-read costs: /confirm all or /confirm <proposal#>',
+  reject: 'Discard the pending LLM proposals',
   status: 'Show staleness and open incidents',
   help: 'Show this help',
 } as const;
@@ -48,6 +52,8 @@ export class TelegramBot {
   private readonly env: TelegramEnv;
   private offset = 0;
   private running = false;
+  /** LLM proposals awaiting /confirm. Single owner, so one slot suffices. */
+  private pending: (LlmProposal & { instrumentId: string | null; account: string | null })[] | null = null;
 
   constructor(telegram: Telegram, db: Db, env: TelegramEnv) {
     this.telegram = telegram;
@@ -138,6 +144,13 @@ export class TelegramBot {
         case 'cost':
           await this.handleCost(text);
           break;
+        case 'confirm':
+          await this.handleConfirm(text);
+          break;
+        case 'reject':
+          this.pending = null;
+          await this.telegram.send('Discarded. Nothing was written.');
+          break;
         case 'status':
           await this.handleStatus();
           break;
@@ -154,7 +167,8 @@ export class TelegramBot {
     }
   }
 
-  /** Photo or document from the owner → archive under data/screenshots (gitignored). */
+  /** Photo or document from the owner → archive under data/screenshots (gitignored),
+   *  then — when LLM_API_KEY is set — propose extracted costs for /confirm. */
   private async handleStatementFile(update: TelegramUpdate, msg: NonNullable<TelegramUpdate['message']>): Promise<void> {
     try {
       const fileId = msg.document
@@ -167,14 +181,95 @@ export class TelegramBot {
         dir: SCREENSHOTS_DIR,
         updateId: update.update_id,
       });
-      await this.telegram.send(
-        `📸 Saved ${path}\n\nNow run /holdings and reply with:\n/cost <line#> <total cost in ₹> [bought YYYY-MM-DD]`,
-      );
+
+      if (!this.env.llmApiKey) {
+        await this.telegram.send(
+          `📸 Saved ${path}\n\nNow run /holdings and reply with:\n/cost <line#> <total cost in ₹> [bought YYYY-MM-DD]`,
+        );
+        return;
+      }
+
+      await this.telegram.send('📸 Saved. Reading the statement…');
+      const positions = await loadPositions(this.db);
+      const bytes = await readFile(path);
+      const proposals = await extractHoldingsFromImage({
+        fetchImpl: this.telegram['fetchImpl'],
+        apiKey: this.env.llmApiKey,
+        ...(this.env.llmModel ? { model: this.env.llmModel } : {}),
+        imageBase64: bytes.toString('base64'),
+        imageMimeType: path.endsWith('.png') ? 'image/png' : 'image/jpeg',
+        positions,
+      });
+
+      if (!proposals.length) {
+        await this.telegram.send('Could not read any costs from that image. Use /holdings + /cost manually.');
+        return;
+      }
+
+      this.pending = proposals.map((p) => ({
+        ...p,
+        instrumentId: p.line === null ? null : positions[p.line]!.instrumentId,
+        account: p.line === null ? null : positions[p.line]!.account,
+      }));
+      const lines = this.pending.map((p, i) => {
+        const target = p.line === null
+          ? '⚠️ no matching holding'
+          : `${p.instrumentId} (${p.account})`;
+        return `${i + 1}. ${p.name} → ${target} = ${formatInr(p.costPaise)} [${p.confidence}]`;
+      });
+      lines.push('', '_Writes only after:_ /confirm all · /confirm <#> · /reject');
+      await this.telegram.send(lines.join('\n'));
     } catch (error) {
       const m = error instanceof Error ? error.message : String(error);
-      console.error('[telegram-bot] Statement download failed:', m);
-      await this.telegram.send(`⚠️ Could not save that file: ${escapeMarkdown(m)}`);
+      console.error('[telegram-bot] Statement handling failed:', m);
+      await this.telegram.send(
+        `⚠️ Could not process that file: ${escapeMarkdown(m)}\nYou can still use /holdings + /cost manually.`,
+      );
     }
+  }
+
+  /** Writes confirmed LLM proposals as owner lots. Nothing writes without this. */
+  private async handleConfirm(text: string): Promise<void> {
+    if (!this.pending?.length) {
+      await this.telegram.send('Nothing pending. Send a statement screenshot first.');
+      return;
+    }
+    const parts = text.trim().split(/\s+/);
+    const arg = parts[1]?.toLowerCase();
+    const targets = arg === 'all'
+      ? this.pending.map((_, i) => i)
+      : [Number(arg) - 1];
+    if (targets.some((t) => !Number.isInteger(t) || t < 0 || t >= this.pending!.length)) {
+      await this.telegram.send('usage: /confirm all | /confirm <proposal#>');
+      return;
+    }
+
+    const written: string[] = [];
+    const skipped: string[] = [];
+    for (const t of targets) {
+      const p = this.pending[t]!;
+      if (p.instrumentId === null || p.account === null) {
+        skipped.push(`${p.name} (no matching holding — use /cost)`);
+        continue;
+      }
+      await insertOwnerCostLot(this.db, {
+        instrumentId: p.instrumentId,
+        account: p.account,
+        quantity: 1,
+        costPaise: p.costPaise,
+        acquiredOn: p.acquiredOn,
+        now: new Date().toISOString(),
+        via: 'llm',
+      });
+      written.push(`${p.name} = ${formatInr(p.costPaise)}`);
+    }
+    if (targets.length === this.pending.length) this.pending = null;
+
+    const lines: string[] = [];
+    if (written.length) lines.push(`✅ Recorded:`, ...written.map((w) => `• ${w}`));
+    if (skipped.length) lines.push('', `⏭️ Skipped:`, ...skipped.map((s) => `• ${escapeMarkdown(s)}`));
+    lines.push('', 'Feeds P&L from the next digest onward.');
+    await this.telegram.send(lines.join('\n'));
   }
 
   /** Numbered open positions — the line numbers /cost expects. */

@@ -6,6 +6,10 @@ export interface Env {
   kiteAccessToken: string | undefined;
   indmoneySnapshotPath: string;
   tokenEncryptionKey: string | undefined;
+  /** Optional: enables LLM statement extraction in the Telegram bot (OpenRouter). */
+  llmApiKey: string | undefined;
+  /** Optional: overrides the default free vision model. */
+  llmModel: string | undefined;
   dryRun: boolean;
 }
 
@@ -78,6 +82,8 @@ export function loadEnv(
     kiteAccessToken: source.KITE_ACCESS_TOKEN,
     indmoneySnapshotPath: source.INDMONEY_SNAPSHOT_PATH ?? 'data/indmoney-snapshot.json',
     tokenEncryptionKey: read(source, 'TOKEN_ENCRYPTION_KEY', need),
+    llmApiKey: source.LLM_API_KEY,
+    llmModel: source.LLM_MODEL,
     dryRun: source.DRY_RUN === '1' || source.DRY_RUN === 'true',
   };
 }

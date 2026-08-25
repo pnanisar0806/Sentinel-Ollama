@@ -52,6 +52,8 @@ export async function insertOwnerCostLot(
     costPaise: Paise;
     acquiredOn: string;
     now: string;
+    /** Provenance of the numbers: 'telegram' (typed by owner) or 'llm' (extracted, owner-approved). */
+    via?: string;
   },
 ): Promise<{ lotId: string }> {
   return db.withTransaction(async (tx) => {
@@ -67,7 +69,7 @@ export async function insertOwnerCostLot(
       `insert into audit_log (entity, entity_id, action, actor, payload)
        values ('lots', $1, 'ingest', 'owner', $2::jsonb)`,
       [lotId, JSON.stringify({
-        via: 'telegram',
+        via: opts.via ?? 'telegram',
         instrumentId: opts.instrumentId,
         account: opts.account,
         quantity: opts.quantity ?? 1,
