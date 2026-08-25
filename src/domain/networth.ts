@@ -107,6 +107,7 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
      )
      select h.instrument_id, i.kind, i.name, h.account, h.value_paise,
             coalesce(h.avg_cost_paise, oc.cost_paise) as avg_cost_paise,
+            coalesce(cn.curated_name, i.name) as name,
             i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source, i.canonical_id
      from holdings h
      join latest l on l.id = h.snapshot_id
@@ -122,7 +123,23 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
          and l.closed_on is null
        order by l.as_of desc, l.acquired_on desc
        limit 1
-     ) oc on true`,
+     ) oc on true
+     left join lateral (
+       -- Curated display name: when a live row shares a canonical identity with an
+       -- owner-verified instrument (BOND:/MF:/NSE:/EPF:/US: ids are seed-created),
+       -- prefer the seed's name. This is what turns INDmoney's stale 'Indiabulls
+       -- Housing Finance' back into 'Sammaan Capital 9% 26-Sep-2026'. CASH is exempt:
+       -- the seed's generic 'Savings account' is LESS informative than the live
+       -- 'HDFC Bank (XX6652)'.
+       select c.name as curated_name
+       from instruments c
+       where c.canonical_id = i.canonical_id
+         and c.id <> i.id
+         and c.kind <> 'CASH'
+         and c.id ~ '^(BOND|MF|NSE|EPF|US):'
+       order by c.id
+       limit 1
+     ) cn on true`,
     [businessDate ?? null],
   );
 
