@@ -1,7 +1,9 @@
 name: digest
 on:
   schedule:
-    - cron: '15 3 * * 1-5'
+    # 15:30 UTC = 21:00 IST, every day (owner's chosen evening slot).
+    # GitHub Actions cron is best-effort — expect a few minutes of slip.
+    - cron: '30 15 * * *'
   workflow_dispatch:
 
 jobs:

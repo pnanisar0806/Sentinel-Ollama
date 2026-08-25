@@ -124,6 +124,10 @@ longer representable — deliberate schema change, not a widened assertion.
   → `US:AAPL`; Apple had been wearing the seed basket's name and carrying the whole
   book's invested figure as its own cost.
 - Reliance Power (groww, manual closure) ₹2,565: **owner-confirmed**.
+- GOTCHA (bit us twice): the LLM's line-anchoring flips on near-identical names
+  (TMCV/TMPV) nondeterministically across runs. Supersede now contains the damage to
+  one lot, but a mis-anchored confirm still writes the wrong instrument confidently.
+  Before `/confirm` on such names, eyeball the proposal card's target (`→ INDS…`).
 
 ---
 

@@ -1,0 +1,31 @@
+# Sentinel — SDD progress ledger
+
+Phase 0: COMPLETE — plan executed through the whole-branch fix wave + scoped re-review;
+PR #1 merged to `main` (2026-08-24). Entries below are post-merge sessions, newest last.
+One line per task / defect / decision; details live in MEMORY.md, not here.
+
+## 2026-08-25 (evening session)
+
+- Statement ingestion live-tested by owner against PRODUCTION Supabase. Three defects
+  found and fixed with wiring tests: `/cost` line-number/order mismatch (shared
+  `displayOrder`), partial `/confirm` double-writes (queue removal), jsonb
+  double-encoding of every Supabase audit payload (objects, never JSON.stringify — all
+  8 write sites). Commit `5fd0bb8`. Suite 417 → 421.
+- Production data repair: 89 lots → 29 open via audited `closed_on` cleanup (DELETE is
+  refused by design); gold identity resolved (owner's "GoldCase" = IND:INDS29570);
+  redundant inline bot entrypoint struck (fix-on-touch). Commit `b9abca8`.
+- Upload idempotency per owner request: `insertOwnerCostLot` now no-ops on identical
+  value, supersedes on change, creates when new; migration `0006` adds a partial unique
+  index (one OPEN owner lot per instrument+account) enforced in SQL. Mapping fix:
+  INDmoney code `118186` is Apple Inc., not a basket aggregate (`US:AAPL`). Commit
+  `148d635`. Suite 424.
+- Owner verified four `/holdings` questions: ICICI Nifty 50 held on both platforms;
+  both Tata Motors entities real (screenshot exposed our swapped costs — corrected in
+  production through the supersede path); US basket line was Apple mislabeled;
+  Reliance Power residual recognized.
+- Digest workflow moved from weekday-morning (08:45 IST) to nightly **21:00 IST**
+  (`cron '30 15 * * *'`) per owner choice. Live only once pushed.
+- Late-night re-upload re-swapped TMCV's lot (LLM line-anchor flip on near-identical
+  names — nondeterministic across runs). Re-corrected via supersede; gotcha recorded in
+  MEMORY: eyeball the proposal card's target instrument before confirming near-identical
+  names.
