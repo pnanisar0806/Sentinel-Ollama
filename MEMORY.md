@@ -1,8 +1,9 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-24. Phase 0 complete through the whole-branch fix wave + scoped
-re-review (387/387 green). Pushed to GitHub; PR #1 open (`phase-0` → `main`).
-Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
+Last updated: 2026-08-25. Phase 0 complete + fix wave + re-review; branch merged to `main`.
+Post-merge: Supabase provisioned (secrets in GH Actions), production double-count fixed,
+statement-ingestion workstream (photo → LLM proposal → owner confirm → owner lot). 417/417
+green. Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
 
@@ -48,7 +49,56 @@ re-review → delete SDD workspace → `superpowers:finishing-a-development-bran
 - **Repo pushed**: private `github.com/pnanisar0806/Sentinel-Ollama`. `main` =
   plan-only `ab91f87` and IS the default branch; `phase-0` tracks origin; PR #1 open.
   Scheduled workflows run ONLY from the default branch — they stay inert until the PR
-  merges.
+  merges. *(Stale: PR has since merged; `main` is the working line — see § Statement ingestion.)*
+
+## Statement ingestion (2026-08-24/25, post-merge)
+
+Owner sends brokerage/MF statement photos to the bot → archived to `data/screenshots/`
+(gitignored) → optional LLM extraction proposes cost lines anchored to the numbered
+`/holdings` list → **owner replies `/confirm yes`, and only then** an OPEN lot lands on
+`lots`. Same approval-gate philosophy as trading; FR-02 holds upstream (unreadable cost
+dropped, never inferred).
+
+- `src/sources/owner-ingest.ts`: `parseCostCommand`, `insertOwnerCostLot` (lot +
+  audit_log in ONE transaction, `source: 'owner-telegram'`), `saveStatementPhoto`.
+  Cost lives on `lots`, NOT `holdings.avg_cost_paise` — holdings rows are replaced per
+  sync and a cost written there dies tomorrow. Quantity defaults to 1 because aggregated
+  holdings model totals.
+- `src/sources/llm-extract.ts`: OpenRouter free vision chain (`LLM_MODEL_CHAIN`,
+  gemma-4-31b primary, one retry then walk on 429). Multiple images = pages of ONE
+  statement, buffered by `media_group_id` and sent in a single request. Output is
+  proposals only: `{line|null, name, costPaise, acquiredOn, confidence}`.
+- Bot commands now `/sync /status /holdings /cost /confirm /help`; env adds optional
+  `LLM_API_KEY` / `LLM_MODEL` (no key = archive + manual `/cost` guidance).
+
+### Live test 2026-08-25 — 3 defects found, all fixed & pinned by tests
+
+The owner ran the real flow against PRODUCTION Supabase (their shell exported the
+pooler DATABASE_URL over .env's pglite). It surfaced what 417 green PGlite tests could not:
+
+1. **`/cost` wrote to the wrong instrument.** `/holdings` renders alphabetically but
+   `/cost` resolved its line number against loadPositions' NATURAL order. Fixed by
+   `displayOrder()` — the ONE ordering both handlers share (`notify/telegram-bot.ts`).
+2. **Partial `/confirm` double-wrote lots.** Confirmed entries stayed queued; every new
+   album + `/confirm all` re-wrote them. Production accumulated 89 lots for ~31
+   instruments (28 duplicate groups). Fixed: written AND skipped entries leave the queue.
+3. **Every audit payload stored to Supabase was double-encoded.** `JSON.stringify(x)` fed
+   to `$n::jsonb` makes postgres-js store a jsonb SCALAR STRING (`jsonb_typeof='string'`),
+   so `payload->>'…'` reads NULL — the whole production audit trail was SQL-opaque.
+   PGlite parses either form, which is why tests passed. Fixed at ALL 8 write sites
+   (rsu, ips, types/writeSnapshot, staleness, owner-ingest, seed ×2, indmoney-login):
+   pass the OBJECT. Verified against the live pooler inside rolled-back transactions;
+   existing rows are immutable (append-only) and stay opaque forever — content intact,
+   just not queryable. **Never feed JSON.stringify to a ::jsonb placeholder.**
+
+Methodology worth keeping: rollback-probes against production (insert inside
+`withTransaction`, throw to roll back, assert 0 persisted) verify driver behavior
+without polluting the append-only tables. This is the only "test" the postgres-js path
+has — see deferred minor #5, vindicated twice today.
+
+Fix-on-touch struck: the redundant inline main-module entrypoint in
+`notify/telegram-bot.ts` is gone; `pnpm telegram:bot` via `jobs/telegram-bot.ts` is the
+only entrypoint.
 
 ---
 
@@ -552,6 +602,21 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
   an exemption list. Owner true-up below.
 
 ## Owner true-up items (need real statements — do not guess)
+
+**Gold holding changed (owner, 2026-08-25): GoldBees is GONE; the owner holds "GoldCase"
+now.** The live sync reports `IND:INDS29570` as "Zerodha Gold ETF" (~₹65k) and C-A
+reconciliation retires seed `NSE:GOLDBEES` (₹63,000) through it. If "GoldCase" is that
+same line under a different name, only labels are wrong; if it is a DIFFERENT instrument
+the sync does not see at all, the seed gold row is stale AND the live row is mislabeled —
+allocation drift's GOLD reading is wrong either way until resolved. Owner must confirm
+which. **OPEN: also decide the dup-lot cleanup below before trusting cost-based P&L.**
+
+**OPEN (live test 2026-08-25): 89 owner-telegram lots in production, 28 duplicate groups.**
+`lots` refuses DELETE; cleanup = UPDATE `closed_on` (the one permitted mutation) on all
+but one lot per (instrument, account). Where costs AGREE within a group (most), keep any
+one. Where they DISAGREE the owner picks the true cost first — known conflicts:
+Kirloskar Pneumatic has ₹22,291.30 ×2 plus an outlier ₹273.38 (likely a misattributed
+tiny line); Tata Motors PV mixes ₹41,530.77 / ₹18,789.88. Nothing is closed yet.
 
 **RESOLVED 2026-08-22 from the owner's INDmoney bonds screen.** The screenshot reconciles to
 the rupee with the table below, so `SEED_HOLDINGS` bond cost stands unchanged. What the live

@@ -53,7 +53,7 @@ export async function installIps(
     await tx.query(
       `insert into audit_log (entity, entity_id, action, actor, payload)
        values ('ips', $1, 'INSTALLED', 'owner', $2::jsonb)`,
-      [String(version), JSON.stringify({ version })],
+      [String(version), { version }],
     );
     return { version, created: true };
   });

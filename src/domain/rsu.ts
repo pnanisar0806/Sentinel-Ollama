@@ -241,13 +241,13 @@ export async function confirmVest(
     await tx.query(
       `insert into audit_log (entity, entity_id, action, actor, payload)
        values ('rsu_vest', $1, 'CONFIRMED', 'owner', $2::jsonb)`,
-      [id, JSON.stringify({
+      [id, {
         units: actual.units,
         priceUsdCents: actual.priceUsdCents.toString(),
         usdInrMicros: actual.usdInrMicros.toString(),
         grossPaise: grossPaise.toString(),
         netPaise: actual.netPaise.toString(),
-      })],
+      }],
     );
   });
 }

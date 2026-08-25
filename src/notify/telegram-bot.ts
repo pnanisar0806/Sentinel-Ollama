@@ -1,7 +1,5 @@
-import { openDb, type Db } from '../db/client.js';
-import { runMigrations } from '../db/migrate.js';
-import { loadEnv, type TelegramEnv } from '../config/env.js';
-import { installIps } from '../domain/ips.js';
+import { type Db } from '../db/client.js';
+import { type TelegramEnv } from '../config/env.js';
 import { runSync } from '../jobs/sync.js';
 import { indmoneySource } from '../jobs/sync.js';
 import { KiteSource } from '../sources/kite.js';
@@ -14,7 +12,6 @@ import { loadPositions, type Position } from '../domain/networth.js';
 import { formatInr } from '../money/paise.js';
 import { readFile } from 'node:fs/promises';
 import { Telegram, escapeMarkdown } from './telegram.js';
-import { isMainModule } from '../util/main-module.js';
 
 const POLL_TIMEOUT = 30; // seconds
 const POLL_INTERVAL_MS = 1000;
@@ -32,6 +29,19 @@ const COMMANDS = {
 } as const;
 
 type Command = keyof typeof COMMANDS;
+
+/**
+ * The ONE owner-facing line-number ordering: /holdings renders it and /cost resolves
+ * against it. Two divergent orderings made `/cost 2` write to a different instrument
+ * than line 2 displayed (live-test finding, 2026-08-25).
+ */
+export function displayOrder<T extends { name?: string | null; instrumentId: string }>(
+  positions: T[],
+): T[] {
+  return [...positions].sort((a, b) =>
+    (a.name || a.instrumentId).localeCompare(b.name || b.instrumentId),
+  );
+}
 
 interface TelegramUpdate {
   update_id: number;
@@ -312,7 +322,13 @@ export class TelegramBot {
       });
       written.push(`${p.name} = ${formatInr(p.costPaise)}`);
     }
-    if (targets.length === this.pending.length) this.pending = null;
+    // Written AND skipped entries leave the queue: a skipped proposal can never be
+    // confirmed (no matching holding), and leaving either in invited double-writes —
+    // a repeat /confirm or a later /confirm all re-wrote already-recorded lots
+    // (live-test finding, 2026-08-25: 89 lots for ~31 instruments in production).
+    const consumed = new Set(targets);
+    const remaining = this.pending!.filter((_, i) => !consumed.has(i));
+    this.pending = remaining.length ? remaining : null;
 
     const lines: string[] = [];
     if (written.length) lines.push(`✅ Recorded:`, ...written.map((w) => `• ${w}`));
@@ -328,8 +344,7 @@ export class TelegramBot {
       await this.telegram.send('_No positions yet — run /sync first._');
       return;
     }
-    const lines = [...positions]
-      .sort((a, b) => (a.name || a.instrumentId).localeCompare(b.name || b.instrumentId))
+    const lines = displayOrder(positions)
       .map((p, i) =>
         `${i + 1}. ${p.name || p.instrumentId} — ${formatInr(p.valuePaise)} (${p.account})`,
       );
@@ -339,7 +354,9 @@ export class TelegramBot {
 
   /** Owner-supplied total cost for position <n>, persisted as an open lot. */
   private async handleCost(text: string): Promise<void> {
-    const positions = await loadPositions(this.db);
+    // Same ordering /holdings rendered — resolving against the raw loadPositions
+    // order wrote the cost to a DIFFERENT instrument than the line shown.
+    const positions = displayOrder(await loadPositions(this.db));
     const cmd = parseCostCommand(text, positions.length);
     const p = positions[cmd.index]!;
     await insertOwnerCostLot(this.db, {
@@ -430,31 +447,4 @@ export class TelegramBot {
     lines.push('', '_Only the owner chat ID may use these commands._');
     await this.telegram.send(lines.join('\n'));
   }
-}
-
-if (isMainModule(import.meta.url)) {
-  const env = loadEnv(process.env, ['telegram', 'crypto']) as TelegramEnv;
-  const db = await openDb(env.databaseUrl);
-  await runMigrations(db);
-  await installIps(db);
-
-  const telegram = new Telegram({
-    botToken: env.telegramBotToken,
-    ownerChatId: env.telegramOwnerChatId,
-    dryRun: env.dryRun,
-  });
-
-  const bot = new TelegramBot(telegram, db, env);
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.log('[telegram-bot] Shutting down...');
-    bot.stop();
-    await db.close();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
-  await bot.start();
 }

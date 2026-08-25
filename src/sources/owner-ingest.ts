@@ -68,14 +68,18 @@ export async function insertOwnerCostLot(
     await tx.query(
       `insert into audit_log (entity, entity_id, action, actor, payload)
        values ('lots', $1, 'ingest', 'owner', $2::jsonb)`,
-      [lotId, JSON.stringify({
+      [lotId, {
         via: opts.via ?? 'telegram',
         instrumentId: opts.instrumentId,
         account: opts.account,
         quantity: opts.quantity ?? 1,
+        // The OBJECT goes in, never JSON.stringify: postgres-js stores a pre-stringified
+        // param as a jsonb SCALAR STRING (jsonb_typeof = 'string'), which made every
+        // Supabase audit row opaque to payload->>'…'. PGlite parses either form; verified
+        // against the live pooler inside a rolled-back transaction 2026-08-25.
         costPaise: opts.costPaise.toString(),
         acquiredOn: opts.acquiredOn,
-      })],
+      }],
     );
     return { lotId };
   });

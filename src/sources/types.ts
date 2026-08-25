@@ -89,7 +89,7 @@ export async function writeSnapshot(
     await tx.query(
       `insert into audit_log (entity, entity_id, action, actor, payload)
        values ('snapshot', $1, 'SYNCED', 'agent', $2::jsonb)`,
-      [snapshotId, JSON.stringify({ source, businessDate, rows: rows.length })],
+      [snapshotId, { source, businessDate, rows: rows.length }],
     );
 
     return snapshotId;

@@ -134,7 +134,7 @@ await saveTokens(db, 'indmoney', tokens, key);
 await db.query(
   `insert into audit_log (entity, entity_id, action, actor, payload)
    values ('oauth', 'indmoney', 'AUTHORIZED', 'owner', $1::jsonb)`,
-  [JSON.stringify({ scope: tokens.scope, expiresAt: tokens.expiresAt })],
+  [{ scope: tokens.scope, expiresAt: tokens.expiresAt }],
 );
 
 console.log(`Connected. Scope: ${tokens.scope}. Refresh token stored encrypted.`);

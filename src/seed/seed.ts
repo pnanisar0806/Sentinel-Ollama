@@ -102,14 +102,14 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
     await db.query(
       `insert into settings_rails (key, value) values ($1, $2::jsonb)
        on conflict (key) do nothing`,
-      [key, JSON.stringify(value)],
+      [key, value],
     );
   }
 
   await db.query(
     `insert into audit_log (entity, entity_id, action, actor, payload)
      values ('seed', $1, 'SEEDED', 'system', $2::jsonb)`,
-    [snapshotId, JSON.stringify({ businessDate, holdings: SEED_HOLDINGS.length })],
+    [snapshotId, { businessDate, holdings: SEED_HOLDINGS.length }],
   );
 
   return { snapshotId };

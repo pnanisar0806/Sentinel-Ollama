@@ -159,7 +159,7 @@ export async function raiseIncidents(db: Db, rows: StalenessRow[]): Promise<numb
       await db.query(
         `insert into audit_log (entity, entity_id, action, actor, payload)
          values ('incident', $1, 'STALE_DATA_OPENED', 'agent', $2::jsonb)`,
-        [row.source, JSON.stringify(row)],
+          [row.source, row],
       );
       opened++;
     }
