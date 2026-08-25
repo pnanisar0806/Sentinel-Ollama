@@ -11,7 +11,7 @@
     "sync": "tsx src/jobs/sync.ts",
     "digest": "tsx src/jobs/digest.ts",
     "ips": "tsx src/jobs/ips.ts",
-    "telegram:bot": "tsx src/jobs/telegram-bot.ts",
+    "telegram:bot": "tsx --env-file=.env src/jobs/telegram-bot.ts",
     "indmoney:login": "tsx --env-file=.env src/jobs/indmoney-login.ts"
   },
   "keywords": [],
