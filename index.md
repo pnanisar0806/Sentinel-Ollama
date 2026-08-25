@@ -7,6 +7,7 @@ exports change. Files marked *(planned)* do not exist yet.
 
 ```
 CLAUDE.md      agent operating instructions + hard PRD constraints
+PENDING.md     one-screen open items + watch list — read FIRST, updated every session
 MEMORY.md      durable state: decisions, contracts, gotchas, open questions
 index.md       this file
 migrations/    numbered .sql, applied in name order

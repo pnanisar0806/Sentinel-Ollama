@@ -5,11 +5,12 @@ Single-user, approval-gated personal investment intelligence agent for the owner
 
 ## Session start protocol — DO THIS FIRST, EVERY SESSION
 
-Before any other tool call, read these three files in order:
+Before any other tool call, read these files in order:
 
-1. `MEMORY.md` — durable project state: decisions, contracts, gotchas, open questions.
-2. `index.md` — map of the repo: what lives where, what each module exports.
-3. `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` — the per-task SDD ledger.
+1. `PENDING.md` — one-screen open items + watch list; what this session should pick up.
+2. `MEMORY.md` — durable project state: decisions, contracts, gotchas, open questions.
+3. `index.md` — map of the repo: what lives where, what each module exports.
+4. `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` — the per-task SDD ledger.
 
 Do **not** re-read the plan (`docs/superpowers/plans/2026-08-12-sentinel-phase-0.md`,
 ~4,700 lines) end to end. Read only the section for the task you are about to run.
@@ -18,12 +19,13 @@ Do **not** re-read the plan (`docs/superpowers/plans/2026-08-12-sentinel-phase-0
 
 Update, in the same commit as the work:
 
+- `PENDING.md` — tick off finished items, add new open ones (owner inputs awaited too).
 - `progress.md` — the ledger line for the task (complete / fix round N / deferred minor).
 - `MEMORY.md` — only if a *durable* fact changed: a decision, an interface, a gotcha,
   an owner true-up item, a corrected assumption.
 - `index.md` — only if files were added, moved, or their exports changed.
 
-Keep all three terse. They are read in full at every session start; length is a tax.
+Keep them terse. They are read in full at every session start; length is a tax.
 
 ## Hard constraints from the PRD — never violate, never soften
 
