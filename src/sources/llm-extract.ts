@@ -68,8 +68,8 @@ export async function extractHoldingsFromImage(deps: {
   apiKey: string;
   /** Explicit model override; when absent the free-model chain is walked. */
   model?: string;
-  imageBase64: string;
-  imageMimeType: string;
+  /** One or more pages of the same statement — all sent in a single request. */
+  images: { base64: string; mimeType: string }[];
   positions: { name: string; instrumentId: string; account: string }[];
   now?: Date;
 }): Promise<LlmProposal[]> {
@@ -77,9 +77,13 @@ export async function extractHoldingsFromImage(deps: {
   const list = deps.positions
     .map((p, i) => `${i + 1}. ${p.name} (${p.account})`)
     .join('\n');
-  const prompt = `${SYSTEM_RULES}\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}`;
+  const prompt = `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}`;
   const models = deps.model ? [deps.model] : LLM_MODEL_CHAIN;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const imageParts = deps.images.map((im) => ({
+    type: 'image_url' as const,
+    image_url: { url: `data:${im.mimeType};base64,${im.base64}` },
+  }));
 
   let lastRaw = '';
   for (let m = 0; m < models.length; m++) {
@@ -98,10 +102,7 @@ export async function extractHoldingsFromImage(deps: {
           model,
           messages: [{
             role: 'user',
-            content: [
-              { type: 'text', text: prompt },
-              { type: 'image_url', image_url: { url: `data:${deps.imageMimeType};base64,${deps.imageBase64}` } },
-            ],
+            content: [{ type: 'text', text: prompt }, ...imageParts],
           }],
         }),
       });

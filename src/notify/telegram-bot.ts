@@ -42,6 +42,9 @@ interface TelegramUpdate {
     text?: string;
     photo?: { file_id: string; width: number; height: number }[];
     document?: { file_id: string; file_name?: string; mime_type?: string };
+    /** Present when the message is part of a multi-photo album — Telegram delivers
+     *  each photo as its OWN message, so albums must be buffered and flushed. */
+    media_group_id?: string;
     from?: { id: number; is_bot?: boolean };
   };
 }
@@ -54,6 +57,9 @@ export class TelegramBot {
   private running = false;
   /** LLM proposals awaiting /confirm. Single owner, so one slot suffices. */
   private pending: (LlmProposal & { instrumentId: string | null; account: string | null })[] | null = null;
+  /** Album buffering: media_group_id → queued files, flushed after a short silence. */
+  private readonly mediaBuffers = new Map<string, { fileId: string; mime: string }[]>();
+  private readonly mediaTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(telegram: Telegram, db: Db, env: TelegramEnv) {
     this.telegram = telegram;
@@ -169,45 +175,82 @@ export class TelegramBot {
 
   /** Photo or document from the owner → archive under data/screenshots (gitignored),
    *  then — when LLM_API_KEY is set — propose extracted costs for /confirm. */
+  /**
+   * Albums arrive as SEPARATE messages sharing a media_group_id. Buffer them and
+   * flush once ~2s of silence passes, so a 5-page album becomes ONE LLM call and
+   * ONE proposal card instead of five partial ones.
+   */
   private async handleStatementFile(update: TelegramUpdate, msg: NonNullable<TelegramUpdate['message']>): Promise<void> {
-    try {
-      const fileId = msg.document
-        ? msg.document.file_id
-        : msg.photo![msg.photo!.length - 1]!.file_id; // Telegram sends size variants; take the largest
-      const path = await saveStatementPhoto({
-        fetchImpl: this.telegram['fetchImpl'],
-        botToken: this.telegram['botToken'],
-        fileId,
-        dir: SCREENSHOTS_DIR,
-        updateId: update.update_id,
+    const fileId = msg.document
+      ? msg.document.file_id
+      : msg.photo![msg.photo!.length - 1]!.file_id; // Telegram sends size variants; take the largest
+    const mime = msg.document
+      ? (msg.document.mime_type?.startsWith('image/') ? msg.document.mime_type : 'image/jpeg')
+      : 'image/jpeg';
+
+    const groupId = msg.media_group_id;
+    if (!groupId) {
+      await this.processStatements(update.update_id, [{ fileId, mime }]);
+      return;
+    }
+
+    const buffer = this.mediaBuffers.get(groupId) ?? [];
+    buffer.push({ fileId, mime });
+    this.mediaBuffers.set(groupId, buffer);
+
+    const timer = this.mediaTimers.get(groupId);
+    if (timer) clearTimeout(timer);
+    this.mediaTimers.set(groupId, setTimeout(() => {
+      this.mediaTimers.delete(groupId);
+      const batch = this.mediaBuffers.get(groupId) ?? [];
+      this.mediaBuffers.delete(groupId);
+      if (batch.length) void this.processStatements(update.update_id, batch).catch((e) => {
+        console.error('[telegram-bot] Album processing failed:', e);
       });
+    }, 2_500));
+  }
+
+  /** Archive every file, then read all pages in one extraction pass against the
+   *  current portfolio; proposals ACCUMULATE across batches until /confirm or /reject. */
+  private async processStatements(updateId: number, files: { fileId: string; mime: string }[]): Promise<void> {
+    try {
+      const images: { base64: string; mimeType: string }[] = [];
+      const savedPaths: string[] = [];
+      for (const [i, f] of files.entries()) {
+        const path = await saveStatementPhoto({
+          fetchImpl: this.telegram['fetchImpl'],
+          botToken: this.telegram['botToken'],
+          fileId: f.fileId,
+          dir: SCREENSHOTS_DIR,
+          updateId: updateId + i,
+        });
+        savedPaths.push(path);
+        const bytes = await readFile(path);
+        images.push({ base64: bytes.toString('base64'), mimeType: f.mime });
+      }
 
       if (!this.env.llmApiKey) {
         await this.telegram.send(
-          `📸 Saved ${path}\n\nNow run /holdings and reply with:\n/cost <line#> <total cost in ₹> [bought YYYY-MM-DD]`,
+          `📸 Saved ${savedPaths.length} image(s) to ${SCREENSHOTS_DIR}.\n\n(LLM extraction is off — set LLM_API_KEY.)\nNow run /holdings and reply with:\n/cost <line#> <total cost in ₹> [bought YYYY-MM-DD]`,
         );
         return;
       }
 
-      await this.telegram.send('📸 Saved. Reading the statement…');
+      await this.telegram.send(`📸 Saved ${images.length} page(s). Reading the statement…`);
       const positions = await loadPositions(this.db);
-      const bytes = await readFile(path);
       const proposals = await extractHoldingsFromImage({
         fetchImpl: this.telegram['fetchImpl'],
         apiKey: this.env.llmApiKey,
         ...(this.env.llmModel ? { model: this.env.llmModel } : {}),
-        imageBase64: bytes.toString('base64'),
-        imageMimeType: path.endsWith('.png') ? 'image/png' : 'image/jpeg',
+        images,
         positions,
       });
 
       if (!proposals.length) {
-        await this.telegram.send('Could not read any costs from that image. Use /holdings + /cost manually.');
+        await this.telegram.send('Could not read any costs from those pages. Use /holdings + /cost manually.');
         return;
       }
 
-      // Screenshots arrive in batches (scrolled pages) — ACCUMULATE, never replace,
-      // or page 2 silently destroys page 1. /reject clears the whole pending set.
       const prior = this.pending?.length ?? 0;
       this.pending = [
         ...(this.pending ?? []),

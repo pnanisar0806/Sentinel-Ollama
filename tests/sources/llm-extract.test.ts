@@ -18,7 +18,7 @@ describe('extractHoldingsFromImage', () => {
     }) as typeof fetch;
 
     const proposals = await extractHoldingsFromImage({
-      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+      fetchImpl, apiKey: 'K', images: [{ base64: 'QQ==', mimeType: 'image/jpeg' }], positions: POSITIONS,
     });
 
     expect(captured!.url).toBe('https://openrouter.ai/api/v1/chat/completions');
@@ -40,12 +40,35 @@ describe('extractHoldingsFromImage', () => {
     expect(proposals[0]!.confidence).toBe('high');
   });
 
+  it('sends every page of a multi-page statement in one request', async () => {
+    let captured: { init: RequestInit } | null = null;
+    const fetchImpl = (async (_url: string | URL | RequestInfo, init?: RequestInit) => {
+      captured = { init: init! };
+      return okResponse('{"items":[]}');
+    }) as typeof fetch;
+
+    await extractHoldingsFromImage({
+      fetchImpl, apiKey: 'K',
+      images: [
+        { base64: 'UAGE1', mimeType: 'image/jpeg' },
+        { base64: 'UAGE2', mimeType: 'image/png' },
+      ],
+      positions: POSITIONS,
+    });
+
+    const body = JSON.parse(String(captured!.init.body));
+    const parts = body.messages[0].content.filter((c: { type: string }) => c.type === 'image_url');
+    expect(parts).toHaveLength(2);
+    expect(parts[0].image_url.url).toBe('data:image/jpeg;base64,UAGE1');
+    expect(parts[1].image_url.url).toBe('data:image/png;base64,UAGE2');
+  });
+
   it('demotes an out-of-range line to unmatched instead of guessing', async () => {
     const fetchImpl = (async () => okResponse(
       '{"items":[{"line":99,"name":"Mystery","totalCostInr":"100"}]}',
     )) as typeof fetch;
     const proposals = await extractHoldingsFromImage({
-      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+      fetchImpl, apiKey: 'K', images: [{ base64: 'QQ==', mimeType: 'image/jpeg' }], positions: POSITIONS,
     });
     expect(proposals[0]!.line).toBeNull();
   });
@@ -55,7 +78,7 @@ describe('extractHoldingsFromImage', () => {
       '{"items":[{"line":1,"name":"A","totalCostInr":"abc"},{"line":1,"name":"B","totalCostInr":"0"},{"line":1,"name":"C","totalCostInr":"500"}]}',
     )) as typeof fetch;
     const proposals = await extractHoldingsFromImage({
-      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+      fetchImpl, apiKey: 'K', images: [{ base64: 'QQ==', mimeType: 'image/jpeg' }], positions: POSITIONS,
     });
     expect(proposals).toHaveLength(1);
     expect(proposals[0]!.costPaise).toBe(50_000n);
@@ -66,7 +89,7 @@ describe('extractHoldingsFromImage', () => {
       new Response(JSON.stringify({ error: { message: 'model is broken' } }), { status: 500 })
     ) as typeof fetch;
     await expect(extractHoldingsFromImage({
-      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+      fetchImpl, apiKey: 'K', images: [{ base64: 'QQ==', mimeType: 'image/jpeg' }], positions: POSITIONS,
     })).rejects.toThrow(/model is broken/);
   });
 
@@ -85,7 +108,7 @@ describe('extractHoldingsFromImage', () => {
     }) as typeof fetch;
 
     const proposals = await extractHoldingsFromImage({
-      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+      fetchImpl, apiKey: 'K', images: [{ base64: 'QQ==', mimeType: 'image/jpeg' }], positions: POSITIONS,
     });
 
     // primary retried once, then the chain moved to the next free pool
