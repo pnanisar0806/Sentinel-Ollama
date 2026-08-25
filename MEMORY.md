@@ -124,10 +124,17 @@ longer representable — deliberate schema change, not a widened assertion.
   → `US:AAPL`; Apple had been wearing the seed basket's name and carrying the whole
   book's invested figure as its own cost.
 - Reliance Power (groww, manual closure) ₹2,565: **owner-confirmed**.
-- GOTCHA (bit us twice): the LLM's line-anchoring flips on near-identical names
-  (TMCV/TMPV) nondeterministically across runs. Supersede now contains the damage to
-  one lot, but a mis-anchored confirm still writes the wrong instrument confidently.
-  Before `/confirm` on such names, eyeball the proposal card's target (`→ INDS…`).
+- GOTCHA → FIXED STRUCTURALLY (2026-08-26): the LLM's line-anchoring flips on
+  near-identical names (TMCV/TMPV) nondeterministically — it bit THREE times in one
+  night, once writing TMCV's cost onto TATAPOWER's row. Fix, layered: (1)
+  `src/sources/statement-tickers.ts` — owner-verified Zerodha symbol → instrument map
+  (28 pairs from the owner's own statements/confirmations; nothing inferred); a ticker
+  hit OVERRIDES the model's guessed line (`resolveProposalTarget`). (2) The extraction
+  prompt now carries "KNOWN SYMBOL MAPPINGS" so anchoring improves at the source.
+  (3) Accumulating proposals that target the same holding with DIFFERENT costs are
+  flagged ⚠️ and `/confirm all` SKIPS them — only explicit `/confirm <#>` writes a
+  conflict, so last-write-wins roulette is dead. New holdings must be ADDED to the map
+  (owner-verified only) or they fall back to line anchoring.
 
 ---
 

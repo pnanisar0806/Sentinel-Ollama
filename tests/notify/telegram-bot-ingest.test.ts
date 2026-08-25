@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { TelegramBot } from '../../src/notify/telegram-bot.js';
+import { TelegramBot, displayOrder, resolveProposalTarget } from '../../src/notify/telegram-bot.js';
 import type { Db } from '../../src/db/client.js';
 import type { TelegramEnv } from '../../src/config/env.js';
 import type { Telegram } from '../../src/notify/telegram.js';
-import { displayOrder } from '../../src/notify/telegram-bot.js';
 import type { Paise } from '../../src/money/paise.js';
 
 /**
@@ -134,6 +133,65 @@ describe('/cost resolves against the line numbers /holdings displayed', () => {
     expect(lots2[0]![0]).toBe('IDX:BETA');
     expect(lots2[0]![4]).toBe('12345600');
     void lotInserts;
+  });
+});
+
+describe('resolveProposalTarget — ticker beats the model\u2019s line guess', () => {
+  const positions = [
+    { instrumentId: 'IND:INDS00395', account: 'zerodha' }, // Tata Power
+    { instrumentId: 'IND:INDS00954', account: 'zerodha' }, // TMPV
+    { instrumentId: 'IND:INDS39566', account: 'zerodha' }, // TMCV
+  ];
+
+  it('a known ticker overrides a WRONG line number (the live failure mode)', () => {
+    // The model once anchored TMCV's cost onto Tata Power's line.
+    const t = resolveProposalTarget({ name: 'TMCV', line: 0 }, positions);
+    expect(t).toEqual({ instrumentId: 'IND:INDS39566', account: 'zerodha' });
+  });
+
+  it('unknown names still anchor by line; unknown + no line stay unwritten', () => {
+    expect(resolveProposalTarget({ name: 'Some New Fund', line: 1 }, positions))
+      .toEqual({ instrumentId: 'IND:INDS00954', account: 'zerodha' });
+    expect(resolveProposalTarget({ name: 'Some New Fund', line: null }, positions))
+      .toEqual({ instrumentId: null, account: null });
+    expect(resolveProposalTarget({ name: 'Some New Fund', line: 99 }, positions))
+      .toEqual({ instrumentId: null, account: null });
+  });
+});
+
+describe('/confirm all refuses conflicted proposals', () => {
+  const proposal = (name: string, id: string | null, costPaise: bigint) => ({
+    line: null,
+    name,
+    costPaise: costPaise as Paise,
+    acquiredOn: '2026-01-01',
+    confidence: 'high' as const,
+    instrumentId: id,
+    account: id === null ? null : 'zerodha',
+    ...(id !== null && costPaise === 999n ? { conflictWithCost: 111n as Paise } : {}),
+  });
+
+  it('writes non-conflicted entries, keeps conflicted pending, and says so', async () => {
+    const { privates, lotInserts, sent } = makeDeps([]);
+    privates.pending = [
+      proposal('Safe', 'IDX:SAFE', 100n),
+      proposal('Clash', 'IDX:CLASH', 999n), // flagged: pending already had ₹1.11 for it
+    ];
+
+    await privates.handleConfirm('/confirm all');
+    expect(lotInserts).toHaveLength(1);
+    expect(lotInserts[0]![0]).toBe('IDX:SAFE');
+    expect(privates.pending!.map((p) => p.instrumentId)).toEqual(['IDX:CLASH']);
+    expect(sent.join('\n')).toContain('Conflicting proposals skipped: #2');
+  });
+
+  it('an explicit /confirm <#> overrides the conflict deliberately', async () => {
+    const { privates, lotInserts } = makeDeps([]);
+    privates.pending = [proposal('Clash', 'IDX:CLASH', 999n)];
+
+    await privates.handleConfirm('/confirm 1');
+    expect(lotInserts).toHaveLength(1);
+    expect(lotInserts[0]![0]).toBe('IDX:CLASH');
   });
 });
 

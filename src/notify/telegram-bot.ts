@@ -8,8 +8,9 @@ import { rateMicros } from '../money/fx.js';
 import { assessStaleness } from '../sources/staleness.js';
 import { parseCostCommand, insertOwnerCostLot, saveStatementPhoto } from '../sources/owner-ingest.js';
 import { extractHoldingsFromImage, type LlmProposal } from '../sources/llm-extract.js';
+import { resolveTicker, tickerForInstrument, normalizeTicker } from '../sources/statement-tickers.js';
 import { loadPositions, type Position } from '../domain/networth.js';
-import { formatInr } from '../money/paise.js';
+import { formatInr, type Paise } from '../money/paise.js';
 import { readFile } from 'node:fs/promises';
 import { Telegram, escapeMarkdown } from './telegram.js';
 
@@ -43,6 +44,28 @@ export function displayOrder<T extends { name?: string | null; instrumentId: str
   );
 }
 
+/**
+ * Resolves where a proposal's cost should land. A known statement ticker is
+ * AUTHORITATIVE — the model's `line` guess flips nondeterministically on
+ * near-identical names (TMCV/TMPV wrote three wrong lots on 2026-08-25), while the
+ * ticker map is owner-verified. The line anchors only holdings the map doesn't know.
+ */
+export function resolveProposalTarget(
+  p: { name?: string | null; line: number | null },
+  positions: { instrumentId: string; account: string }[],
+): { instrumentId: string | null; account: string | null } {
+  const byTicker = p.name ? resolveTicker(p.name) : undefined;
+  if (byTicker) {
+    const pos = positions.find((q) => q.instrumentId === byTicker);
+    if (pos) return { instrumentId: pos.instrumentId, account: pos.account };
+  }
+  if (p.line === null || p.line < 0 || p.line >= positions.length) {
+    return { instrumentId: null, account: null };
+  }
+  const pos = positions[p.line]!;
+  return { instrumentId: pos.instrumentId, account: pos.account };
+}
+
 interface TelegramUpdate {
   update_id: number;
   message?: {
@@ -65,8 +88,15 @@ export class TelegramBot {
   private readonly env: TelegramEnv;
   private offset = 0;
   private running = false;
-  /** LLM proposals awaiting /confirm. Single owner, so one slot suffices. */
-  private pending: (LlmProposal & { instrumentId: string | null; account: string | null })[] | null = null;
+  /** LLM proposals awaiting /confirm. Single owner, so one slot suffices.
+   *  `conflictWithCost` marks a proposal that targets a holding already pending with a
+   *  DIFFERENT value — `/confirm all` skips those (last-write-wins roulette wrote a
+   *  wrong cost three times on 2026-08-25); only an explicit `/confirm <#>` writes it. */
+  private pending: (LlmProposal & {
+    instrumentId: string | null;
+    account: string | null;
+    conflictWithCost?: Paise | null;
+  })[] | null = null;
   /** Album buffering: media_group_id → queued files, flushed after a short silence. */
   private readonly mediaBuffers = new Map<string, { fileId: string; mime: string }[]>();
   private readonly mediaTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -248,12 +278,19 @@ export class TelegramBot {
 
       await this.telegram.send(`📸 Saved ${images.length} page(s). Reading the statement…`);
       const positions = await loadPositions(this.db);
+      const knownTickers = positions
+        .map((pos) => {
+          const t = tickerForInstrument(pos.instrumentId);
+          return t ? `${t} = ${pos.name || pos.instrumentId}` : undefined;
+        })
+        .filter((s): s is string => s !== undefined);
       const proposals = await extractHoldingsFromImage({
         fetchImpl: this.telegram['fetchImpl'],
         apiKey: this.env.llmApiKey,
         ...(this.env.llmModel ? { model: this.env.llmModel } : {}),
         images,
         positions,
+        ...(knownTickers.length ? { knownTickers } : {}),
       });
 
       if (!proposals.length) {
@@ -262,19 +299,26 @@ export class TelegramBot {
       }
 
       const prior = this.pending?.length ?? 0;
-      this.pending = [
-        ...(this.pending ?? []),
-        ...proposals.map((p) => ({
-          ...p,
-          instrumentId: p.line === null ? null : positions[p.line]!.instrumentId,
-          account: p.line === null ? null : positions[p.line]!.account,
-        })),
-      ];
-      const lines = this.pending.slice(prior).map((p, i) => {
-        const target = p.line === null
+      const incoming = proposals.map((p) => {
+        const target = resolveProposalTarget(p, positions);
+        // Same holding already pending at a DIFFERENT value → mark, don't trust.
+        // Two album batches proposing conflicting costs used to both write,
+        // last-write-wins (the Tata swap, 2026-08-25).
+        const clash = (this.pending ?? []).find(
+          (q) => q.instrumentId !== null && q.instrumentId === target.instrumentId
+            && q.account === target.account && q.costPaise !== p.costPaise,
+        );
+        return { ...p, ...target, conflictWithCost: clash ? clash.costPaise : null };
+      });
+      this.pending = [...(this.pending ?? []), ...incoming];
+      const lines = incoming.map((p, i) => {
+        const target = p.instrumentId === null
           ? '⚠️ no matching holding'
           : `${p.instrumentId} (${p.account})`;
-        return `${prior + i + 1}. ${p.name} → ${target} = ${formatInr(p.costPaise)} [${p.confidence}]`;
+        const flag = p.conflictWithCost != null
+          ? ` ⚠️ pending already has ${formatInr(p.conflictWithCost)} for it`
+          : '';
+        return `${prior + i + 1}. ${p.name} → ${target} = ${formatInr(p.costPaise)}${flag} [${p.confidence}]`;
       });
       lines.push('', `_Pending total: ${this.pending.length}. Writes only after:_ /confirm all · /confirm <#> · /reject`);
       await this.telegram.send(lines.join('\n'));
@@ -295,13 +339,19 @@ export class TelegramBot {
     }
     const parts = text.trim().split(/\s+/);
     const arg = parts[1]?.toLowerCase();
+    // /confirm all refuses CONFLICTED entries — two batches proposing different costs
+    // for the same holding used to both write, last one winning by accident. An
+    // explicit /confirm <#> is the owner's conscious override.
     const targets = arg === 'all'
-      ? this.pending.map((_, i) => i)
+      ? this.pending.map((_, i) => i).filter((i) => this.pending![i]!.conflictWithCost == null)
       : [Number(arg) - 1];
     if (targets.some((t) => !Number.isInteger(t) || t < 0 || t >= this.pending!.length)) {
       await this.telegram.send('usage: /confirm all | /confirm <proposal#>');
       return;
     }
+    const conflictedIdx = this.pending
+      .map((p, i) => (p.conflictWithCost != null ? i : -1))
+      .filter((i) => i >= 0);
 
     const written: string[] = [];
     const updated: string[] = [];
@@ -345,6 +395,12 @@ export class TelegramBot {
     if (updated.length) lines.push(`♻️ Updated:`, ...updated);
     if (unchanged.length) lines.push(`➖ Unchanged:`, ...unchanged);
     if (skipped.length) lines.push('', `⏭️ Skipped:`, ...skipped.map((s) => `• ${escapeMarkdown(s)}`));
+    if (arg === 'all' && conflictedIdx.length) {
+      lines.push(
+        '',
+        `⚠️ Conflicting proposals skipped: #${conflictedIdx.map((i) => i + 1).join(', #')} — review and /confirm <#> to write one anyway`,
+      );
+    }
     lines.push('', 'Feeds P&L from the next digest onward.');
     await this.telegram.send(lines.join('\n'));
   }

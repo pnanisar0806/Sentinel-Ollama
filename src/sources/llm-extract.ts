@@ -71,13 +71,20 @@ export async function extractHoldingsFromImage(deps: {
   /** One or more pages of the same statement — all sent in a single request. */
   images: { base64: string; mimeType: string }[];
   positions: { name: string; instrumentId: string; account: string }[];
+  /** Owner-verified "TICKER = Holding name" lines. Statement screenshots show exchange
+   *  symbols; without these the model must fuzzy-match tickers to long names, which is
+   *  where near-identical rows (TMCV/TMPV) get swapped. */
+  knownTickers?: string[];
   now?: Date;
 }): Promise<LlmProposal[]> {
   const now = deps.now ?? new Date();
   const list = deps.positions
     .map((p, i) => `${i + 1}. ${p.name} (${p.account})`)
     .join('\n');
-  const prompt = `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}`;
+  const hints = deps.knownTickers?.length
+    ? `\n\nKNOWN SYMBOL MAPPINGS — a row displaying one of these symbols belongs to exactly this holding:\n${deps.knownTickers.map((s) => `- ${s}`).join('\n')}\nUse the symbol to pick the line with certainty; do not guess between similar names.`
+    : '';
+  const prompt = `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}${hints}`;
   const models = deps.model ? [deps.model] : LLM_MODEL_CHAIN;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const imageParts = deps.images.map((im) => ({

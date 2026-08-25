@@ -29,3 +29,18 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
   names — nondeterministic across runs). Re-corrected via supersede; gotcha recorded in
   MEMORY: eyeball the proposal card's target instrument before confirming near-identical
   names.
+
+## 2026-08-26 (late-night session)
+
+- Owner pasted a proposal card proving the swap mechanism precisely: values read
+  correctly, but anchoring assigned TMCV's cost to TATAPOWER's row and proposed TMPV
+  twice (once per album batch). Confirmed writes were last-write-wins.
+  Production re-corrected (TMCV ₹18,789.88 / TMPV ₹41,530.77 / TATAPOWER ₹27,074
+  verified open).
+- Structural fix shipped: `statement-tickers.ts` owner-verified symbol map overrides
+  line-guess anchoring (`resolveProposalTarget`); extraction prompt carries the symbol
+  mappings; conflicting proposals for the same holding are flagged ⚠️ and skipped by
+  `/confirm all` (explicit `/confirm <#>` overrides). Suite 424 → 432. Commit pending.
+- Digest schedule moved to nightly 21:00 IST + SDD progress ledger created (was
+  referenced by CLAUDE.md but missing) — `f8cb46c`. Push still awaited from owner;
+  bot code takes effect locally on next restart.
