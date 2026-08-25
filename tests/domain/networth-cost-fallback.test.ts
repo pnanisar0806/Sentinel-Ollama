@@ -40,8 +40,10 @@ describe('cost-basis fallback to owner-ingested lots', () => {
   });
 
   it('uses the NEWEST open lot and ignores closed ones regardless of age', async () => {
-    await insertLot({ instrument: 'NSE:GOLDBEES', account: 'zerodha', costPaise: 5_000_000n, acquiredOn: '2023-01-01' });
-    await insertLot({ instrument: 'NSE:GOLDBEES', account: 'zerodha', costPaise: 6_300_000n, acquiredOn: '2024-06-01' }); // newer open
+    // Migration 0006 forbids two OPEN owner lots per position — an older value must
+    // be closed (superseded), which is exactly the history this test walks through.
+    await insertLot({ instrument: 'NSE:GOLDBEES', account: 'zerodha', costPaise: 5_000_000n, acquiredOn: '2023-01-01', closedOn: '2024-06-01' }); // superseded
+    await insertLot({ instrument: 'NSE:GOLDBEES', account: 'zerodha', costPaise: 6_300_000n, acquiredOn: '2024-06-01' }); // newest open
     await insertLot({ instrument: 'NSE:GOLDBEES', account: 'zerodha', costPaise: 9_999_999n, acquiredOn: '2025-01-01', closedOn: '2025-02-01' }); // closed
     expect((await gold()).avgCostPaise).toBe(6_300_000n);
   });

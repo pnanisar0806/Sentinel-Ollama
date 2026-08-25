@@ -13,6 +13,11 @@ describe('resolveCanonicalId', () => {
     expect(resolveCanonicalId('IND:5536')).toBe('MF:5536');
     expect(resolveCanonicalId('IND:INDS19182')).toBe('NSE:INDS19182');
     expect(resolveCanonicalId('INDS19182')).toBe('NSE:INDS19182');
+
+    // Owner screenshot 2026-08-25: code 118186 is Apple itself, not a basket
+    // aggregate — mapping it to US:INDMONEY-BASKET made Apple wear the seed
+    // basket's display name and carried the whole book's cost onto its row.
+    expect(resolveCanonicalId('IND:118186')).toBe('US:AAPL');
   });
 
   it('keeps ISIN-shaped ids canonical without a map entry', () => {

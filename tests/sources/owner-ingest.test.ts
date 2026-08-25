@@ -101,6 +101,95 @@ describe('insertOwnerCostLot', () => {
   });
 });
 
+describe('insertOwnerCostLot reconciliation — upload must not duplicate', () => {
+  // Owner-reported hazard (2026-08-25): re-uploading statements re-recorded costs,
+  // refilling lots with redundant open rows. Contract: same value = no-op,
+  // changed value = supersede (close old, write new), new position = create.
+  it('creates once, then reports unchanged WITHOUT writing a second lot', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-24' });
+
+    const first = await insertOwnerCostLot(db, {
+      instrumentId: 'NSE:GOLDBEES', account: 'zerodha',
+      costPaise: paise(6_300_000n), acquiredOn: '2024-01-15', now: NOW,
+    });
+    expect(first.outcome).toBe('created');
+
+    const second = await insertOwnerCostLot(db, {
+      instrumentId: 'NSE:GOLDBEES', account: 'zerodha',
+      costPaise: paise(6_300_000n), acquiredOn: '2026-08-25', now: NOW,
+    });
+    expect(second.outcome).toBe('unchanged');
+    expect(second.lotId).toBe(first.lotId);
+
+    const open = await db.query(
+      `select id from lots where source = 'owner-telegram' and closed_on is null`,
+    );
+    expect(open).toHaveLength(1);
+    await db.close();
+  });
+
+  it('supersedes on a changed value — old lot closes, exactly one open remains', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-24' });
+
+    const before = await insertOwnerCostLot(db, {
+      instrumentId: 'NSE:GOLDBEES', account: 'zerodha',
+      costPaise: paise(6_300_000n), acquiredOn: '2024-01-15', now: NOW,
+    });
+    const after = await insertOwnerCostLot(db, {
+      instrumentId: 'NSE:GOLDBEES', account: 'zerodha',
+      costPaise: paise(7_100_000n), acquiredOn: '2024-01-15', now: NOW,
+    });
+
+    expect(after.outcome).toBe('superseded');
+    expect(after.lotId).not.toBe(before.lotId);
+    expect(after.previousCostPaise).toBe(6_300_000n);
+
+    const lots = await db.query<{ id: string; cost_paise: number; closed_on: string | null }>(
+      `select id, cost_paise, closed_on from lots
+       where source = 'owner-telegram' order by as_of`,
+    );
+    expect(lots).toHaveLength(2);
+    expect(lots[0]!.closed_on).not.toBeNull();     // old value closed…
+    expect(lots[1]!.closed_on).toBeNull();          // …new value open
+    expect(lots[1]!.cost_paise).toBe(7_100_000);    // ₹71,000 in paise
+
+    const audits = await db.query<{ action: string; payload: Record<string, unknown> }>(
+      `select action, payload from audit_log where entity = 'lots' order by action`,
+    );
+    expect(audits.map((a) => a.action)).toEqual(['ingest', 'ingest']);
+    await db.close();
+  });
+
+  it('refuses a second open owner lot even from RAW SQL — the index, not app code, enforces it', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-24' });
+    await insertOwnerCostLot(db, {
+      instrumentId: 'NSE:GOLDBEES', account: 'zerodha',
+      costPaise: paise(6_300_000n), acquiredOn: '2024-01-15', now: NOW,
+    });
+
+    await expect(db.query(
+      `insert into lots (instrument_id, account, acquired_on, quantity, cost_paise, closed_on, seeded, as_of, source)
+       values ('NSE:GOLDBEES', 'zerodha', '2024-01-15', 1, 999, null, true, $1, 'owner-telegram')`,
+      [NOW],
+    )).rejects.toThrow();
+
+    // Closing the first makes room again — disposal/supersession lifecycle intact.
+    await db.query(`update lots set closed_on = '2026-08-25' where source = 'owner-telegram'`);
+    await expect(db.query(
+      `insert into lots (instrument_id, account, acquired_on, quantity, cost_paise, closed_on, seeded, as_of, source)
+       values ('NSE:GOLDBEES', 'zerodha', '2024-01-15', 1, 999, null, true, $1, 'owner-telegram')`,
+      [NOW],
+    )).resolves.toBeTruthy();
+    await db.close();
+  });
+});
+
 describe('saveStatementPhoto', () => {
   const DIR = 'data/screenshots/.test-tmp';
 

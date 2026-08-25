@@ -41,7 +41,14 @@ export function parseCostCommand(text: string, positionCount: number, now = new 
   return { index: idx - 1, costPaise, acquiredOn };
 }
 
-/** Writes one open lot plus its audit row atomically. Quantity defaults to 1 because
+/** What happened when an owner-supplied cost met the position's existing open lot:
+ *  'created' — first cost for this position;
+ *  'unchanged' — identical cost already on file, NOTHING written;
+ *  'superseded' — different value: old lot closed, new one written (lots refuse
+ *  UPDATE of cost and DELETE — supersession is the only correction path). */
+export type OwnerCostOutcome = 'created' | 'unchanged' | 'superseded';
+
+/** Records an owner-supplied total cost idempotently. Quantity defaults to 1 because
  *  aggregated holdings model totals (see seed convention): quantity x price == total. */
 export async function insertOwnerCostLot(
   db: Db,
@@ -55,8 +62,35 @@ export async function insertOwnerCostLot(
     /** Provenance of the numbers: 'telegram' (typed by owner) or 'llm' (extracted, owner-approved). */
     via?: string;
   },
-): Promise<{ lotId: string }> {
+): Promise<{ lotId: string; outcome: OwnerCostOutcome; previousCostPaise?: Paise }> {
   return db.withTransaction(async (tx) => {
+    const open = await tx.query<{ id: string; cost_paise: string | number }>(
+      `select id, cost_paise from lots
+       where instrument_id = $1 and account = $2
+         and closed_on is null and source = 'owner-telegram'
+       order by as_of desc`,
+      [opts.instrumentId, opts.account],
+    );
+
+    // Re-uploading statements must never pile up redundant lots (live-test finding
+    // 2026-08-25). Same value → no-op; migration 0006's partial unique index enforces
+    // the same one-open-lot invariant against any raw write.
+    if (open.length >= 1 && open.every((o) => BigInt(o.cost_paise) === opts.costPaise)) {
+      return { lotId: open[0]!.id, outcome: 'unchanged' };
+    }
+
+    let outcome: OwnerCostOutcome = 'created';
+    const supersededIds = open.map((o) => o.id);
+    if (open.length > 0) {
+      outcome = 'superseded';
+      for (const o of open) {
+        await tx.query(`update lots set closed_on = $2::date where id = $1`, [
+          o.id,
+          opts.now.slice(0, 10),
+        ]);
+      }
+    }
+
     const rows = await tx.query<{ id: string }>(
       `insert into lots (instrument_id, account, acquired_on, quantity, cost_paise, closed_on, seeded, as_of, source)
        values ($1, $2, $3::date, $4, $5, null, true, $6, 'owner-telegram')
@@ -79,9 +113,16 @@ export async function insertOwnerCostLot(
         // against the live pooler inside a rolled-back transaction 2026-08-25.
         costPaise: opts.costPaise.toString(),
         acquiredOn: opts.acquiredOn,
+        ...(supersededIds.length ? { supersededLots: supersededIds } : {}),
       }],
     );
-    return { lotId };
+    return {
+      lotId,
+      outcome,
+      ...(outcome === 'superseded'
+        ? { previousCostPaise: BigInt(open[0]!.cost_paise) as Paise }
+        : {}),
+    };
   });
 }
 

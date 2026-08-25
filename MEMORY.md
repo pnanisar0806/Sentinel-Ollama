@@ -100,6 +100,31 @@ Fix-on-touch struck: the redundant inline main-module entrypoint in
 `notify/telegram-bot.ts` is gone; `pnpm telegram:bot` via `jobs/telegram-bot.ts` is the
 only entrypoint.
 
+### Upload idempotency (2026-08-25, migration 0006)
+
+`insertOwnerCostLot` is now an UPSERT-BY-VALUE: same cost open → `'unchanged'` (no-op);
+different → `'superseded'` (close old via closed_on + insert new, audit names both);
+none → `'created'`. Migration `0006_owner_lot_idempotency.sql` adds a partial unique
+index — **at most one OPEN owner-telegram lot per (instrument, account)** — so the
+invariant holds against raw SQL from any code path, FR-03 style. Bot messages speak the
+outcome (Recorded / Updated ₹old→₹new / Unchanged). Production applied; a test in
+networth-cost-fallback.test.ts was updated because two OPEN lots per position are no
+longer representable — deliberate schema change, not a widened assertion.
+
+### Portfolio verification (owner answers, 2026-08-25 evening)
+
+- ICICI Nifty 50 under BOTH indmoney (₹6.57L) and zerodha Coin (₹46.7k): **both real**.
+- Tata Motors dual entities: **both real** (TMCV 100u + TMPV 100u per Zerodha
+  screenshot) — and the screenshot exposed that our two lots carried SWAPPED costs;
+  corrected in production through the supersede path (`via: 'owner-correction'`):
+  Tata Motors Ltd ← ₹18,789.88, TMPV ← ₹41,530.77.
+- "US fractional basket" line was never a product: INDmoney code 118186 IS Apple Inc.
+  (fixture proves it; owner screenshot shows the US book = 6 named holdings, summing
+  exactly to the app's portfolio value). Fixed `INDMONEY_TO_CANONICAL['118186']`
+  → `US:AAPL`; Apple had been wearing the seed basket's name and carrying the whole
+  book's invested figure as its own cost.
+- Reliance Power (groww, manual closure) ₹2,565: **owner-confirmed**.
+
 ---
 
 ## Whole-branch review — 2026-08-22, READ THIS BEFORE THE FIX WAVE

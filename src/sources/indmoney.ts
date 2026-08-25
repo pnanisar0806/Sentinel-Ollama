@@ -143,7 +143,9 @@ const INDMONEY_TO_CANONICAL: Record<string, string> = {
   'SERVICE_NOW_EPF': 'EPF:SERVICE_NOW',
   'SAVINGS_HDFC_FEDERAL': 'CASH:SAVINGS_HDFC_FEDERAL',
   // US stocks
-  '118186': 'US:INDMONEY-BASKET',  // US fractional basket code
+  '118186': 'US:AAPL',  // Apple Inc. — owner screenshot (2026-08-25) proved this code
+                        // is Apple itself, NOT a basket aggregate: the six US codes are
+                        // the whole US book and no basket product exists.
 };
 
 const ALNUM = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');

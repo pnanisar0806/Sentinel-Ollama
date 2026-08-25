@@ -304,6 +304,8 @@ export class TelegramBot {
     }
 
     const written: string[] = [];
+    const updated: string[] = [];
+    const unchanged: string[] = [];
     const skipped: string[] = [];
     for (const t of targets) {
       const p = this.pending[t]!;
@@ -311,7 +313,7 @@ export class TelegramBot {
         skipped.push(`${p.name} (no matching holding — use /cost)`);
         continue;
       }
-      await insertOwnerCostLot(this.db, {
+      const res = await insertOwnerCostLot(this.db, {
         instrumentId: p.instrumentId,
         account: p.account,
         quantity: 1,
@@ -320,7 +322,15 @@ export class TelegramBot {
         now: new Date().toISOString(),
         via: 'llm',
       });
-      written.push(`${p.name} = ${formatInr(p.costPaise)}`);
+      if (res.outcome === 'unchanged') {
+        unchanged.push(`• ${p.name} = ${formatInr(p.costPaise)} (already recorded)`);
+      } else if (res.outcome === 'superseded') {
+        updated.push(
+          `• ${p.name}: ${formatInr(res.previousCostPaise!)} → ${formatInr(p.costPaise)}`,
+        );
+      } else {
+        written.push(`• ${p.name} = ${formatInr(p.costPaise)}`);
+      }
     }
     // Written AND skipped entries leave the queue: a skipped proposal can never be
     // confirmed (no matching holding), and leaving either in invited double-writes —
@@ -331,7 +341,9 @@ export class TelegramBot {
     this.pending = remaining.length ? remaining : null;
 
     const lines: string[] = [];
-    if (written.length) lines.push(`✅ Recorded:`, ...written.map((w) => `• ${w}`));
+    if (written.length) lines.push(`✅ Recorded:`, ...written);
+    if (updated.length) lines.push(`♻️ Updated:`, ...updated);
+    if (unchanged.length) lines.push(`➖ Unchanged:`, ...unchanged);
     if (skipped.length) lines.push('', `⏭️ Skipped:`, ...skipped.map((s) => `• ${escapeMarkdown(s)}`));
     lines.push('', 'Feeds P&L from the next digest onward.');
     await this.telegram.send(lines.join('\n'));
@@ -359,7 +371,7 @@ export class TelegramBot {
     const positions = displayOrder(await loadPositions(this.db));
     const cmd = parseCostCommand(text, positions.length);
     const p = positions[cmd.index]!;
-    await insertOwnerCostLot(this.db, {
+    const res = await insertOwnerCostLot(this.db, {
       instrumentId: p.instrumentId,
       account: p.account,
       quantity: 1,
@@ -367,9 +379,12 @@ export class TelegramBot {
       acquiredOn: cmd.acquiredOn,
       now: new Date().toISOString(),
     });
-    await this.telegram.send(
-      `✅ Cost recorded: ${p.instrumentId} (${p.account}) = ${formatInr(cmd.costPaise)}, acquired ${cmd.acquiredOn}.\nIt feeds P&L from the next digest onward.`,
-    );
+    const body = res.outcome === 'unchanged'
+      ? `Already recorded: ${p.instrumentId} (${p.account}) = ${formatInr(cmd.costPaise)}. Nothing changed.`
+      : res.outcome === 'superseded'
+        ? `♻️ Updated: ${p.instrumentId} (${p.account}) ${formatInr(res.previousCostPaise!)} → ${formatInr(cmd.costPaise)}, acquired ${cmd.acquiredOn}.`
+        : `✅ Cost recorded: ${p.instrumentId} (${p.account}) = ${formatInr(cmd.costPaise)}, acquired ${cmd.acquiredOn}.`;
+    await this.telegram.send(`${body}\nIt feeds P&L from the next digest onward.`);
   }
 
   private async buildSources() {
