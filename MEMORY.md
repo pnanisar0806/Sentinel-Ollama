@@ -603,20 +603,18 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
 
 ## Owner true-up items (need real statements — do not guess)
 
-**Gold holding changed (owner, 2026-08-25): GoldBees is GONE; the owner holds "GoldCase"
-now.** The live sync reports `IND:INDS29570` as "Zerodha Gold ETF" (~₹65k) and C-A
-reconciliation retires seed `NSE:GOLDBEES` (₹63,000) through it. If "GoldCase" is that
-same line under a different name, only labels are wrong; if it is a DIFFERENT instrument
-the sync does not see at all, the seed gold row is stale AND the live row is mislabeled —
-allocation drift's GOLD reading is wrong either way until resolved. Owner must confirm
-which. **OPEN: also decide the dup-lot cleanup below before trusting cost-based P&L.**
+**Gold holding changed (owner, 2026-08-25): RESOLVED same day.** "GoldCase" IS the
+`IND:INDS29570` line (~₹65k) INDmoney reports as "Zerodha Gold ETF" — owner-confirmed
+identity, naming only. Seed `NSE:GOLDBEES` retirement through the canonical twin is
+CORRECT; no structural change.
 
-**OPEN (live test 2026-08-25): 89 owner-telegram lots in production, 28 duplicate groups.**
-`lots` refuses DELETE; cleanup = UPDATE `closed_on` (the one permitted mutation) on all
-but one lot per (instrument, account). Where costs AGREE within a group (most), keep any
-one. Where they DISAGREE the owner picks the true cost first — known conflicts:
-Kirloskar Pneumatic has ₹22,291.30 ×2 plus an outlier ₹273.38 (likely a misattributed
-tiny line); Tata Motors PV mixes ₹41,530.77 / ₹18,789.88. Nothing is closed yet.
+**Dup-lot cleanup (2026-08-25): DONE.** Owner chose full cleanup, majority-cost keeper.
+60 of 89 owner-telegram lots closed via UPDATE closed_on (the only permitted mutation),
+each with a CLEANUP_CLOSED audit row naming its survivor and reason; 29 open remain,
+exactly one per (instrument, account), 0 anomalies. Conflicting-cost groups resolved by
+recurring value (Kirloskar ₹273.38 outlier closed; Tata Motors PV kept ₹18,789.88,
+Tata Motors Ltd kept ₹41,530.77). Owner will re-upload statements under the fixed bot to
+re-record costs authoritatively — new lots supersede via the newest-open-lot rule.
 
 **RESOLVED 2026-08-22 from the owner's INDmoney bonds screen.** The screenshot reconciles to
 the rupee with the table below, so `SEED_HOLDINGS` bond cost stands unchanged. What the live
