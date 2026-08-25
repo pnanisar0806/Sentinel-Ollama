@@ -63,10 +63,35 @@ describe('extractHoldingsFromImage', () => {
 
   it('surfaces a provider error by name', async () => {
     const fetchImpl = (async () =>
-      new Response(JSON.stringify({ error: { message: 'rate limited' } }), { status: 429 })
+      new Response(JSON.stringify({ error: { message: 'model is broken' } }), { status: 500 })
     ) as typeof fetch;
     await expect(extractHoldingsFromImage({
       fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
-    })).rejects.toThrow(/rate limited/);
+    })).rejects.toThrow(/model is broken/);
+  });
+
+  it('walks the model chain when the free pool is saturated (429)', async () => {
+    const calledModels: string[] = [];
+    const fetchImpl = (async (_url: string | URL | RequestInfo, init?: RequestInit) => {
+      const model = (JSON.parse(String(init!.body)) as { model: string }).model;
+      calledModels.push(model);
+      if (calledModels.length <= 2) {
+        return new Response(JSON.stringify({
+          error: { message: 'Provider returned error', code: 429,
+            metadata: { raw: 'temporarily rate-limited upstream' } },
+        }), { status: 429 });
+      }
+      return okResponse('{"items":[{"line":2,"name":"Gold","totalCostInr":"63000"}]}');
+    }) as typeof fetch;
+
+    const proposals = await extractHoldingsFromImage({
+      fetchImpl, apiKey: 'K', imageBase64: 'QQ==', imageMimeType: 'image/jpeg', positions: POSITIONS,
+    });
+
+    // primary retried once, then the chain moved to the next free pool
+    expect(calledModels[0]).toBe('google/gemma-4-31b-it:free');
+    expect(calledModels[1]).toBe('google/gemma-4-31b-it:free');
+    expect(calledModels[2]).toBe('minimax/minimax-m3:free');
+    expect(proposals[0]!.costPaise).toBe(6_300_000n);
   });
 });
