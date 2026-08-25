@@ -206,18 +206,24 @@ export class TelegramBot {
         return;
       }
 
-      this.pending = proposals.map((p) => ({
-        ...p,
-        instrumentId: p.line === null ? null : positions[p.line]!.instrumentId,
-        account: p.line === null ? null : positions[p.line]!.account,
-      }));
-      const lines = this.pending.map((p, i) => {
+      // Screenshots arrive in batches (scrolled pages) — ACCUMULATE, never replace,
+      // or page 2 silently destroys page 1. /reject clears the whole pending set.
+      const prior = this.pending?.length ?? 0;
+      this.pending = [
+        ...(this.pending ?? []),
+        ...proposals.map((p) => ({
+          ...p,
+          instrumentId: p.line === null ? null : positions[p.line]!.instrumentId,
+          account: p.line === null ? null : positions[p.line]!.account,
+        })),
+      ];
+      const lines = this.pending.slice(prior).map((p, i) => {
         const target = p.line === null
           ? '⚠️ no matching holding'
           : `${p.instrumentId} (${p.account})`;
-        return `${i + 1}. ${p.name} → ${target} = ${formatInr(p.costPaise)} [${p.confidence}]`;
+        return `${prior + i + 1}. ${p.name} → ${target} = ${formatInr(p.costPaise)} [${p.confidence}]`;
       });
-      lines.push('', '_Writes only after:_ /confirm all · /confirm <#> · /reject');
+      lines.push('', `_Pending total: ${this.pending.length}. Writes only after:_ /confirm all · /confirm <#> · /reject`);
       await this.telegram.send(lines.join('\n'));
     } catch (error) {
       const m = error instanceof Error ? error.message : String(error);
