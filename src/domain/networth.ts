@@ -103,11 +103,24 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
        where ($1::date is null or s.business_date <= $1::date)
        order by s.source, s.business_date desc, s.taken_at desc
      )
-     select h.instrument_id, i.kind, i.name, h.account, h.value_paise, h.avg_cost_paise,
+     select h.instrument_id, i.kind, i.name, h.account, h.value_paise,
+            coalesce(h.avg_cost_paise, oc.cost_paise) as avg_cost_paise,
             i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source, i.canonical_id
      from holdings h
      join latest l on l.id = h.snapshot_id
-     join instruments i on i.id = h.instrument_id`,
+     join instruments i on i.id = h.instrument_id
+     left join lateral (
+       -- Owner-ingested cost basis (source 'owner-telegram') lives as an open lot and
+       -- must survive daily re-syncs: holdings are replaced per snapshot, lots are not.
+       -- The NEWEST open lot wins; a closed lot is disposal history, never cost input.
+       select l.cost_paise
+       from lots l
+       where l.instrument_id = h.instrument_id
+         and l.account = h.account
+         and l.closed_on is null
+       order by l.as_of desc, l.acquired_on desc
+       limit 1
+     ) oc on true`,
     [businessDate ?? null],
   );
 

@@ -8,15 +8,21 @@ import { KiteSource } from '../sources/kite.js';
 import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
 import { assessStaleness } from '../sources/staleness.js';
+import { parseCostCommand, insertOwnerCostLot, saveStatementPhoto } from '../sources/owner-ingest.js';
+import { loadPositions } from '../domain/networth.js';
+import { formatInr } from '../money/paise.js';
 import { Telegram, escapeMarkdown } from './telegram.js';
 import { isMainModule } from '../util/main-module.js';
 
 const POLL_TIMEOUT = 30; // seconds
 const POLL_INTERVAL_MS = 1000;
+const SCREENSHOTS_DIR = 'data/screenshots';
 
 /** Commands the bot understands. */
 const COMMANDS = {
   sync: 'Trigger an on-demand portfolio sync (Kite + INDmoney + FX)',
+  holdings: 'List open positions with their /cost line numbers',
+  cost: 'Record a holding\u2019s total cost from a statement: /cost <n> <inr> [YYYY-MM-DD]',
   status: 'Show staleness and open incidents',
   help: 'Show this help',
 } as const;
@@ -30,6 +36,8 @@ interface TelegramUpdate {
     date: number;
     chat: { id: number | string };
     text?: string;
+    photo?: { file_id: string; width: number; height: number }[];
+    document?: { file_id: string; file_name?: string; mime_type?: string };
     from?: { id: number; is_bot?: boolean };
   };
 }
@@ -94,13 +102,21 @@ export class TelegramBot {
 
   private async handleUpdate(update: TelegramUpdate, sources: Awaited<ReturnType<typeof this.buildSources>>): Promise<void> {
     const msg = update.message;
-    if (!msg?.text) return;
+    if (!msg) return;
 
     const chatId = String(msg.chat.id);
     if (!this.telegram.isOwner(chatId)) {
       console.log('[telegram-bot] Ignored message from non-owner:', chatId);
       return;
     }
+
+    // Photos/documents arrive before any text routing — a statement screenshot is
+    // valid input even with no caption.
+    if (msg.photo?.length || msg.document) {
+      await this.handleStatementFile(update, msg);
+      return;
+    }
+    if (!msg.text) return;
 
     const text = msg.text.trim();
     if (!text.startsWith('/')) return;
@@ -116,6 +132,12 @@ export class TelegramBot {
         case 'sync':
           await this.handleSync(sources);
           break;
+        case 'holdings':
+          await this.handleHoldings();
+          break;
+        case 'cost':
+          await this.handleCost(text);
+          break;
         case 'status':
           await this.handleStatus();
           break;
@@ -130,6 +152,61 @@ export class TelegramBot {
       console.error('[telegram-bot] Command error:', msg);
       await this.telegram.send(`⚠️ Command failed: ${escapeMarkdown(msg)}`);
     }
+  }
+
+  /** Photo or document from the owner → archive under data/screenshots (gitignored). */
+  private async handleStatementFile(update: TelegramUpdate, msg: NonNullable<TelegramUpdate['message']>): Promise<void> {
+    try {
+      const fileId = msg.document
+        ? msg.document.file_id
+        : msg.photo![msg.photo!.length - 1]!.file_id; // Telegram sends size variants; take the largest
+      const path = await saveStatementPhoto({
+        fetchImpl: this.telegram['fetchImpl'],
+        botToken: this.telegram['botToken'],
+        fileId,
+        dir: SCREENSHOTS_DIR,
+        updateId: update.update_id,
+      });
+      await this.telegram.send(
+        `📸 Saved ${path}\n\nNow run /holdings and reply with:\n/cost <line#> <total cost in ₹> [bought YYYY-MM-DD]`,
+      );
+    } catch (error) {
+      const m = error instanceof Error ? error.message : String(error);
+      console.error('[telegram-bot] Statement download failed:', m);
+      await this.telegram.send(`⚠️ Could not save that file: ${escapeMarkdown(m)}`);
+    }
+  }
+
+  /** Numbered open positions — the line numbers /cost expects. */
+  private async handleHoldings(): Promise<void> {
+    const positions = await loadPositions(this.db);
+    if (!positions.length) {
+      await this.telegram.send('_No positions yet — run /sync first._');
+      return;
+    }
+    const lines = positions.map((p, i) =>
+      `${i + 1}. ${p.instrumentId} (${p.account}) — ${formatInr(p.valuePaise)}`,
+    );
+    lines.push('', '_Reply with:_ /cost <line#> <total cost in ₹> [YYYY-MM-DD]');
+    await this.telegram.send(lines.join('\n'));
+  }
+
+  /** Owner-supplied total cost for position <n>, persisted as an open lot. */
+  private async handleCost(text: string): Promise<void> {
+    const positions = await loadPositions(this.db);
+    const cmd = parseCostCommand(text, positions.length);
+    const p = positions[cmd.index]!;
+    await insertOwnerCostLot(this.db, {
+      instrumentId: p.instrumentId,
+      account: p.account,
+      quantity: 1,
+      costPaise: cmd.costPaise,
+      acquiredOn: cmd.acquiredOn,
+      now: new Date().toISOString(),
+    });
+    await this.telegram.send(
+      `✅ Cost recorded: ${p.instrumentId} (${p.account}) = ${formatInr(cmd.costPaise)}, acquired ${cmd.acquiredOn}.\nIt feeds P&L from the next digest onward.`,
+    );
   }
 
   private async buildSources() {

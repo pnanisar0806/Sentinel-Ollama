@@ -16,7 +16,9 @@ const workflowsDir = fileURLToPath(new URL('../../.github/workflows/', import.me
 
 /** Collects the `env:` keys of the single `run:` step that invokes the job. */
 function workflowEnv(file: string): Record<string, string> {
-  const text = readFileSync(workflowsDir + file, 'utf8');
+  // Normalize CRLF: a Windows checkout materializes these files with \r\n, and the
+  // regex below is LF-only — without this the whole suite fails off a fresh clone.
+  const text = readFileSync(workflowsDir + file, 'utf8').replace(/\r\n/g, '\n');
   // Tolerates comment and blank lines inside the block - real workflows have
   // them, and a parser that stops at the first `#` silently reports a short
   // environment, which would make this whole test lie.
