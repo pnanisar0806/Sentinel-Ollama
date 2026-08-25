@@ -154,8 +154,10 @@ describe('loadPositions snapshot selection', () => {
     const values = positions.map((p) => p.valuePaise);
 
     expect(values).not.toContain(111_11n);          // older same-source snapshot dropped
-    expect(values).toContain(222_22n);              // other source merged in
-    expect(positions.length).toBe(SEED_HOLDINGS.length + 1);
+    expect(values.filter((v) => v === 222_22n)).toHaveLength(1); // other source merged in
+    // The kite RPOWER shares the seed RPOWER's canonical id AND account, so the
+    // seed placeholder retires (C-A): 20 seed rows - 1 retired + 1 live = 20.
+    expect(positions.length).toBe(SEED_HOLDINGS.length);
     expect(new Set(positions.map((p) => p.source))).toEqual(new Set(['manual-seed', 'kite']));
   });
 

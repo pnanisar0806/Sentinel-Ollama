@@ -748,6 +748,24 @@ is the owner's balance sheet, so it needs confirmation before being hard-coded.
 set in `allocation.test.ts` are pinned to the seed at cost. Marking to market moves both, in
 the same commit, as MEMORY already anticipated for bonds (+₹55,798.23).
 
+## Production reconciliation fix (2026-08-25)
+
+First real sync exposed two defects that kept seed/live duplicates alive (~₹35L double-count):
+1. **Prefix bug**: mapper looked up `INDMONEY_TO_CANONICAL[id]` with prefixed ids (`IND:5536`)
+   while keys are bare (`5536`) → every non-bond live row had NULL canonical.
+2. **Account-label mismatch**: live rows were hardcoded `account='indmoney'` while seed uses
+   real custodies ('zerodha'/'bank'/'epf') → (canonical,account) never collided.
+
+Fixes, all test-backed (408/408): `resolveCanonicalId()` matches bare/prefixed/ISIN-shaped ids
+plus alphanumeric-skeleton statement codes (ServiceNow EPF, `3004965*` bank rows); live rows now
+carry **broker-attributed accounts** (normalized `Zerodha `→`zerodha`, blanks fall back by asset
+type EPF→epf / SA→bank); aggregation groups per (instrument, broker-folio); seed retirement adds
+CANONICAL-ONLY matching (account label ignored for seed; live-live never merged) and retires the
+two placeholder baskets (`SMALLCASE-RESIDUE`, `US:INDMONEY-BASKET`) once unmapped live EQUITY rows
+exist; an owner-verified seed cost **carries over** to its live twin when the twin reports none
+(bond face-value trap). Note: INDmoney DOES report numeric invested amounts for EPF — only
+IND_STOCK is 'unknown'.
+
 ## Deferred minors (tracked, not blocking)
 
 **Fix-on-touch**: if the task you are running edits one of these files, fix the minor in

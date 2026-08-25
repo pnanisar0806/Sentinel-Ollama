@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { McpClient } from './mcp-client.js';
 import type { Source, SourceRow } from './types.js';
 import { rupees, type Paise } from '../money/paise.js';
-import type { InstrumentSeed } from '../seed/seed-data.js';
+import type { Account, InstrumentSeed } from '../seed/seed-data.js';
 
 interface SnapshotRow {
   instrumentId: string;
@@ -47,7 +47,7 @@ export class FileIndmoneySource implements Source {
       instrument: {
         id: h.instrumentId, kind: h.kind, name: h.name,
         currency: h.currency, ...(h.issuer ? { issuer: h.issuer } : {}),
-        canonicalId: INDMONEY_TO_CANONICAL[h.instrumentId] ?? undefined,
+        canonicalId: resolveCanonicalId(h.instrumentId),
       },
     }));
     return { rows, asOf: parsed.asOf };
@@ -63,10 +63,12 @@ interface RemoteHolding {
   investment_code?: string;
   investment?: string;
   asset_type?: string;
-  /** A number, or the literal string 'unknown' — every IND_STOCK row is 'unknown'. */
+  /** A number, or the literal string 'unknown' - every IND_STOCK row is 'unknown'. */
   invested_amount?: number | string | null;
   market_value?: number;
   total_units?: number;
+  /** Where the holding actually custodies: 'Zerodha', 'Groww', 'INDmoney', '' … */
+  broker?: string;
 }
 
 /** The tool answers per asset class; there is no all-assets call. */
@@ -144,6 +146,53 @@ const INDMONEY_TO_CANONICAL: Record<string, string> = {
   '118186': 'US:INDMONEY-BASKET',  // US fractional basket code
 };
 
+const ALNUM = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Resolves a live instrument id to the owner-curated canonical identity, or undefined.
+ * Live ids carry an 'IND:' prefix ('IND:5536') while the map is keyed by bare code —
+ * matching on BOTH is what lets the seed ever be superseded. ISIN-shaped ids are
+ * canonical as-is. Statement codes (EPF company name, bank account numbers) match on
+ * alphanumeric-normalized prefixes so separator drift cannot break them. Anything else
+ * is undefined — an unknown stays unknown rather than being invented (FR-02 discipline).
+ */
+export function resolveCanonicalId(id: string): string | undefined {
+  if (!id) return undefined;
+  const direct = INDMONEY_TO_CANONICAL[id];
+  if (direct) return direct;
+  const bare = id.startsWith('IND:') ? id.slice(4) : id;
+  const viaBare = INDMONEY_TO_CANONICAL[bare];
+  if (viaBare) return viaBare;
+  const bareIsin = bare.replace(/^ISIN:/, '');
+  if (ISIN.test(bareIsin)) return `ISIN:${bareIsin}`;
+  // instrumentIdFor() uppercases and dash-joins spaces, so statement-code matching
+  // runs on the alphanumeric skeleton of the PREFIX-STRIPPED id.
+  const norm = ALNUM(bare);
+  if (norm === 'servicenowsoftwaredevelopmentindiapvt') return 'EPF:SERVICE_NOW';
+  if (norm.startsWith('3004965federal')) return 'CASH:SAVINGS_HDFC_FEDERAL';
+  if (norm.startsWith('3004965hdfcbank')) return 'CASH:SAVINGS_HDFC_FEDERAL';
+  return undefined;
+}
+
+/**
+ * Live rows speak the seed's account language: broker provenance normalized to the
+ * Account union ('Zerodha ' -> 'zerodha'), with per-type fallbacks where INDmoney's
+ * own broker field is blank (EPF rows, bank rows, bonds). Unknown brokers fold into
+ * 'indmoney' rather than inventing a new Account value.
+ */
+function brokerAccountFor(h: RemoteHolding): Account {
+  const broker = (h.broker ?? '').trim().toLowerCase();
+  if (broker === 'zerodha') return 'zerodha';
+  if (broker === 'groww') return 'groww';
+  if (broker === 'indmoney' || broker === '') {
+    const t = h.asset_type ?? '';
+    if (t === 'EPF') return 'epf';
+    if (t === 'SA') return 'bank';
+    return 'indmoney';
+  }
+  return 'indmoney';
+}
+
 export class RemoteIndmoneySource implements Source {
   readonly name = 'indmoney';
 
@@ -209,12 +258,15 @@ export class RemoteIndmoneySource implements Source {
 }
 
 /**
- * One instrument is one position. The same fund arrives once per broker/folio —
- * ICICI Nifty 50 comes back three times — and leaving them as separate rows would
- * understate a single-scheme concentration and collide on (snapshot, instrument).
+ * One instrument per broker-folio. The same fund arrives once per broker — ICICI
+ * Nifty 50 comes back from two INDmoney folios AND a Zerodha folio — and leaving
+ * them as separate rows would collide on (snapshot, instrument). Grouping is by
+ * (instrument, broker-normalized account): the two INDmoney folios merge with each
+ * other while the Zerodha folio stays distinct, because the account label is what
+ * the C-A reconciliation keys on and what the owner reads.
  */
 function aggregate(holdings: RemoteHolding[]): SourceRow[] {
-  const byId = new Map<string, SourceRow>();
+  const byKey = new Map<string, SourceRow>();
 
   for (const h of holdings) {
     const assetType = h.asset_type ?? '';
@@ -230,6 +282,7 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
     }
 
     const id = instrumentIdFor(h);
+    const account = brokerAccountFor(h);
     // A non-numeric invested_amount ('unknown') is FR-02 unknown cost, never zero.
     //
     // For BONDS `invested_amount` is FACE VALUE, not cost — confirmed exactly against
@@ -244,19 +297,20 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
       : typeof h.invested_amount === 'number' && h.invested_amount > 0
       ? rupees(h.invested_amount.toFixed(2))
       : null;
-    const existing = byId.get(id);
+    const key = `${id}|${account}`;
+    const existing = byKey.get(key);
 
     if (!existing) {
-      byId.set(id, {
+      byKey.set(key, {
         instrumentId: id,
-        account: 'indmoney',
+        account,
         quantity: h.total_units ?? 0,
         valuePaise: rupees(h.market_value.toFixed(2)),
         avgCostPaise: cost,
         instrument: {
           id, kind, name: h.investment ?? id,
           currency: CURRENCY_BY_ASSET_TYPE[assetType] ?? 'INR',
-          canonicalId: INDMONEY_TO_CANONICAL[id] ?? (kind === 'BOND' && ISIN.test(id.replace('ISIN:', '')) ? id : undefined),
+          canonicalId: resolveCanonicalId(id),
         },
       });
       continue;
@@ -270,5 +324,5 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
       : (existing.avgCostPaise + cost) as Paise;
   }
 
-  return [...byId.values()];
+  return [...byKey.values()];
 }

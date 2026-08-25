@@ -55,8 +55,11 @@ describe('RemoteIndmoneySource', () => {
 
     expect(rows.length).toBeGreaterThan(0);
     expect(asOf).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    // Accounts are broker-attributed now: real custodies (zerodha/groww) plus the
+    // per-type fallbacks (indmoney/epf/bank). 'fidelity' never comes from INDmoney.
+    const allowed = new Set(['zerodha', 'groww', 'indmoney', 'epf', 'bank']);
     for (const r of rows) {
-      expect(r.account).toBe('indmoney');
+      expect(allowed.has(r.account)).toBe(true);
       expect(typeof r.valuePaise).toBe('bigint');
       expect(r.avgCostPaise === null || typeof r.avgCostPaise === 'bigint').toBe(true);
     }
@@ -93,17 +96,19 @@ describe('RemoteIndmoneySource', () => {
     expect(rows.filter((r) => r.avgCostPaise === null)).toHaveLength(rows.length);
   });
 
-  it('aggregates the same instrument held across brokers into one position', async () => {
+  it('aggregates folios within a broker but keeps real brokers apart', async () => {
     const mf = capture('MF');
     const codes = mf.holdings.map((h) => h.investment_code);
     const distinct = new Set(codes);
     expect(distinct.size).toBeLessThan(codes.length); // the capture really does repeat
 
     const { rows } = await source(stubOnce(mf), ['MF']).fetch();
-    expect(rows).toHaveLength(distinct.size);
+    // Per-broker attribution means MORE rows than before (a Zerodha folio no longer
+    // merges into an INDmoney folio of the same fund) but never fewer than the
+    // distinct instrument count.
+    expect(rows.length).toBeGreaterThanOrEqual(distinct.size);
 
-    // Each row is converted to exact paise at the boundary and summed as bigint —
-    // summing the floats first and rounding once lands a paise away.
+    // Money is conserved exactly regardless of how folios are grouped.
     const expected = mf.holdings.reduce((s, h) => s + rupees(h.market_value!.toFixed(2)), 0n);
     expect(rows.reduce((s, r) => s + r.valuePaise, 0n)).toBe(expected);
   });

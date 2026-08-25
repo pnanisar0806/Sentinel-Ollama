@@ -185,7 +185,7 @@ export class TelegramBot {
       return;
     }
     const lines = positions.map((p, i) =>
-      `${i + 1}. ${p.instrumentId} (${p.account}) — ${formatInr(p.valuePaise)}`,
+      `${i + 1}. ${p.name || p.instrumentId} — ${formatInr(p.valuePaise)} (${p.account})`,
     );
     lines.push('', '_Reply with:_ /cost <line#> <total cost in ₹> [YYYY-MM-DD]');
     await this.telegram.send(lines.join('\n'));

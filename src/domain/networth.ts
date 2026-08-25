@@ -13,6 +13,8 @@ export type AssetClass = 'EQUITY' | 'DEBT' | 'GOLD' | 'CASH';
 
 export interface Position {
   instrumentId: string;
+  /** Human-readable name from the instruments table — what /holdings renders. */
+  name: string;
   kind: InstrumentKind;
   account: Account;
   valuePaise: Paise;
@@ -124,38 +126,83 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
     [businessDate ?? null],
   );
 
-  // First pass: collect all live source keys (non-manual-seed)
+  // First pass: collect all live source keys (non-manual-seed), their canonical ids,
+  // and whether live now carries unmapped granular EQUITY rows.
   const liveKeys = new Set<string>();
+  const liveCanonicals = new Set<string>();
+  let hasUnmappedLiveEquity = false;
   for (const r of rows) {
     if (r.source !== 'manual-seed') {
       liveKeys.add(reconcileKey(r));
+      if (r.canonical_id) liveCanonicals.add(r.canonical_id);
+      if (!r.canonical_id && r.kind === 'EQUITY') hasUnmappedLiveEquity = true;
     }
   }
 
-  // Second pass: include all rows, but skip seed rows whose key is covered by a live source
-  const positions: Position[] = [];
+  /**
+   * Supersession (owner decision 2026-08-23, refined against the real capture):
+   * a seed row retires when a live row shares its identity — by (canonical,account)
+   * key, by CANONICAL ALONE (live labels accounts by real broker, seed used broker
+   * guesses; same money, different label), or because it is one of the two placeholder
+   * baskets whose decomposed constituents live now reports. Live-live rows are never
+   * merged: each source manages its own aggregation.
+   *
+   * When the retiring seed row carried an owner-verified cost and its live twin has
+   * none (the bond face-value trap), that cost is CARRIED OVER to the survivor —
+   * verified data must not die with a superseded row.
+   */
+  const BASKET_PLACEHOLDERS = new Set(['NSE:SMALLCASE-RESIDUE', 'US:INDMONEY-BASKET']);
+  interface Entry { pos: Position; row: HoldingRow }
+  const entries: Entry[] = [];
+  const orphanedSeedCost = new Map<string, Paise>();
+
   for (const r of rows) {
     const key = reconcileKey(r);
-    if (r.source === 'manual-seed' && liveKeys.has(key)) {
-      continue; // seed row superseded by live source
+    if (r.source === 'manual-seed') {
+      const covered = liveKeys.has(key)
+        || (r.canonical_id ? liveCanonicals.has(r.canonical_id) : false)
+        || (BASKET_PLACEHOLDERS.has(r.instrument_id) && hasUnmappedLiveEquity);
+      if (covered) {
+        if (r.avg_cost_paise !== null) {
+          orphanedSeedCost.set(r.canonical_id ?? r.instrument_id, toPaise(r.avg_cost_paise));
+        }
+        continue;
+      }
     }
-    positions.push({
-      instrumentId: r.instrument_id,
-      kind: r.kind,
-      account: r.account,
-      valuePaise: toPaise(r.value_paise),
-      avgCostPaise: r.avg_cost_paise === null ? null : toPaise(r.avg_cost_paise),
-      assetClass: classify(r.kind, r.instrument_id, r.name),
-      currency: r.currency,
-      issuer: r.issuer,
-      sector: r.sector,
-      isEmployer: r.is_employer,
-      asOf: r.as_of instanceof Date ? r.as_of.toISOString() : String(r.as_of),
-      source: r.source,
+    entries.push({
+      row: r,
+      pos: {
+        instrumentId: r.instrument_id,
+        name: r.name,
+        kind: r.kind,
+        account: r.account,
+        valuePaise: toPaise(r.value_paise),
+        avgCostPaise: r.avg_cost_paise === null ? null : toPaise(r.avg_cost_paise),
+        assetClass: classify(r.kind, r.instrument_id, r.name),
+        currency: r.currency,
+        issuer: r.issuer,
+        sector: r.sector,
+        isEmployer: r.is_employer,
+        asOf: r.as_of instanceof Date ? r.as_of.toISOString() : String(r.as_of),
+        source: r.source,
+      },
     });
   }
 
-  return positions;
+  // Cost carryover happens only onto LIVE survivors — a surviving seed twin keeps its
+  // own cost untouched.
+  if (orphanedSeedCost.size) {
+    for (const e of entries) {
+      if (e.row.source === 'manual-seed' || e.pos.avgCostPaise !== null) continue;
+      const canon = e.row.canonical_id;
+      if (canon && orphanedSeedCost.has(canon)) {
+        e.pos.avgCostPaise = orphanedSeedCost.get(canon)!;
+        orphanedSeedCost.delete(canon);
+      }
+    }
+  }
+
+  return entries.map((e) => e.pos);
 }
 
 export interface NetWorth {
