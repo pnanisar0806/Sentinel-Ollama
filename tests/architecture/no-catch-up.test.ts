@@ -81,6 +81,7 @@ const reachers = () => reachersOf(graph);
 const ALLOWED = new Set([
   'src/domain/buckets.ts',   // bucket reporting; re-exports the FI band, never sizes
   'src/notify/digest.ts',    // renders funded status to the owner
+  'src/notify/dashboard.ts', // renders HTML dashboard with funded status
   'src/jobs/digest.ts',      // the digest CLI entrypoint
 ]);
 
