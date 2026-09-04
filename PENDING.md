@@ -4,10 +4,32 @@ One screen of what's open, so a new session doesn't have to re-read anything. Up
 every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
-## Next up (agreed, not started)
+## Next up
 
-- [ ] **Sammaan bond maturity modeling** — INE148I07GL3 matures **26-Sep-2026** (~4
-      weeks): ₹3,00,000 face + final coupon ≈ ₹27,000 redeems to cash, retiring half the
+- [ ] **FIX the Fidelity RSU Telegram flow — agreed with owner 2026-09-05, do tomorrow**
+      Today a Fidelity screenshot upload is a DEAD END (owner found the digest stale and
+      asked; we traced it):
+      1. Upload → photo saved → caption keywords / inline keyboard pick Fidelity →
+         `processFidelityStatement` (`notify/telegram-bot.ts:684`).
+      2. **BUG:** it calls `extractHoldingsFromImage` with `FIDELITY_EXTRACTION_PROMPT`,
+         but the parser (`sources/llm-extract.ts:145`) only understands the brokerage
+         schema `{items:[{totalCostInr,…}]}`. The Fidelity prompt returns
+         `{vests:[{grantId,vestOn,units,priceUsd,withholdingPct,netUnits}]}` → parser gets
+         **zero** proposals → bot replies "Could not read any RSU vest events".
+      3. Even with a parse: `fidelityVestsToProposals` + `checkFidelityVestExists`
+         (`sources/fidelity-ingest.ts:82,111`) are imported but **never called**;
+         `/confirm` writes only cost lots (`insertOwnerCostLot`), never `rsu_vests` /
+         `confirmVest`; `/fidelity` is a stub ("not yet wired to the media buffer").
+      **Plan:** parse `vests` into a `FidelityProposal[]` queue → `/confirm <#>|all` writes
+      `rsu_vests` via `confirmVest` (recompute gross/net from units×priceUsd×FX in one
+      transaction; FR-03 already in SQL) → digest then reads the vested units.
+      **Live test = owner's next real Fidelity statement.**
+      NOTE: the 78 US:NOW shares in today's digest come from `pnpm seed` (hardcoded from
+      numbers the owner pasted in chat, 2026-08-24/09-05 session) — NOT from any Telegram
+      flow.
+
+- [ ] **Sammaan bond maturity modeling** — INE148I07GL3 matures **26-Sep-2026** (~1
+      week): ₹3,00,000 face + final coupon ≈ ₹27,000 redeems to cash, retiring half the
       bond bucket and pushing CASH above its band. Nothing models maturities yet; the
       surplus curve and IPS drift both need it. All inputs owner-verified in seed data.
       Pure TDD task, no owner input required.
@@ -24,10 +46,16 @@ MEMORY.md; the code map lives in index.md.
 
 ## Watch items
 
+- **Digest now depends on sync (changed 2026-09-05, commit `30b47d3`).** `digest.yml` lost
+  its fixed 21:00 IST cron; it triggers on `workflow_run` of `sync` and runs only when the
+  sync **concludes successfully**. Trade-off accepted: a failed sync = no digest that day.
+  Sync cron unchanged `0 12 * * *` (17:30 IST) and slips by hours → digest fires whenever
+  sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Sundays
+  09:30 IST unchanged.
 - **Secrets hygiene:** the Telegram bot token and Supabase DB password appeared in
   plaintext chat (2026-08-25). Rotation advised (BotFather `/token`; Supabase dashboard)
   → then update the GH secret + local env. **Not done yet.**
-- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest 21:00 IST** (`30 15 * * *`) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
+- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
 - The interactive bot (`pnpm telegram:bot`) runs locally only — commands, photo uploads,
   confirms need it awake. Digests/syncs do not.
 - When extraction misbehaves: check `lots` audit trail (`action='ingest'` /
@@ -44,4 +72,6 @@ MEMORY.md; the code map lives in index.md.
 | `148d635` | upload idempotency (unchanged/superseded/created) + migration 0006 unique index |
 | `f8cb46c` | digest → nightly 21:00 IST; SDD progress ledger created |
 | `fd96bd2` | ticker-anchored proposal resolution + ⚠️ conflict guard on /confirm all |
-| *(this session)* | **Daily digest restored + weekly deep report**; statement type selection via inline keyboard; Fidelity RSU ingestion via `/fidelity`; live NOW price in RSU projection; callback query handling in bot |
+| `30b47d3` | digest now runs on sync completion (`workflow_run`); fixed 21:00 slot removed |
+| `472d801` | untracked `.claude/`, `.serena/`, `zoox_finalTEMP_MPY_wvf_snd.mp4` (were swept into bc728b4); gitignored |
+| *(this session)* | seed reality fixed (US:NOW 78 @ ₹10.73L, ₹53.42L total); local `pnpm sync` verified; Fidelity Telegram flow diagnosed as a dead end (see Next up) |

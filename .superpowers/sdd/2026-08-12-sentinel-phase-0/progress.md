@@ -30,6 +30,24 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
   MEMORY: eyeball the proposal card's target instrument before confirming near-identical
   names.
 
+## 2026-09-05 (session)
+
+- Owner reported digest still reading stale data (₹46.54L assets / ₹13,422 fidelity, manual-seed
+  "STALE 288h"). Root cause: DB held only the old 2026-08-24 manual-seed snapshot (US:NOW qty 1
+  @ ₹5L). Re-ran `pnpm seed` → fresh 2026-09-04 manual-seed snapshot persisted with **US:NOW 78
+  @ ₹10,72,974 → ₹53.42L total**, verified by query. Local `pnpm sync` now works against
+  `data/indmoney-snapshot.json` (`synced: indmoney, frankfurter`).
+- GOTCHA: three earlier `pnpm seed` runs printed "Seeded snapshot <id>" yet persisted NOTHING
+  (pooler port 6543 churn) — verify by querying snapshots, not by trusting the printed id.
+- Digest gated on sync: `digest.yml` now `workflow_run` on sync success (commit `30b47d3`);
+  fixed 21:00 cron removed; sync cron unchanged. Trade-off: sync failure ⇒ no digest that day.
+- Cleanup commit `472d801`: untracked + gitignored `.claude/`, `.serena/`,
+  `zoox_finalTEMP_MPY_wvf_snd.mp4` (swept into bc728b4); deleted temp `check-*.ts`/`test-insert.ts`.
+- **Fidelity Telegram flow diagnosed as a dead end** (owner asked what an upload does): parser
+  schema mismatch (`{items}` vs `{vests}`), queue writers never called, `/confirm` writes cost
+  lots only, `/fidelity` is a stub. 78 shares came from seed hardcoding, not Telegram. **Fix
+  agreed for next session** — see `PENDING.md`.
+
 ## 2026-08-26 (late-night session)
 
 - Owner pasted a proposal card proving the swap mechanism precisely: values read

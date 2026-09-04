@@ -1,9 +1,41 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-08-25. Phase 0 complete + fix wave + re-review; branch merged to `main`.
+Last updated: 2026-09-05. Phase 0 complete + fix wave + re-review; branch merged to `main`.
 Post-merge: Supabase provisioned (secrets in GH Actions), production double-count fixed,
-statement-ingestion workstream (photo → LLM proposal → owner confirm → owner lot). 417/417
-green. Read this at session start (see `CLAUDE.md`). Update it when a durable fact changes.
+statement-ingestion workstream (photo → LLM proposal → owner confirm → owner lot). Read this
+at session start (see `CLAUDE.md`). Update it when a durable fact changes.
+
+---
+
+## 2026-09-05 session — seed reality + Fidelity flow gap + digest gating
+
+**Seed is now the real Fidelity picture.** `pnpm seed` writes a fresh manual-seed snapshot
+(2026-09-04): US:NOW **78 shares @ ₹10,72,974** (`107_297_400` paise), total assets
+**₹53,41,973.61**. The old 2026-08-24 snapshot (US:NOW qty **1** @ ₹5L, ₹47.69L total) still
+sits in the DB and the latest-per-source reader (`networth.ts:103` `distinct on (source)`)
+now returns the new one. The ₹46.54L / ₹13,422-fidelity digest the owner saw was the OLD
+snapshot revalued: **1 share × live NOW (~$142) × FX (~94.5) ≈ ₹13,422**, exactly what printed.
+Any consumer must use latest-per-source, never a fixed date.
+
+**GOTCHA — `pnpm seed` writes can vanish silently via the pooler.** Three seed runs against
+`aws-0-ap-south-1.pooler.supabase.com:6543` (transaction-mode pgbouncer + postgres-js
+`max:2`) printed "Seeded snapshot <id>" yet persisted nothing; a later run stuck. Verify a
+seed by querying `snapshots where source='manual-seed'` for the expected date rather than
+trusting the printed id. The digest itself is fine (reads only), but a manual re-seed that
+"cheerfully" failed is what fooled us this session. Read + write share the same pooler.
+
+**Fidelity Telegram flow is a DEAD END — diagnosed, fix agreed for tomorrow.** See
+`PENDING.md` Next up for the exact broken chain (`processFidelityStatement` → parser schema
+mismatch → no queue writer). The 78 shares did NOT come through Telegram; they were hardcoded
+into `SEED_HOLDINGS` (`seed-data.ts:116`) from numbers the owner pasted in chat.
+
+**Digest gating (commit `30b47d3`).** `digest.yml` no longer has a fixed cron; it fires on
+`workflow_run` of `sync`, gated `conclusion == 'success'`. Sync cron untouched
+(`0 12 * * *`). Trade-off accepted: failed/missing sync ⇒ no digest that day.
+
+**Cleanups (commit `472d801`).** `.claude/`, `.serena/`, `zoox_finalTEMP_MPY_wvf_snd.mp4`
+were swept into `bc728b4`; untracked + gitignored. Temp `check-*.ts` / `test-insert.ts`
+scripts deleted. Working tree clean apart from intended changes.
 
 ---
 
