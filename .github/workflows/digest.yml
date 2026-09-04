@@ -1,9 +1,11 @@
 name: digest
 on:
-  schedule:
-    # 15:30 UTC = 21:00 IST, every day (owner's chosen evening slot).
-    # GitHub Actions cron is best-effort — expect a few minutes of slip.
-    - cron: '30 15 * * *'
+  # The digest must read the day's fresh snapshots, so it runs only once the
+  # sync workflow has completed successfully. GitHub Actions cron is best-effort
+  # and slips by hours, so a fixed 21:00 slot could fire before the sync.
+  workflow_run:
+    workflows: [sync]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -13,6 +15,7 @@ permissions:
 
 jobs:
   digest:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
