@@ -83,6 +83,7 @@ const ALLOWED = new Set([
   'src/notify/digest.ts',    // renders funded status to the owner
   'src/notify/dashboard.ts', // renders HTML dashboard with funded status
   'src/jobs/digest.ts',      // the digest CLI entrypoint
+  'src/jobs/weekly.ts',      // the weekly deep report CLI entrypoint
 ]);
 
 /** A module whose name says it decides how much to buy, or how much risk to take. */

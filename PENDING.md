@@ -27,13 +27,13 @@ MEMORY.md; the code map lives in index.md.
 - **Secrets hygiene:** the Telegram bot token and Supabase DB password appeared in
   plaintext chat (2026-08-25). Rotation advised (BotFather `/token`; Supabase dashboard)
   → then update the GH secret + local env. **Not done yet.**
-- Schedules (GitHub Actions, UTC cron, slips a few minutes): digest **nightly 21:00 IST**
-  · sync daily **17:30 IST** · keepalive Sundays 09:30 IST. Live since push 2026-08-26.
+- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest 21:00 IST** (`30 15 * * *`) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
 - The interactive bot (`pnpm telegram:bot`) runs locally only — commands, photo uploads,
   confirms need it awake. Digests/syncs do not.
 - When extraction misbehaves: check `lots` audit trail (`action='ingest'` /
   `'CLEANUP_CLOSED'`) before touching data; corrections go through supersede, never
   UPDATE-of-cost or DELETE (refused by trigger).
+- Statement uploads now ask for type via inline keyboard (Brokerage/MF vs Fidelity RSU) before processing.
 
 ## Landed recently (oldest → newest)
 
@@ -44,3 +44,4 @@ MEMORY.md; the code map lives in index.md.
 | `148d635` | upload idempotency (unchanged/superseded/created) + migration 0006 unique index |
 | `f8cb46c` | digest → nightly 21:00 IST; SDD progress ledger created |
 | `fd96bd2` | ticker-anchored proposal resolution + ⚠️ conflict guard on /confirm all |
+| *(this session)* | **Daily digest restored + weekly deep report**; statement type selection via inline keyboard; Fidelity RSU ingestion via `/fidelity`; live NOW price in RSU projection; callback query handling in bot |

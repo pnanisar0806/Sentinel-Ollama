@@ -10,6 +10,7 @@
     "seed": "tsx src/seed/seed.ts",
     "sync": "tsx src/jobs/sync.ts",
     "digest": "tsx src/jobs/digest.ts",
+    "weekly": "tsx src/jobs/weekly.ts",
     "ips": "tsx src/jobs/ips.ts",
     "telegram:bot": "tsx --env-file=.env src/jobs/telegram-bot.ts",
     "indmoney:login": "tsx --env-file=.env src/jobs/indmoney-login.ts"

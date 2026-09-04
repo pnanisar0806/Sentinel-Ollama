@@ -76,6 +76,9 @@ export async function extractHoldingsFromImage(deps: {
    *  where near-identical rows (TMCV/TMPV) get swapped. */
   knownTickers?: string[];
   now?: Date;
+  /** Optional custom prompt to override the default SYSTEM_RULES. Use for non-standard
+   *  statement formats (e.g., Fidelity RSU vest events). If provided, SYSTEM_RULES is ignored. */
+  customPrompt?: string;
 }): Promise<LlmProposal[]> {
   const now = deps.now ?? new Date();
   const list = deps.positions
@@ -84,7 +87,9 @@ export async function extractHoldingsFromImage(deps: {
   const hints = deps.knownTickers?.length
     ? `\n\nKNOWN SYMBOL MAPPINGS — a row displaying one of these symbols belongs to exactly this holding:\n${deps.knownTickers.map((s) => `- ${s}`).join('\n')}\nUse the symbol to pick the line with certainty; do not guess between similar names.`
     : '';
-  const prompt = `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}${hints}`;
+  const prompt = deps.customPrompt
+    ? deps.customPrompt
+    : `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}${hints}`;
   const models = deps.model ? [deps.model] : LLM_MODEL_CHAIN;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const imageParts = deps.images.map((im) => ({

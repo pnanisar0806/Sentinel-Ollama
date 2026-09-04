@@ -8,6 +8,7 @@ import { currentIps } from '../domain/ips.js';
 import { loadPositions, netWorth, outstandingLiabilities } from '../domain/networth.js';
 import { projectVests, type VestEvent } from '../domain/rsu.js';
 import { assessStaleness, type StalenessRow } from '../sources/staleness.js';
+import { fetchLiveRsuInputs, type LiveRsuInputs } from '../sources/rsu-live.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import { formatInr, type Paise } from '../money/paise.js';
 
@@ -68,6 +69,19 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
   const grants = await db.query<{ id: string; granted_on: Date | string; units: string; note: string }>(
     'select id, granted_on, units, note from rsu_grants',
   );
+
+  // Fetch live NOW price + USD/INR for fresh RSU projection
+  let liveInputs: { nowPriceCents: bigint; usdInr: number; asOf: string } | null = null;
+  try {
+    liveInputs = await fetchLiveRsuInputs();
+  } catch (e) {
+    // Fall back to seed values if live fetch fails; staleness engine will flag it
+    console.warn('Live RSU price/FX fetch failed, falling back to seed values:', e);
+  }
+
+  const priceUsd = liveInputs ? Number(liveInputs.nowPriceCents) / 100 : ASSUMPTIONS.seedNowPriceUsd;
+  const usdInr = liveInputs ? liveInputs.usdInr : ASSUMPTIONS.seedUsdInr;
+
   const vests = projectVests(
     grants.map((g) => ({
       id: g.id,
@@ -76,8 +90,8 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
       note: g.note,
     })),
     {
-      priceUsd: ASSUMPTIONS.seedNowPriceUsd,
-      usdInr: ASSUMPTIONS.seedUsdInr,
+      priceUsd,
+      usdInr,
       from: businessDate,
       to: `${Number(businessDate.slice(0, 4)) + 1}-12-31`,
     },

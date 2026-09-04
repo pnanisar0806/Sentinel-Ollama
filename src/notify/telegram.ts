@@ -31,23 +31,20 @@ export class Telegram {
     return String(chatId) === this.ownerChatId;
   }
 
-  async send(markdown: string): Promise<{ sent: boolean }> {
+  async send(markdown: string, replyMarkup?: object): Promise<{ sent: boolean }> {
     if (this.dryRun) {
       console.log(`[dry-run] would send ${markdown.length} chars to ${this.ownerChatId}`);
       return { sent: false };
     }
 
     for (const chunk of split(markdown)) {
-      const failure = await this.post(chunk, 'Markdown');
+      const failure = await this.post(chunk, 'Markdown', replyMarkup);
       if (failure === undefined) continue;
 
-      // A parse error must never cost the owner the message. Escaping is the primary
-      // defence; this is the backstop for anything it misses — the content matters far
-      // more than the bold. Any OTHER failure (revoked token, blocked bot) stays loud.
       if (!/can't parse entities|parse entities|entity/i.test(failure)) {
         throw new Error(`Telegram sendMessage failed: ${failure}`);
       }
-      const plain = await this.post(chunk, undefined);
+      const plain = await this.post(chunk, undefined, replyMarkup);
       if (plain !== undefined) {
         throw new Error(`Telegram sendMessage failed even as plain text: ${plain}`);
       }
@@ -55,8 +52,21 @@ export class Telegram {
     return { sent: true };
   }
 
+  /** Answer a callback query (for inline keyboard buttons). */
+  async answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+    if (this.dryRun) return;
+    await this.fetchImpl(
+      `https://api.telegram.org/bot${this.botToken}/answerCallbackQuery`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+      },
+    );
+  }
+
   /** Returns undefined on success, or Telegram's own description on failure. */
-  private async post(text: string, parseMode: 'Markdown' | undefined): Promise<string | undefined> {
+  private async post(text: string, parseMode: 'Markdown' | undefined, replyMarkup?: object): Promise<string | undefined> {
     const res = await this.fetchImpl(
       `https://api.telegram.org/bot${this.botToken}/sendMessage`,
       {
@@ -67,6 +77,7 @@ export class Telegram {
           text,
           ...(parseMode ? { parse_mode: parseMode } : {}),
           disable_web_page_preview: true,
+          ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
         }),
       },
     );

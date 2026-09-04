@@ -54,6 +54,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/notify/telegram-bot.ts` | `TelegramBot`, `displayOrder(positions)` — long-polling command bot (`/sync`, `/status`, `/holdings`, `/cost`, `/confirm`, `/reject`, `/help`), owner-locked; builds sync sources from exported `indmoneySource` + optional Kite. Statement photos: single images extract immediately; **albums buffer by `media_group_id`** and flush as one multi-page LLM pass after a short silence. LLM proposals queue until the owner replies `/confirm`; confirmed AND skipped entries leave the queue (a repeat confirm used to double-write). `/holdings` and `/cost` share `displayOrder` — two divergent orderings once wrote a cost to the wrong instrument. Without `LLM_API_KEY` photos are archived and the bot walks the owner through manual `/cost`. Entrypoint is `jobs/telegram-bot.ts` only |
 | `src/jobs/keepalive.ts` | CLI entrypoint — weekly `audit_log` insert to keep the Supabase free tier awake (it is a DB write, not an HTTP ping) |
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
+| `src/jobs/weekly.ts` | CLI entrypoint — `pnpm weekly`. Loads `['telegram','crypto']` env, runs migrations + IPS install, composes weekly deep report (FR-51) with Opus 5 synthesis, sends via Telegram |
 
 ## Migrations
 
@@ -106,7 +107,8 @@ the allowlist there, or the suite goes red.
 |---|---|---|
 | `.github/workflows/ci.yml` | on push + PR | `tsc --noEmit` then `pnpm test`. Nothing enforced the suite before |
 | `.github/workflows/sync.yml` | `0 12 * * *` — **daily** | Weekday-only left the Monday digest reading Friday's data, 63.25h against a 36h limit |
-| `.github/workflows/digest.yml` | `15 3 * * 1-5` | Now at most ~15h behind a sync |
+| `.github/workflows/digest.yml` | `30 15 * * *` — **21:00 IST daily** | Daily digest (FR-50); restored per owner request |
+| `.github/workflows/weekly.yml` | `30 2 * * 6` — **Sat 08:00 IST** | Weekly deep report (FR-51); supplement to daily |
 | `.github/workflows/keepalive.yml` | `0 4 * * 0` | Largely subsumed by the daily sync; kept as a belt-and-braces Supabase ping |
 
 None of them pin a pnpm `version:` — `package.json`'s `packageManager` is the single
@@ -114,7 +116,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 
 ## Scripts
 
-`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `ips` · `telegram:bot` · `indmoney:login`
+`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `weekly` · `ips` · `telegram:bot` · `indmoney:login`
 
 `indmoney:login` runs `tsx --env-file=.env` — nothing else loads `.env` (no dotenv dep), so
 every other script still needs its vars exported. `.env` is gitignored and holds

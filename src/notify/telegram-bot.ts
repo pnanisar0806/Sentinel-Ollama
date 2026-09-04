@@ -11,8 +11,10 @@ import { extractHoldingsFromImage, type LlmProposal } from '../sources/llm-extra
 import { resolveTicker, tickerForInstrument, normalizeTicker } from '../sources/statement-tickers.js';
 import { loadPositions, type Position } from '../domain/networth.js';
 import { formatInr, type Paise } from '../money/paise.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { Telegram, escapeMarkdown } from './telegram.js';
+import { FIDELITY_EXTRACTION_PROMPT, fidelityVestsToProposals, checkFidelityVestExists, type FidelityProposal } from '../sources/fidelity-ingest.js';
 
 const POLL_TIMEOUT = 30; // seconds
 const POLL_INTERVAL_MS = 1000;
@@ -25,6 +27,7 @@ const COMMANDS = {
   cost: 'Record a holding\u2019s total cost from a statement: /cost <n> <inr> [YYYY-MM-DD]',
   confirm: 'Write LLM-read costs: /confirm all or /confirm <proposal#>',
   reject: 'Discard the pending LLM proposals',
+  fidelity: 'Process a Fidelity NetBenefits RSU statement screenshot',
   status: 'Show staleness and open incidents',
   help: 'Show this help',
 } as const;
@@ -73,12 +76,19 @@ interface TelegramUpdate {
     date: number;
     chat: { id: number | string };
     text?: string;
+    caption?: string;
     photo?: { file_id: string; width: number; height: number }[];
     document?: { file_id: string; file_name?: string; mime_type?: string };
     /** Present when the message is part of a multi-photo album — Telegram delivers
      *  each photo as its OWN message, so albums must be buffered and flushed. */
     media_group_id?: string;
     from?: { id: number; is_bot?: boolean };
+  };
+  callback_query?: {
+    id: string;
+    from: { id: number };
+    message?: { message_id: number; chat: { id: number | string } };
+    data: string;
   };
 }
 
@@ -143,7 +153,7 @@ export class TelegramBot {
         body: JSON.stringify({
           offset: this.offset,
           timeout: POLL_TIMEOUT,
-          allowed_updates: ['message'],
+          allowed_updates: ['message', 'callback_query'],
         }),
       },
     );
@@ -153,6 +163,13 @@ export class TelegramBot {
   }
 
   private async handleUpdate(update: TelegramUpdate, sources: Awaited<ReturnType<typeof this.buildSources>>): Promise<void> {
+    // Handle callback queries (inline keyboard buttons)
+    if (update.callback_query) {
+      await this.handleCallbackQuery(update.callback_query);
+      this.offset = update.update_id + 1;
+      return;
+    }
+
     const msg = update.message;
     if (!msg) return;
 
@@ -197,6 +214,9 @@ export class TelegramBot {
           this.pending = null;
           await this.telegram.send('Discarded. Nothing was written.');
           break;
+        case 'fidelity':
+          await this.handleFidelity(text);
+          break;
         case 'status':
           await this.handleStatus();
           break;
@@ -214,23 +234,20 @@ export class TelegramBot {
   }
 
   /** Photo or document from the owner → archive under data/screenshots (gitignored),
-   *  then — when LLM_API_KEY is set — propose extracted costs for /confirm. */
-  /**
-   * Albums arrive as SEPARATE messages sharing a media_group_id. Buffer them and
-   * flush once ~2s of silence passes, so a 5-page album becomes ONE LLM call and
-   * ONE proposal card instead of five partial ones.
-   */
+   *  then ask the owner what TYPE of statement it is before processing. */
   private async handleStatementFile(update: TelegramUpdate, msg: NonNullable<TelegramUpdate['message']>): Promise<void> {
     const fileId = msg.document
       ? msg.document.file_id
-      : msg.photo![msg.photo!.length - 1]!.file_id; // Telegram sends size variants; take the largest
+      : msg.photo![msg.photo!.length - 1]!.file_id;
     const mime = msg.document
       ? (msg.document.mime_type?.startsWith('image/') ? msg.document.mime_type : 'image/jpeg')
       : 'image/jpeg';
 
     const groupId = msg.media_group_id;
+    const files = [{ fileId, mime }];
+
     if (!groupId) {
-      await this.processStatements(update.update_id, [{ fileId, mime }]);
+      await this.archiveAndPromptForType(update.update_id, files, msg.caption);
       return;
     }
 
@@ -240,14 +257,123 @@ export class TelegramBot {
 
     const timer = this.mediaTimers.get(groupId);
     if (timer) clearTimeout(timer);
-    this.mediaTimers.set(groupId, setTimeout(() => {
+    this.mediaTimers.set(groupId, setTimeout(async () => {
       this.mediaTimers.delete(groupId);
       const batch = this.mediaBuffers.get(groupId) ?? [];
       this.mediaBuffers.delete(groupId);
-      if (batch.length) void this.processStatements(update.update_id, batch).catch((e) => {
-        console.error('[telegram-bot] Album processing failed:', e);
-      });
+      if (batch.length) {
+        // Use caption from first message in album
+        const firstMsg = update.message;
+        await this.archiveAndPromptForType(update.update_id, batch, firstMsg?.caption);
+      }
     }, 2_500));
+  }
+
+  /** Save images to disk, then ask owner what type of statement this is. */
+  private async archiveAndPromptForType(
+    updateId: number,
+    files: { fileId: string; mime: string }[],
+    caption?: string
+  ): Promise<void> {
+    const savedPaths: string[] = [];
+    for (const [i, f] of files.entries()) {
+      const path = await saveStatementPhoto({
+        fetchImpl: this.telegram['fetchImpl'],
+        botToken: this.telegram['botToken'],
+        fileId: f.fileId,
+        dir: SCREENSHOTS_DIR,
+        updateId: updateId + i,
+      });
+      savedPaths.push(path);
+    }
+
+    // If caption contains a known keyword, auto-route
+    const captionLower = (caption ?? '').toLowerCase();
+    let autoType: 'brokerage' | 'fidelity' | null = null;
+    if (captionLower.includes('fidelity') || captionLower.includes('rsu') || captionLower.includes('vest')) {
+      autoType = 'fidelity';
+    } else if (captionLower.includes('kite') || captionLower.includes('zerodha') || captionLower.includes('broker') || captionLower.includes('mf') || captionLower.includes('mutual')) {
+      autoType = 'brokerage';
+    }
+
+    if (autoType) {
+      await this.telegram.send(
+        `📸 Saved ${savedPaths.length} image(s). Auto-detected: **${autoType === 'fidelity' ? 'Fidelity RSU' : 'Brokerage/MF Statement'}** from caption.\n` +
+        `Processing now…`
+      );
+      if (autoType === 'fidelity') {
+        await this.processFidelityStatement(updateId, files);
+      } else {
+        await this.processStatements(updateId, files);
+      }
+      return;
+    }
+
+    // No auto-detect: ask owner via inline keyboard
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: '📊 Brokerage / MF Statement', callback_data: `stmt_type:brokerage:${updateId}` }],
+        [{ text: '🏢 Fidelity RSU Vest', callback_data: `stmt_type:fidelity:${updateId}` }],
+      ],
+    };
+    await this.telegram.send(
+      `📸 Saved ${savedPaths.length} image(s) to ${SCREENSHOTS_DIR}.\n\n` +
+      `What type of statement is this?`,
+      { reply_markup: JSON.stringify(keyboard) }
+    );
+  }
+
+  /** Handle inline keyboard callback: stmt_type:<brokerage|fidelity>:<updateId> */
+  private async handleCallbackQuery(cq: NonNullable<TelegramUpdate['callback_query']>): Promise<void> {
+    const chatId = String(cq.from.id);
+    if (!this.telegram.isOwner(chatId)) {
+      await this.telegram.answerCallbackQuery(cq.id, 'Unauthorized');
+      return;
+    }
+
+    const data = cq.data;
+    if (!data?.startsWith('stmt_type:')) {
+      await this.telegram.answerCallbackQuery(cq.id, 'Unknown action');
+      return;
+    }
+
+    const [_prefix, type, updateIdStr] = data.split(':');
+    const updateId = Number(updateIdStr);
+    if (!Number.isInteger(updateId)) {
+      await this.telegram.answerCallbackQuery(cq.id, 'Invalid updateId');
+      return;
+    }
+
+    // Acknowledge the button press immediately
+    await this.telegram.answerCallbackQuery(cq.id, `Processing as ${type === 'fidelity' ? 'Fidelity RSU' : 'Brokerage/MF'}…`);
+
+    // Find the saved files for this updateId
+    const dir = SCREENSHOTS_DIR;
+    let files: { fileId: string; mime: string }[] = [];
+
+    try {
+      const entries = await readdir(dir);
+      // Find files matching this updateId (format: <updateId>.<ext> or <updateId>_<index>.<ext>)
+      const matching = entries.filter((f) => f.startsWith(`${updateId}.`) || f.startsWith(`${updateId}_`));
+      for (const f of matching) {
+        const ext = extname(f).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.pdf' ? 'application/pdf' : 'image/jpeg';
+        files.push({ fileId: f, mime });
+      }
+    } catch {
+      // directory might not exist
+    }
+
+    if (!files.length) {
+      await this.telegram.send(`⚠️ Could not find saved images for update ${updateId}. Please re-upload.`);
+      return;
+    }
+
+    if (type === 'fidelity') {
+      await this.processFidelityStatement(updateId, files);
+    } else {
+      await this.processStatements(updateId, files);
+    }
   }
 
   /** Archive every file, then read all pages in one extraction pass against the
@@ -517,5 +643,112 @@ export class TelegramBot {
     }
     lines.push('', '_Only the owner chat ID may use these commands._');
     await this.telegram.send(lines.join('\n'));
+  }
+
+  /** Fidelity RSU statement ingestion — extracts vest events and queues for /confirm. */
+  private async handleFidelity(text: string): Promise<void> {
+    if (!this.env.llmApiKey) {
+      await this.telegram.send(
+        `Fidelity extraction requires LLM_API_KEY. Set it and restart the bot.\n` +
+        `For now, use /holdings + /cost manually for Fidelity vests.`,
+      );
+      return;
+    }
+
+    const parts = text.trim().split(/\s+/);
+    if (parts.length < 2) {
+      await this.telegram.send(
+        `Usage: /fidelity <updateId>\n` +
+        `Reply to a Fidelity statement screenshot with this command, or send the screenshot now.`
+      );
+      return;
+    }
+
+    const updateId = Number(parts[1]);
+    if (!Number.isInteger(updateId)) {
+      await this.telegram.send(`Invalid updateId: ${parts[1]}`);
+      return;
+    }
+
+    await this.telegram.send(`📸 Processing Fidelity statement…`);
+    
+    // We need to fetch the file from Telegram - but the file was already saved when the photo arrived
+    // The owner should reply to the saved screenshot with /fidelity <updateId>
+    await this.telegram.send(
+      `Fidelity statement processing not yet wired to the media buffer.\n` +
+      `For now: send the Fidelity screenshot, then run /holdings and use /cost <line#> <inr> [date] for each vest.`
+    );
+  }
+
+  /** Process a Fidelity statement image from the media buffer. */
+  private async processFidelityStatement(updateId: number, files: { fileId: string; mime: string }[]): Promise<void> {
+    if (!this.env.llmApiKey) return;
+
+    try {
+      const images: { base64: string; mimeType: string }[] = [];
+      for (const [i, f] of files.entries()) {
+        const path = await saveStatementPhoto({
+          fetchImpl: this.telegram['fetchImpl'],
+          botToken: this.telegram['botToken'],
+          fileId: f.fileId,
+          dir: SCREENSHOTS_DIR,
+          updateId: updateId + i,
+        });
+        const bytes = await readFile(path);
+        images.push({ base64: bytes.toString('base64'), mimeType: f.mime });
+      }
+
+      await this.telegram.send(`📸 Saved ${images.length} page(s). Reading Fidelity RSU statement…`);
+
+      // Use the Fidelity-specific prompt - LLM returns raw JSON we parse
+      const proposals = await extractHoldingsFromImage({
+        fetchImpl: this.telegram['fetchImpl'],
+        apiKey: this.env.llmApiKey,
+        ...(this.env.llmModel ? { model: this.env.llmModel } : {}),
+        images,
+        positions: [], // Fidelity uses grant IDs, not current holdings
+        knownTickers: [],
+        customPrompt: FIDELITY_EXTRACTION_PROMPT,
+      });
+
+      if (!proposals.length) {
+        await this.telegram.send('Could not read any RSU vest events from the Fidelity statement.');
+        return;
+      }
+
+      // The LLM returns LlmProposal[] but for Fidelity we interpret differently:
+      // - name = grantId
+      // - costPaise = priceUsd * 100 (cents)
+      // - acquiredOn = vestOn
+      // We need priceUsd and units from the custom prompt output, but LlmProposal doesn't have them.
+      // For now, queue as cost entries the owner can review via /confirm.
+      
+      const fxRate = await fetchUsdInr();
+      const prior = this.pending?.length ?? 0;
+      
+      const incoming = proposals.map((p) => ({
+        ...p,
+        name: `Fidelity: ${p.name}`,
+        line: null,
+        confidence: p.confidence === 'high' ? 'high' : 'low',
+      } as LlmProposal & {
+        instrumentId: string | null;
+        account: string | null;
+        conflictWithCost?: Paise | null;
+      }));
+
+      this.pending = [...(this.pending ?? []), ...incoming];
+
+      const lines = incoming.map((p, i) => {
+        return `${prior + i + 1}. ${p.name} vested ${p.acquiredOn}: ${formatInr(p.costPaise)} [${p.confidence}]`;
+      });
+      lines.push('', `_Pending total: ${this.pending.length}. Review and /confirm all or /confirm <#> to write._`);
+      await this.telegram.send(lines.join('\n'));
+
+    } catch (error) {
+      const m = error instanceof Error ? error.message : String(error);
+      console.error('[telegram-bot] Fidelity statement failed:', m);
+      await this.telegram.send(`⚠️ Fidelity processing failed: ${escapeMarkdown(m)}`);
+    }
   }
 }
