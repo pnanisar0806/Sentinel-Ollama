@@ -9,19 +9,19 @@ describe('seed data matches the PRD balance sheet', () => {
   const sumOf = (ids: string[]) =>
     addP(...SEED_HOLDINGS.filter((h) => ids.includes(h.instrumentId)).map((h) => h.valuePaise));
 
-  it('totals exactly 47.69L of assets (within ±5,000 rupees)', () => {
+  it('totals exactly 53.42L of assets (within ±5,000 rupees) — updated for current Fidelity reality', () => {
     const total = addP(...SEED_HOLDINGS.map((h) => h.valuePaise));
     const totalRupees = Number(total / 100n);
-    // EPF 1,354,000 + MF 1,183,000 + stocks/ETFs 832,000 + bonds 600,000 + savings 163,000 + US basket 137,000 + Fidelity 500,000 = 4,769,000
-    expect(totalRupees).toBeGreaterThan(4_764_000); // 4,769,000 - 5,000
-    expect(totalRupees).toBeLessThan(4_774_000); // 4,769,000 + 5,000
+    // EPF 1,354,000 + MF 1,183,000 + stocks/ETFs 832,000 + bonds 600,000 + savings 163,000 + US basket 137,000 + Fidelity 1,072,974 = 5,341,974
+    expect(totalRupees).toBeGreaterThan(5_336_000); // 5,341,974 - 5,000
+    expect(totalRupees).toBeLessThan(5_347_000); // 5,341,974 + 5,000
   });
 
   it('carries EPF and Fidelity at their stated values', () => {
     const byAccount = (account: string) =>
       addP(...SEED_HOLDINGS.filter((h) => h.account === account).map((h) => h.valuePaise));
     expect(byAccount('epf')).toBe(rupees(1_354_000));
-    expect(byAccount('fidelity')).toBe(rupees(500_000));
+    expect(byAccount('fidelity')).toBe(rupees(1_072_974));
   });
 
   it('references only declared instruments', () => {

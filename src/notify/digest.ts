@@ -8,9 +8,10 @@ import { currentIps } from '../domain/ips.js';
 import { loadPositions, netWorth, outstandingLiabilities } from '../domain/networth.js';
 import { projectVests, type VestEvent } from '../domain/rsu.js';
 import { assessStaleness, type StalenessRow } from '../sources/staleness.js';
-import { fetchLiveRsuInputs, type LiveRsuInputs } from '../sources/rsu-live.js';
+import { fetchLiveRsuInputs } from '../sources/rsu-live.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
-import { formatInr, type Paise } from '../money/paise.js';
+import { formatInr, type Paise, cents } from '../money/paise.js';
+import { usdToInr } from '../money/fx.js';
 
 export interface DigestInput {
   businessDate: string;
@@ -62,25 +63,49 @@ async function previousNet(
 
 export async function buildDigestInput(db: Db, now: string): Promise<DigestInput> {
   const businessDate = now.slice(0, 10);
-  const positions = await loadPositions(db);
-  const liabilities = await outstandingLiabilities(db, `${businessDate.slice(0, 7)}-01`);
-  const nw = netWorth(positions, liabilities);
 
-  const grants = await db.query<{ id: string; granted_on: Date | string; units: string; note: string }>(
-    'select id, granted_on, units, note from rsu_grants',
-  );
-
-  // Fetch live NOW price + USD/INR for fresh RSU projection
+  // Fetch live NOW price + USD/INR for fresh RSU projection AND employer stock revaluation
   let liveInputs: { nowPriceCents: bigint; usdInr: number; asOf: string } | null = null;
   try {
     liveInputs = await fetchLiveRsuInputs();
   } catch (e) {
-    // Fall back to seed values if live fetch fails; staleness engine will flag it
     console.warn('Live RSU price/FX fetch failed, falling back to seed values:', e);
   }
 
   const priceUsd = liveInputs ? Number(liveInputs.nowPriceCents) / 100 : ASSUMPTIONS.seedNowPriceUsd;
   const usdInr = liveInputs ? liveInputs.usdInr : ASSUMPTIONS.seedUsdInr;
+
+  let positions = await loadPositions(db);
+
+  // Revalue US:NOW (employer stock) with live price if available
+  // Fidelity has no auto-sync, so seed holding goes stale — revalue daily using live price
+  if (liveInputs) {
+    const employerHolding = await db.query<{ quantity: string | number; value_paise: string | number }>(
+      `select h.quantity, h.value_paise
+       from holdings h
+       join snapshots s on s.id = h.snapshot_id
+       join instruments i on i.id = h.instrument_id
+       where i.id = 'US:NOW' and i.is_employer = true
+       order by s.business_date desc, s.taken_at desc
+       limit 1`,
+    );
+    if (employerHolding.length > 0) {
+      const qty = Number(employerHolding[0]!.quantity);
+      const newValuePaise = usdToInr(
+        cents((Number(liveInputs.nowPriceCents) * qty).toString()),
+        BigInt(Math.round(liveInputs.usdInr * 1_000_000)),
+      );
+      positions = positions.map((p) =>
+        p.isEmployer && p.currency === 'USD'
+          ? { ...p, valuePaise: newValuePaise }
+          : p
+      );
+    }
+  }
+
+  const grants = await db.query<{ id: string; granted_on: Date | string; units: string; note: string }>(
+    'select id, granted_on, units, note from rsu_grants',
+  );
 
   const vests = projectVests(
     grants.map((g) => ({
@@ -96,6 +121,9 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
       to: `${Number(businessDate.slice(0, 4)) + 1}-12-31`,
     },
   );
+
+  const liabilities = await outstandingLiabilities(db, `${businessDate.slice(0, 7)}-01`);
+  const nw = netWorth(positions, liabilities);
 
   return {
     businessDate,

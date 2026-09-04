@@ -205,24 +205,24 @@ describe('the real seeded portfolio', () => {
 
     // Derived side comes from the loaded positions; the literals are the seed's own
     // arithmetic, asserted exactly so a seed correction fails loudly.
-    expect(employer).toBe(500_000_00n);
+    // Updated for current Fidelity reality (78 NOW shares @ $145.59, FX ~94.48)
+    expect(employer).toBe(107_297_400n);
     expect(sammaan).toBe(379_999_61n);
-    expect(total).toBe(476_899_961n);
+    expect(total).toBe(534_197_361n);
 
     expect(c.employerPct).toBeCloseTo(Number(employer) / Number(total), 12);
-    expect(c.employerPct).toBeCloseTo(0.10484379, 8);   // 10.4844% - OVER the 10% cap
+    expect(c.employerPct).toBeCloseTo(0.20085723, 8);   // 20.0857% - OVER the 10% cap
     expect(c.employerPct).toBeGreaterThan(CAPS.employer);
 
-    // The plan asserts as fact that the seed breaches the Sammaan issuer cap. Against the
-    // owner-verified bond figures it does NOT: 3,79,999.61 / 47,68,999.61 = 7.9681%.
+    // Sammaan issuer % is now 7.11% (was 7.97% at old total) — well under 10% cap
     expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(Number(sammaan) / Number(total), 12);
-    expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(0.07968120, 8);
+    expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(0.07113468, 8);
     expect(c.byIssuer.get('Sammaan Capital')!).toBeLessThan(CAPS.singleIssuer);
     expect(c.breaches.filter((b) => /Sammaan/.test(b))).toEqual([]);
 
     // There IS a single-issuer breach in the seed, and it is not the one the plan
     // claimed: US:NOW carries issuer 'ServiceNow', so employer concentration is issuer
-    // concentration too and both caps fire on the same 10.4844%.
+    // concentration too and both caps fire on the same 20.0857%.
     expect(c.byIssuer.get('ServiceNow')).toBeCloseTo(c.employerPct, 12);
     expect(c.breaches.filter((b) => /ServiceNow/.test(b))).toHaveLength(1);
   });
@@ -231,19 +231,18 @@ describe('the real seeded portfolio', () => {
     const c = concentration(positions);
     const kinds = c.breaches.map((b) => b.split(':')[0]).sort();
 
-    // Two single-stock breaches (the smallcase residue at 13.74% and NOW at 10.48%),
-    // the employer cap, and the ServiceNow issuer cap that rides along with it.
+    // Breaches: Employer cap (20.09%), Single-issuer cap (ServiceNow 20.09%),
+    // Single-stock cap (NOW 20.09%), Single-stock cap (Smallcase residue ~12.6%)
     // No Sammaan issuer breach, no MF-scheme breach, no sector breach.
     expect(kinds).toEqual([
       'Employer cap', 'Single-issuer cap', 'Single-stock cap', 'Single-stock cap',
     ]);
     expect(c.breaches.filter((b) => b.includes('NSE:SMALLCASE-RESIDUE'))).toHaveLength(1);
     expect(c.breaches.filter((b) => b.includes('US:NOW'))).toHaveLength(2); // stock + employer
-    expect(c.topStockPct).toBeCloseTo(0.13742924, 8);
+    expect(c.topStockPct).toBeCloseTo(0.20085723, 8);
 
-    // Only NOW and RPOWER carry a sector in the seed, so the sector cap sees a tenth
-    // of the portfolio and must say so.
-    expect(c.sectorCoveragePct).toBeCloseTo(0.10538898, 8);
+    // Only NOW and RPOWER carry a sector in the seed, so the sector cap sees ~20% of the portfolio
+    expect(c.sectorCoveragePct).toBeCloseTo(0.20134394, 8);
     expect(c.caveats).toContain(SECTOR_COVERAGE_CAVEAT);
   });
 
@@ -252,16 +251,19 @@ describe('the real seeded portfolio', () => {
     const rows = allocationDrift(nw.byAssetClass, nw.assetsPaise);
     const by = new Map(rows.map((r) => [r.assetClass, r]));
 
-    expect(by.get('EQUITY')!.actual).toBeCloseTo(0.53952615, 8);
+    // EQUITY is 58.89% (NOW 20.13% + other equity) — under 60% cap
+    expect(by.get('EQUITY')!.actual).toBeCloseTo(0.58891605, 8);
     expect(by.get('EQUITY')!.breach).toBeNull();
-    expect(by.get('DEBT')!.actual).toBeCloseTo(0.41308446, 8);
+    // DEBT is 36.88% (EPF + bonds + liquid ETF)
+    expect(by.get('DEBT')!.actual).toBeCloseTo(0.36877749, 8);
     expect(by.get('DEBT')!.breach).toBeNull();
-    expect(by.get('CASH')!.actual).toBeCloseTo(0.03417908, 8);
+    // CASH is 3.05%
+    expect(by.get('CASH')!.actual).toBeCloseTo(0.03051307, 8);
     expect(by.get('CASH')!.breach).toBeNull();
 
-    expect(by.get('GOLD')!.actual).toBeCloseTo(0.01321032, 8);
+    expect(by.get('GOLD')!.actual).toBeCloseTo(0.01179339, 8);
     expect(by.get('GOLD')!.breach).toBe('UNDER');
-    // 5% of 4,76,899,961 paise = 23,844,998 (truncated) less the 63,00,000 held.
-    expect(by.get('GOLD')!.driftPaise).toBe(17_544_998n); // Rs 1,75,449.98 of gold to buy
+    // 5% of 53,41,97,361 paise = 26,709,868 less the 6,30,000 held = 20,409,868
+    expect(by.get('GOLD')!.driftPaise).toBe(20_409_868n);
   });
 });

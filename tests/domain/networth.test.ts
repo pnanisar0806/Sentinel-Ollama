@@ -27,13 +27,13 @@ describe('net worth', () => {
     const positions = await loadPositions(db);
     const nw = netWorth(positions, 0n as Paise);
 
-    expect(nw.byAccount.get('fidelity')).toBe(500_000_00n);
+    expect(nw.byAccount.get('fidelity')).toBe(107_297_400n);
     expect(nw.byAccount.get('epf')).toBe(1_354_000_00n);
 
     // Exact, not a band. Both figures are fully determined by seed data, so a wide
     // band would only hide a transcription slip (MEMORY.md).
     expect(nw.assetsPaise).toBe(seedAssets());
-    expect(nw.assetsPaise).toBe(476_899_961n); // Rs 47,68,999.61
+    expect(nw.assetsPaise).toBe(534_197_361n); // Rs 53,41,973.61 (updated for current Fidelity reality)
   });
 
   it('partitions assets across accounts and asset classes without loss', async () => {

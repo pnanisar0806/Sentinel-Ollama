@@ -113,7 +113,7 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
 
   { instrumentId: 'CASH:SAVINGS', account: 'bank', quantity: 1, valuePaise: rupees(163_000), avgCostPaise: null },
   { instrumentId: 'US:INDMONEY-BASKET', account: 'indmoney', quantity: 1, valuePaise: rupees(137_000), avgCostPaise: null },
-  { instrumentId: 'US:NOW', account: 'fidelity', quantity: 1, valuePaise: rupees(500_000), avgCostPaise: null },
+  { instrumentId: 'US:NOW', account: 'fidelity', quantity: 78, valuePaise: rupees(1_072_974), avgCostPaise: null },
 ];
 
 export const SEED_LOANS: LoanSeed[] = [
@@ -188,5 +188,5 @@ export const SEED_RSU_GRANTS: RsuGrantSeed[] = [
   { id: 'G2023', grantedOn: '2023-02-15', units: 165, note: 'Annual refresher' },
   { id: 'G2024', grantedOn: '2024-02-15', units: 190, note: 'Annual refresher' },
   { id: 'G2025', grantedOn: '2025-02-15', units: 205, note: 'Annual refresher' },
-  { id: 'G2026', grantedOn: '2026-02-15', units: 285, note: 'Largest grant to date' },
+  { id: 'G2026', grantedOn: '2026-02-17', units: 285, note: 'Fidelity Grant 26RSU' },
 ];
