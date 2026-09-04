@@ -12,3 +12,8 @@ data/indmoney-snapshot.json
 data/*.snapshot.json
 
 data/screenshots/
+
+# Local agent tooling state / scratch files — never tracked.
+.claude/
+.serena/
+*.mp4
