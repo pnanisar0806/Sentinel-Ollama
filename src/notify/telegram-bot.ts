@@ -14,7 +14,8 @@ import { formatInr, type Paise } from '../money/paise.js';
 import { readFile, readdir } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { Telegram, escapeMarkdown } from './telegram.js';
-import { FIDELITY_EXTRACTION_PROMPT, fidelityVestsToProposals, checkFidelityVestExists, type FidelityProposal } from '../sources/fidelity-ingest.js';
+import { extractRsuVestsFromImage, fidelityVestsToProposals, checkFidelityVestExists, type FidelityProposal } from '../sources/fidelity-ingest.js';
+import { persistVests, confirmVest } from '../domain/rsu.js';
 
 const POLL_TIMEOUT = 30; // seconds
 const POLL_INTERVAL_MS = 1000;
@@ -25,7 +26,7 @@ const COMMANDS = {
   sync: 'Trigger an on-demand portfolio sync (Kite + INDmoney + FX)',
   holdings: 'List open positions with their /cost line numbers',
   cost: 'Record a holding\u2019s total cost from a statement: /cost <n> <inr> [YYYY-MM-DD]',
-  confirm: 'Write LLM-read costs: /confirm all or /confirm <proposal#>',
+  confirm: 'Write LLM-read costs or Fidelity vests: /confirm all or /confirm <proposal#>',
   reject: 'Discard the pending LLM proposals',
   fidelity: 'Process a Fidelity NetBenefits RSU statement screenshot',
   status: 'Show staleness and open incidents',
@@ -107,6 +108,9 @@ export class TelegramBot {
     account: string | null;
     conflictWithCost?: Paise | null;
   })[] | null = null;
+  /** Fidelity vest proposals awaiting /confirm — the RSU twin of `pending`. Same
+   *  approval gate, same commands; vests land in `rsu_vests`, not `lots`. */
+  private fidelityPending: FidelityProposal[] | null = null;
   /** Album buffering: media_group_id → queued files, flushed after a short silence. */
   private readonly mediaBuffers = new Map<string, { fileId: string; mime: string }[]>();
   private readonly mediaTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -212,6 +216,7 @@ export class TelegramBot {
           break;
         case 'reject':
           this.pending = null;
+          this.fidelityPending = null;
           await this.telegram.send('Discarded. Nothing was written.');
           break;
         case 'fidelity':
@@ -348,21 +353,7 @@ export class TelegramBot {
     await this.telegram.answerCallbackQuery(cq.id, `Processing as ${type === 'fidelity' ? 'Fidelity RSU' : 'Brokerage/MF'}…`);
 
     // Find the saved files for this updateId
-    const dir = SCREENSHOTS_DIR;
-    let files: { fileId: string; mime: string }[] = [];
-
-    try {
-      const entries = await readdir(dir);
-      // Find files matching this updateId (format: <updateId>.<ext> or <updateId>_<index>.<ext>)
-      const matching = entries.filter((f) => f.startsWith(`${updateId}.`) || f.startsWith(`${updateId}_`));
-      for (const f of matching) {
-        const ext = extname(f).toLowerCase();
-        const mime = ext === '.png' ? 'image/png' : ext === '.pdf' ? 'application/pdf' : 'image/jpeg';
-        files.push({ fileId: f, mime });
-      }
-    } catch {
-      // directory might not exist
-    }
+    const files = await this.savedFilesFor(updateId);
 
     if (!files.length) {
       await this.telegram.send(`⚠️ Could not find saved images for update ${updateId}. Please re-upload.`);
@@ -459,6 +450,13 @@ export class TelegramBot {
 
   /** Writes confirmed LLM proposals as owner lots. Nothing writes without this. */
   private async handleConfirm(text: string): Promise<void> {
+    // RSU route takes precedence when populated — vests and cost proposals share the
+    // same confirmation workflow but go to different tables.
+    if (this.fidelityPending?.length) {
+      await this.confirmFidelity(text);
+      return;
+    }
+
     if (!this.pending?.length) {
       await this.telegram.send('Nothing pending. Send a statement screenshot first.');
       return;
@@ -514,6 +512,7 @@ export class TelegramBot {
     // (live-test finding, 2026-08-25: 89 lots for ~31 instruments in production).
     const consumed = new Set(targets);
     const remaining = this.pending!.filter((_, i) => !consumed.has(i));
+    // Never clear the fidelity queue here — it is drained only when vests confirm.
     this.pending = remaining.length ? remaining : null;
 
     const lines: string[] = [];
@@ -670,17 +669,47 @@ export class TelegramBot {
       return;
     }
 
-    await this.telegram.send(`📸 Processing Fidelity statement…`);
-    
-    // We need to fetch the file from Telegram - but the file was already saved when the photo arrived
-    // The owner should reply to the saved screenshot with /fidelity <updateId>
+    // Reconstruct the saved screenshot(s) from disk, then process exactly like an
+    // auto-typed upload. Returns when no file was found for that update id.
+    const ok = await this.handleFidelityForUpdate(updateId);
+    if (ok) return;
+
     await this.telegram.send(
-      `Fidelity statement processing not yet wired to the media buffer.\n` +
-      `For now: send the Fidelity screenshot, then run /holdings and use /cost <line#> <inr> [date] for each vest.`
+      `⚠️ No saved screenshot for update ${updateId}. Send the Fidelity statement image first.`,
     );
   }
 
-  /** Process a Fidelity statement image from the media buffer. */
+  /** Saved-image discovery — readdir of data/screenshots, matching `<updateId>.`, shared
+   *  by the inline-keyboard callback and the /fidelity command. */
+  private async savedFilesFor(updateId: number): Promise<{ fileId: string; mime: string }[]> {
+    const files: { fileId: string; mime: string }[] = [];
+    try {
+      const entries = await readdir(SCREENSHOTS_DIR);
+      const matching = entries.filter((f) => f.startsWith(`${updateId}.`) || f.startsWith(`${updateId}_`));
+      for (const f of matching) {
+        const ext = extname(f).toLowerCase();
+        const mime = ext === '.png' ? 'image/png' : ext === '.pdf' ? 'application/pdf' : 'image/jpeg';
+        files.push({ fileId: f, mime });
+      }
+    } catch {
+      // directory might not exist yet
+    }
+    return files;
+  }
+
+  /** Calls processFidelityStatement for the given update id. Returns false when no
+   *  matching screenshot is on disk, so a caller can distinguish "processed" from
+   *  "nothing saved". */
+  private async handleFidelityForUpdate(updateId: number): Promise<boolean> {
+    const files = await this.savedFilesFor(updateId);
+    if (!files.length) return false;
+    await this.processFidelityStatement(updateId, files);
+    return true;
+  }
+
+  /** Process a Fidelity RSU statement image from the media buffer: extract vests with
+   *  the fidelity schema, price them at the live USD/INR rate, drop anything already
+   *  confirmed ACTUAL, then queue for /confirm. Nothing writes without /confirm. */
   private async processFidelityStatement(updateId: number, files: { fileId: string; mime: string }[]): Promise<void> {
     if (!this.env.llmApiKey) return;
 
@@ -700,55 +729,126 @@ export class TelegramBot {
 
       await this.telegram.send(`📸 Saved ${images.length} page(s). Reading Fidelity RSU statement…`);
 
-      // Use the Fidelity-specific prompt - LLM returns raw JSON we parse
-      const proposals = await extractHoldingsFromImage({
+      const vests = await extractRsuVestsFromImage({
         fetchImpl: this.telegram['fetchImpl'],
         apiKey: this.env.llmApiKey,
         ...(this.env.llmModel ? { model: this.env.llmModel } : {}),
         images,
-        positions: [], // Fidelity uses grant IDs, not current holdings
-        knownTickers: [],
-        customPrompt: FIDELITY_EXTRACTION_PROMPT,
       });
-
-      if (!proposals.length) {
+      if (!vests.length) {
         await this.telegram.send('Could not read any RSU vest events from the Fidelity statement.');
         return;
       }
 
-      // The LLM returns LlmProposal[] but for Fidelity we interpret differently:
-      // - name = grantId
-      // - costPaise = priceUsd * 100 (cents)
-      // - acquiredOn = vestOn
-      // We need priceUsd and units from the custom prompt output, but LlmProposal doesn't have them.
-      // For now, queue as cost entries the owner can review via /confirm.
-      
-      const fxRate = await fetchUsdInr();
-      const prior = this.pending?.length ?? 0;
-      
-      const incoming = proposals.map((p) => ({
-        ...p,
-        name: `Fidelity: ${p.name}`,
-        line: null,
-        confidence: p.confidence === 'high' ? 'high' : 'low',
-      } as LlmProposal & {
-        instrumentId: string | null;
-        account: string | null;
-        conflictWithCost?: Paise | null;
-      }));
+      const fx = await fetchUsdInr();
+      // Proposals are always current at ingest; the FX quote the proposal carries is the
+      // one used here so /confirm is a faithful write of what was shown.
+      const proposals = fidelityVestsToProposals(vests, fx.rate);
 
-      this.pending = [...(this.pending ?? []), ...incoming];
+      // Fidelity vests are immutable once confirmed (FR-03): a row already ACTUAL must
+      // not be re-queued, or /confirm would be guaranteed to fail on it.
+      const fresh: FidelityProposal[] = [];
+      for (const p of proposals) {
+        if (await checkFidelityVestExists(this.db, p.grantId, p.vestOn)) continue;
+        fresh.push(p);
+      }
+      if (!fresh.length) {
+        await this.telegram.send(
+          'Every recognised vest on that statement is already confirmed — nothing new to record.',
+        );
+        return;
+      }
 
-      const lines = incoming.map((p, i) => {
-        return `${prior + i + 1}. ${p.name} vested ${p.acquiredOn}: ${formatInr(p.costPaise)} [${p.confidence}]`;
+      const prior = this.fidelityPending?.length ?? 0;
+      this.fidelityPending = [...(this.fidelityPending ?? []), ...fresh];
+
+      const lines = fresh.map((p, i) => {
+        return `${prior + i + 1}. ${p.grantId} vesting ${p.vestOn}: ${p.units}u → net ${formatInr(p.netPaise)} (gross ${formatInr(p.grossPaise)})`;
       });
-      lines.push('', `_Pending total: ${this.pending.length}. Review and /confirm all or /confirm <#> to write._`);
+      lines.push('', `_Pending total: ${this.fidelityPending.length}. Review and /confirm all or /confirm <#> to write._`);
       await this.telegram.send(lines.join('\n'));
-
     } catch (error) {
       const m = error instanceof Error ? error.message : String(error);
       console.error('[telegram-bot] Fidelity statement failed:', m);
       await this.telegram.send(`⚠️ Fidelity processing failed: ${escapeMarkdown(m)}`);
     }
+  }
+
+  /** Confirms Fidelity vest proposals into `rsu_vests` as immutable ACTUAL rows. */
+  private async confirmFidelity(text: string): Promise<void> {
+    const parts = text.trim().split(/\s+/);
+    const arg = parts[1]?.toLowerCase();
+    const targets = arg === 'all'
+      ? this.fidelityPending!.map((_, i) => i)
+      : [Number(arg) - 1];
+    if (targets.some((t) => !Number.isInteger(t) || t < 0 || t >= this.fidelityPending!.length)) {
+      await this.telegram.send('usage: /confirm all | /confirm <proposal#>');
+      return;
+    }
+
+    const written: string[] = [];
+    const skipped: string[] = [];
+    const consumed = new Set<number>();
+    for (const t of targets) {
+      const p = this.fidelityPending![t]!;
+
+      // A vest can only be confirmed where its grant exists — rsu_vests.grant_id is a
+      // foreign key. Grant rows themselves are never auto-created: doing so would
+      // fabricate granted_on / units (FR-02). Every real statement should match a
+      // seeded G-grant; anything else is surfaced, not invented.
+      const grants = await this.db.query<{ id: string }>(
+        'select id from rsu_grants where id = $1',
+        [p.grantId],
+      );
+      if (!grants.length) {
+        // Also consumed: a skipped entry would otherwise sit in fidelityPending and,
+        // because handleConfirm routes to it first, silently block ALL later cost
+        // confirmations too. The owner fixes the seed and re-sends the statement.
+        skipped.push(`• ${p.grantId} (no such grant — add it to seed data first)`);
+        consumed.add(t);
+        continue;
+      }
+
+      // Ensure a PROJECTED row exists for the (grant, vest_on) key, then confirm it.
+      // FR-03's SQL guard means persistVests never touches an ACTUAL row; a stray
+      // PROJECTED row is harmless if confirmVest fails below (overwritten next run).
+      await persistVests(this.db, [{
+        grantId: p.grantId,
+        vestOn: p.vestOn,
+        units: p.units,
+        status: 'PROJECTED',
+        grossPaise: p.grossPaise,
+        netPaise: p.netPaise,
+      }], { asOf: new Date().toISOString() });
+
+      const rows = await this.db.query<{ id: string }>(
+        `select id from rsu_vests where grant_id = $1 and vest_on = $2`,
+        [p.grantId, p.vestOn],
+      );
+      const id = rows[0]?.id;
+      if (!id) {
+        skipped.push(`• ${p.grantId} (could not locate the vest row)`);
+        continue;
+      }
+      await confirmVest(this.db, id, {
+        units: p.units,
+        priceUsdCents: p.priceUsdCents,
+        usdInrMicros: p.usdInrMicros,
+        netPaise: p.netPaise,
+      }, { asOf: new Date().toISOString() });
+
+      written.push(`• ${p.grantId} vesting ${p.vestOn}: net ${formatInr(p.netPaise)} (gross ${formatInr(p.grossPaise)})`);
+      consumed.add(t);
+    }
+
+    // Confirmed entries leave the queue — the same double-write guard as cost.
+    const remaining = this.fidelityPending!.filter((_, i) => !consumed.has(i));
+    this.fidelityPending = remaining.length ? remaining : null;
+
+    const lines: string[] = [];
+    if (written.length) lines.push(`✅ Confirmed vests:`, ...written);
+    if (skipped.length) lines.push('', `⏭️ Skipped:`, ...skipped);
+    lines.push('', 'Feeds the RSU pipeline from the next digest onward.');
+    await this.telegram.send(lines.join('\n'));
   }
 }

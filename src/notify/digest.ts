@@ -122,6 +122,19 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     },
   );
 
+  // A vest the owner already confirmed ACTUAL on a Fidelity statement is fact, not a
+  // forecast — drop it from the projection so the digest never re-announces the same
+  // grant tranche after it was written.
+  const confirmed = await db.query<{ grant_id: string; vest_on: string | Date }>(
+    "select grant_id, vest_on from rsu_vests where status = 'ACTUAL'",
+  );
+  const confirmedKeys = new Set(confirmed.map((r) => {
+    // DATE columns come back as Date on PGlite and string on Supabase.
+    const vestOn = r.vest_on instanceof Date ? r.vest_on.toISOString().slice(0, 10) : String(r.vest_on).slice(0, 10);
+    return `${r.grant_id}|${vestOn}`;
+  }));
+  const unconfirmed = vests.filter((v) => !confirmedKeys.has(`${v.grantId}|${v.vestOn}`));
+
   const liabilities = await outstandingLiabilities(db, `${businessDate.slice(0, 7)}-01`);
   const nw = netWorth(positions, liabilities);
 
@@ -138,7 +151,7 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     buckets: await bucketStatuses(db),
     milestones: await milestoneStatuses(db, businessDate),
     staleness: await assessStaleness(db, now),
-    nextVest: vests[0] ?? null,
+    nextVest: unconfirmed[0] ?? null,
     ipsVersion: (await currentIps(db)).version,
     funded: fundedStatus(nw.assetsPaise),
   };

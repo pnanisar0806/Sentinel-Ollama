@@ -63,33 +63,21 @@ const SYSTEM_RULES = [
   'when the image row clearly corresponds to a listed portfolio row; otherwise null.',
 ].join('\n');
 
-export async function extractHoldingsFromImage(deps: {
+/**
+ * Shared OpenRouter vision pass: send one or more images with a task prompt to the free
+ * vision-model chain, retry once on the primary, walk the chain on 429, strip JSON fences
+ * and return whatever JSON the model produced — ANY shape. Callers map the shape they
+ * expect (brokerage `{items:[…]}`, Fidelity `{vests:[…]}`, …).
+ */
+export async function extractJsonFromImage(deps: {
   fetchImpl: typeof fetch;
   apiKey: string;
   /** Explicit model override; when absent the free-model chain is walked. */
   model?: string;
   /** One or more pages of the same statement — all sent in a single request. */
   images: { base64: string; mimeType: string }[];
-  positions: { name: string; instrumentId: string; account: string }[];
-  /** Owner-verified "TICKER = Holding name" lines. Statement screenshots show exchange
-   *  symbols; without these the model must fuzzy-match tickers to long names, which is
-   *  where near-identical rows (TMCV/TMPV) get swapped. */
-  knownTickers?: string[];
-  now?: Date;
-  /** Optional custom prompt to override the default SYSTEM_RULES. Use for non-standard
-   *  statement formats (e.g., Fidelity RSU vest events). If provided, SYSTEM_RULES is ignored. */
-  customPrompt?: string;
-}): Promise<LlmProposal[]> {
-  const now = deps.now ?? new Date();
-  const list = deps.positions
-    .map((p, i) => `${i + 1}. ${p.name} (${p.account})`)
-    .join('\n');
-  const hints = deps.knownTickers?.length
-    ? `\n\nKNOWN SYMBOL MAPPINGS — a row displaying one of these symbols belongs to exactly this holding:\n${deps.knownTickers.map((s) => `- ${s}`).join('\n')}\nUse the symbol to pick the line with certainty; do not guess between similar names.`
-    : '';
-  const prompt = deps.customPrompt
-    ? deps.customPrompt
-    : `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}${hints}`;
+  prompt: string;
+}): Promise<unknown> {
   const models = deps.model ? [deps.model] : LLM_MODEL_CHAIN;
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const imageParts = deps.images.map((im) => ({
@@ -114,7 +102,7 @@ export async function extractHoldingsFromImage(deps: {
           model,
           messages: [{
             role: 'user',
-            content: [{ type: 'text', text: prompt }, ...imageParts],
+            content: [{ type: 'text', text: deps.prompt }, ...imageParts],
           }],
         }),
       });
@@ -141,37 +129,72 @@ export async function extractHoldingsFromImage(deps: {
       if (typeof content !== 'string') throw new Error('OpenRouter returned no message content');
 
       // Models love wrapping JSON in fences even when told not to.
-      const json = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-      const parsed = JSON.parse(json) as {
-        items?: { line?: number | null; name?: string; totalCostInr?: string; acquiredOn?: string; confidence?: string }[];
-      };
-
-      const proposals: LlmProposal[] = [];
-      for (const item of parsed.items ?? []) {
-        if (typeof item.totalCostInr !== 'string') continue;
-        let costPaise: Paise;
-        try {
-          costPaise = rupees(item.totalCostInr.replace(/[₹,\s]/g, ''));
-        } catch {
-          continue; // unreadable cost is dropped, never guessed
-        }
-        if (costPaise <= 0n) continue;
-        const line = typeof item.line === 'number' && item.line >= 1 && item.line <= deps.positions.length
-          ? item.line - 1
-          : null;
-        const acquiredOn = typeof item.acquiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item.acquiredOn)
-          ? item.acquiredOn
-          : now.toISOString().slice(0, 10);
-        proposals.push({
-          line,
-          name: item.name ?? '(unnamed)',
-          costPaise,
-          acquiredOn,
-          confidence: item.confidence === 'high' ? 'high' : 'low',
-        });
-      }
-      return proposals;
+      return JSON.parse(content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
     }
   }
   throw new Error(`OpenRouter failed after walking the model chain: ${lastRaw}`);
+}
+
+/** Brokerage-schema extraction: `{items:[{line,name,totalCostInr,acquiredOn,confidence}]}`. */
+export async function extractHoldingsFromImage(deps: {
+  fetchImpl: typeof fetch;
+  apiKey: string;
+  /** Explicit model override; when absent the free-model chain is walked. */
+  model?: string;
+  /** One or more pages of the same statement — all sent in a single request. */
+  images: { base64: string; mimeType: string }[];
+  positions: { name: string; instrumentId: string; account: string }[];
+  /** Owner-verified "TICKER = Holding name" lines. Statement screenshots show exchange
+   *  symbols; without these the model must fuzzy-match tickers to long names, which is
+   *  where near-identical rows (TMCV/TMPV) get swapped. */
+  knownTickers?: string[];
+  now?: Date;
+}): Promise<LlmProposal[]> {
+  const now = deps.now ?? new Date();
+  const list = deps.positions
+    .map((p, i) => `${i + 1}. ${p.name} (${p.account})`)
+    .join('\n');
+  const hints = deps.knownTickers?.length
+    ? `\n\nKNOWN SYMBOL MAPPINGS — a row displaying one of these symbols belongs to exactly this holding:\n${deps.knownTickers.map((s) => `- ${s}`).join('\n')}\nUse the symbol to pick the line with certainty; do not guess between similar names.`
+    : '';
+  const prompt = `${SYSTEM_RULES}\n\nYou may be given several images: they are consecutive\npages of the SAME statement — treat them as one document.\n\nCURRENT PORTFOLIO:\n${list || '(empty)'}${hints}`;
+
+  const parsed = await extractJsonFromImage({
+    fetchImpl: deps.fetchImpl,
+    apiKey: deps.apiKey,
+    ...(deps.model ? { model: deps.model } : {}),
+    images: deps.images,
+    prompt,
+  });
+  if (typeof parsed !== 'object' || parsed === null) return [];
+  const items = (parsed as Record<string, unknown>).items;
+  if (!Array.isArray(items)) return [];
+
+  const proposals: LlmProposal[] = [];
+  for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue;
+    const r = item as Record<string, unknown>;
+    if (typeof r.totalCostInr !== 'string') continue;
+    let costPaise: Paise;
+    try {
+      costPaise = rupees(r.totalCostInr.replace(/[₹,\s]/g, ''));
+    } catch {
+      continue; // unreadable cost is dropped, never guessed
+    }
+    if (costPaise <= 0n) continue;
+    const line = typeof r.line === 'number' && r.line >= 1 && r.line <= deps.positions.length
+      ? r.line - 1
+      : null;
+    const acquiredOn = typeof r.acquiredOn === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.acquiredOn)
+      ? r.acquiredOn
+      : now.toISOString().slice(0, 10);
+    proposals.push({
+      line,
+      name: typeof r.name === 'string' ? r.name : '(unnamed)',
+      costPaise,
+      acquiredOn,
+      confidence: r.confidence === 'high' ? 'high' : 'low',
+    });
+  }
+  return proposals;
 }

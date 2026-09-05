@@ -16,8 +16,8 @@ export const CONFIRMED_SOURCE = 'owner-confirmed';
  * are carried as integer micro-units internally. Money never rides on a float; units are a
  * quantity, but they multiply money, so they get the same treatment.
  */
-const UNITS_SCALE = 1_000_000n;
-const toUnitsMicros = (units: number): bigint => BigInt(Math.round(units * Number(UNITS_SCALE)));
+export const UNITS_SCALE = 1_000_000n;
+export const toUnitsMicros = (units: number): bigint => BigInt(Math.round(units * Number(UNITS_SCALE)));
 
 export interface VestEvent {
   grantId: string;

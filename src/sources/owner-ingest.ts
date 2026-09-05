@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Db } from '../db/client.js';
 import { rupees, type Paise } from '../money/paise.js';
@@ -126,7 +126,11 @@ export async function insertOwnerCostLot(
   });
 }
 
-/** Telegram getFile → download → data/screenshots/<updateId>.<ext>. Returns the path. */
+/** Telegram getFile → download → data/screenshots/<updateId>.<ext>. Returns the path.
+ *  When `fileId` is already a saved local filename (the inline-keyboard and /fidelity
+ *  paths hand back the basenames written when the photo arrived — Telegram file_ids never
+ *  look like `123.jpg`), reuse it without a `getFile` round-trip; calling getFile with a
+ *  filename used to fail with "file not found" and dead-end the whole keyboard flow. */
 export async function saveStatementPhoto(deps: {
   fetchImpl: typeof fetch;
   botToken: string;
@@ -134,6 +138,10 @@ export async function saveStatementPhoto(deps: {
   dir: string;
   updateId: number | string;
 }): Promise<string> {
+  const local = join(deps.dir, deps.fileId);
+  const exists = await access(local).then(() => true, () => false);
+  if (exists) return local;
+
   const metaRes = await deps.fetchImpl(`https://api.telegram.org/bot${deps.botToken}/getFile`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

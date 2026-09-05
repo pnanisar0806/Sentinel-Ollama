@@ -7,6 +7,40 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
 
+## Fidelity RSU flow — SHIPPED 2026-09-05 (evening)
+
+Fidelity screenshot → `extractRsuVestsFromImage` (`sources/fidelity-ingest.ts`) → priced
+`FidelityProposal[]` queued in `telegram-bot.ts` `fidelityPending` → `/confirm <#>|all`
+writes ACTUAL `rsu_vests` + audit row; `/reject` clears both queues; the digest stops
+announcing a vest once it is ACTUAL.
+
+- **Money math shares `rsu.ts` constants.** `UNITS_SCALE` and `toUnitsMicros` are now
+  EXPORTED from `src/domain/rsu.ts`; `fidelityVestsToProposals` uses them, so the
+  proposal's `grossPaise` literally equals `confirmVest`'s recomputed gross and
+  `netPaise ≤ gross` passes by construction. The old 10⁴ scale inflation (proposal net
+  ~100× the true figure) is gone. `priceUsdCents = cents(BigInt(Math.round(priceUsd*100)))`.
+- **Row-ensure is two top-level calls, never nested:** `persistVests(db, [PROJECTED], {asOf})`
+  (FR-03-safe upsert, never touches ACTUAL) → select id by `(grant_id, vest_on)` →
+  `confirmVest`. `Db.withTransaction` does not nest.
+- **Grants are never auto-created** (FR-02). A vest whose grant has no `rsu_grants` row is
+  skipped ("no such grant — add it to seed data first"), and skipped entries are CONSUMED:
+  `handleConfirm` routes to `fidelityPending` first, so a stuck entry would silently block
+  later cost confirmations until removed.
+- **`saveStatementPhoto` short-circuits** when `join(dir, fileId)` already exists on disk —
+  kills the callback-path "file not found" dead-end for brokerage AND fidelity keyboards.
+- **PGlite DATE→Date gotcha now has TWO sites.** digest's `buildDigestInput` filter
+  normalizes `vest_on` exactly like `granted_on`:
+  `instanceof Date ? toISOString().slice(0,10) : String(...).slice(0,10)`. Building a key
+  from bare `String(r.vest_on)` never matched `'YYYY-MM-DD'` and re-announced confirmed vests.
+- **13 new tests** (fidelity-ingest 6, telegram-bot-fidelity 5, digest ACTUAL-filter 1).
+  Suite 444 passed / 55 files, plus the one stale `workflow-schedule` cron failure —
+  surfaced, not fixed (see Gotchas below).
+- **A real Fidelity statement is the live test** — and it also resolves the open RSU
+  per-grant split true-up (₹57.05L vs PRD ₹53.25L): the statement carries per-grant units
+  and dates, which is exactly what that gap asks for.
+
+---
+
 ## 2026-09-05 session — seed reality + Fidelity flow gap + digest gating
 
 **Seed is now the real Fidelity picture.** `pnpm seed` writes a fresh manual-seed snapshot
@@ -24,10 +58,16 @@ seed by querying `snapshots where source='manual-seed'` for the expected date ra
 trusting the printed id. The digest itself is fine (reads only), but a manual re-seed that
 "cheerfully" failed is what fooled us this session. Read + write share the same pooler.
 
-**Fidelity Telegram flow is a DEAD END — diagnosed, fix agreed for tomorrow.** See
-`PENDING.md` Next up for the exact broken chain (`processFidelityStatement` → parser schema
-mismatch → no queue writer). The 78 shares did NOT come through Telegram; they were hardcoded
+**Fidelity Telegram flow — dead end diagnosed this morning, SHIPPED this evening** (see
+`§ Fidelity RSU flow` above). The 78 shares did NOT come through Telegram; they were hardcoded
 into `SEED_HOLDINGS` (`seed-data.ts:116`) from numbers the owner pasted in chat.
+
+**Stale test surfaced, decision needed (2026-09-05 evening).** Since commit `30b47d3`
+moved digest.yml from a fixed cron to `workflow_run` on sync success, the shared `cronOf()`
+in `tests/jobs/workflow-schedule.test.ts` throws "no cron in digest.yml" — the suite's one
+persistent red test. `digest.yml` intentionally has no cron. Do not silently edit the test's
+assertion; the owner decides whether digest freshness is still gated by a workflow (then the
+test is updated to assert the `workflow_run` shape) or the assertion is dropped.
 
 **Digest gating (commit `30b47d3`).** `digest.yml` no longer has a fixed cron; it fires on
 `workflow_run` of `sync`, gated `conclusion == 'success'`. Sync cron untouched

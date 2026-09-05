@@ -62,3 +62,24 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
 - Digest schedule moved to nightly 21:00 IST + SDD progress ledger created (was
   referenced by CLAUDE.md but missing) — `f8cb46c`. Push still awaited from owner;
   bot code takes effect locally on next restart.
+
+## 2026-09-05 (evening session)
+
+- **Fidelity RSU flow shipped** (dead end diagnosed this morning). Verified chain: statement
+  screenshot → `extractRsuVestsFromImage` via the new shape-free `extractJsonFromImage` LLM pass
+  (Fidelity `{vests:[…]}`, no longer forced through the brokerage `{items}` parser) →
+  `fidelityVestsToProposals` priced with the SAME `UNITS_SCALE`/`toUnitsMicros` that `rsu.ts`
+  exports (proposal gross = `confirmVest` recompute, net ≤ gross by construction) → queued in
+  `fidelityPending` → `/confirm <#>|all` writes ACTUAL `rsu_vests` via PROJECTED `persistVests`
+  row-ensure + `confirmVest` (two top-level calls; grants never auto-created FR-02; missing-grant
+  and confirmed entries consumed so cost confirms never block). `/fidelity` wired, `/reject`
+  clears both queues, `saveStatementPhoto` short-circuits on existing files.
+- **Digest double-announcement bug fixed**: confirmed ACTUAL vests were re-forecast because the
+  confirmed-filter key was built from bare `String(vest_on)` under PGlite's DATE→Date behavior;
+  now normalized exactly like `granted_on` (`toISOString().slice(0,10)`). Guard test "no double
+  forecast" added to the digest suite.
+- Suite 432 → **444 passed** (+6 fidelity-ingest, +5 telegram-bot-fidelity, +1 digest guard);
+  sole red = stale `workflow-schedule` digest.yml cron assertion — surfaced to owner, decision
+  awaited (see `PENDING.md`); not silently edited.
+- RSU per-grant split true-up (₹57.05L vs PRD ₹53.25L) is now resolvable live: the next real
+  Fidelity statement carries per-grant units/vest dates and doubles as the end-to-end live test.

@@ -6,27 +6,21 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
-- [ ] **FIX the Fidelity RSU Telegram flow — agreed with owner 2026-09-05, do tomorrow**
-      Today a Fidelity screenshot upload is a DEAD END (owner found the digest stale and
-      asked; we traced it):
-      1. Upload → photo saved → caption keywords / inline keyboard pick Fidelity →
-         `processFidelityStatement` (`notify/telegram-bot.ts:684`).
-      2. **BUG:** it calls `extractHoldingsFromImage` with `FIDELITY_EXTRACTION_PROMPT`,
-         but the parser (`sources/llm-extract.ts:145`) only understands the brokerage
-         schema `{items:[{totalCostInr,…}]}`. The Fidelity prompt returns
-         `{vests:[{grantId,vestOn,units,priceUsd,withholdingPct,netUnits}]}` → parser gets
-         **zero** proposals → bot replies "Could not read any RSU vest events".
-      3. Even with a parse: `fidelityVestsToProposals` + `checkFidelityVestExists`
-         (`sources/fidelity-ingest.ts:82,111`) are imported but **never called**;
-         `/confirm` writes only cost lots (`insertOwnerCostLot`), never `rsu_vests` /
-         `confirmVest`; `/fidelity` is a stub ("not yet wired to the media buffer").
-      **Plan:** parse `vests` into a `FidelityProposal[]` queue → `/confirm <#>|all` writes
-      `rsu_vests` via `confirmVest` (recompute gross/net from units×priceUsd×FX in one
-      transaction; FR-03 already in SQL) → digest then reads the vested units.
-      **Live test = owner's next real Fidelity statement.**
+- [x] **Fidelity RSU Telegram flow — SHIPPED 2026-09-05** (the dead end is gone). Flow:
+      screenshot → `extractRsuVestsFromImage` (`{vests}`) → priced proposal queue →
+      `/confirm <#>|all` writes ACTUAL `rsu_vests` via `confirmVest`; `/reject` clears it;
+      /`fidelity` wired; `saveStatementPhoto` short-circuits on existing files; digest
+      stops announcing confirmed vests. 13 new tests; suite 432 → 444 (see MEMORY § Fidelity
+      flow). **Remaining = the live test** — see Waiting on OWNER.
       NOTE: the 78 US:NOW shares in today's digest come from `pnpm seed` (hardcoded from
       numbers the owner pasted in chat, 2026-08-24/09-05 session) — NOT from any Telegram
       flow.
+
+- [ ] **Reconcile `tests/jobs/workflow-schedule.test.ts` to the digest gating change.**
+      Its `cronOf()` throws "no cron in digest.yml" — `digest.yml` has no cron by design
+      since `30b47d3` (fires on sync success). The suite's one persistent red. Needs an
+      owner decision: update the assertion to the `workflow_run` shape, or drop the
+      freshness-cron assertion for digest.yml. Don't silence it silently.
 
 - [ ] **Sammaan bond maturity modeling** — INE148I07GL3 matures **26-Sep-2026** (~1
       week): ₹3,00,000 face + final coupon ≈ ₹27,000 redeems to cash, retiring half the
@@ -36,8 +30,11 @@ MEMORY.md; the code map lives in index.md.
 
 ## Waiting on OWNER
 
-- [ ] Fidelity statement — per-grant/tranche RSU split (model carries ₹57.05L vs PRD's
-      stated ₹53.25L; never tune the value to close the gap)
+- [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
+      screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
+      split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
+      the gap)
+- [ ] Decision on the stale `workflow-schedule.test.ts` cron assertion (see Next up)
 - [ ] The date each protection milestone was actually set (`milestones.raised_on` —
       "% elapsed" is NULL until then)
 - [ ] Monthly electricity figure (closes the ₹82,124 vs PRD ₹76,000 surplus outflow gap)
@@ -74,4 +71,5 @@ MEMORY.md; the code map lives in index.md.
 | `fd96bd2` | ticker-anchored proposal resolution + ⚠️ conflict guard on /confirm all |
 | `30b47d3` | digest now runs on sync completion (`workflow_run`); fixed 21:00 slot removed |
 | `472d801` | untracked `.claude/`, `.serena/`, `zoox_finalTEMP_MPY_wvf_snd.mp4` (were swept into bc728b4); gitignored |
-| *(this session)* | seed reality fixed (US:NOW 78 @ ₹10.73L, ₹53.42L total); local `pnpm sync` verified; Fidelity Telegram flow diagnosed as a dead end (see Next up) |
+| `bc728b4` | seed reality fixed (US:NOW 78 @ ₹10.73L, ₹53.42L total); local `pnpm sync` verified; digest gating to sync success (`30b47d3`) |
+| *(this session)* | Fidelity RSU flow shipped (extract → priced queue → `/confirm` ACTUAL vests); digest ACTUAL-filter Date fix; 13 new tests; suite 444/1-stale |

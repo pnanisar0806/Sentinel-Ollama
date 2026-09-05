@@ -4,8 +4,12 @@ import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { persistSchedules } from '../../src/domain/loans.js';
 import { installIps } from '../../src/domain/ips.js';
+import { confirmVest, persistVests } from '../../src/domain/rsu.js';
 import { buildDigestInput, composeDigest } from '../../src/notify/digest.js';
 import { formatInr } from '../../src/money/paise.js';
+import { dollars } from '../../src/money/paise.js';
+import { rateMicros } from '../../src/money/fx.js';
+import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 
 let db: Db;
 beforeEach(async () => {
@@ -77,5 +81,34 @@ describe('daily digest', () => {
   it('is a pure function — the same input renders the same output', async () => {
     const input = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
     expect(composeDigest(input)).toBe(composeDigest(input));
+  });
+
+  it('stops announcing a vest once the owner confirmed it ACTUAL (no double forecast)', async () => {
+    const before = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
+    expect(before.nextVest).not.toBeNull();
+    const target = before.nextVest!;
+
+    // Approve the projected vest exactly as the owner would on the statement.
+    await persistVests(db, [{
+      grantId: target.grantId, vestOn: target.vestOn, units: target.units,
+      status: 'PROJECTED', grossPaise: target.grossPaise, netPaise: target.netPaise,
+    }], { asOf: '2026-08-12T08:45:00+05:30' });
+    const [row] = await db.query<{ id: string }>(
+      'select id from rsu_vests where grant_id = $1 and vest_on = $2',
+      [target.grantId, target.vestOn],
+    );
+    await confirmVest(db, row!.id, {
+      units: target.units,
+      priceUsdCents: dollars(ASSUMPTIONS.seedNowPriceUsd),
+      usdInrMicros: rateMicros(ASSUMPTIONS.seedUsdInr),
+      netPaise: target.netPaise,
+    }, { asOf: '2026-08-12T08:45:00+05:30' });
+
+    const after = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
+    expect(after.nextVest).not.toBeNull();
+    // Grant grantIds share the same quarterly cycle, so the next announcement is the same
+    // date one grant along — never the confirmed pair again.
+    expect(after.nextVest!.grantId).not.toBe(target.grantId);
+    expect(after.nextVest!.vestOn).toBe(target.vestOn);
   });
 });
