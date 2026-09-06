@@ -20,9 +20,12 @@ MEMORY.md; the code map lives in index.md.
 
           pnpm exec tsx --env-file=.env _retire-kite.mts
 
-      It deletes the `kite` snapshot, its 31 holdings and the kite `oauth_tokens` row in one
-      transaction, then prints the corrected net worth (expect ~48 positions, ~₹57.1L). A
-      Claude-side classifier blocks the production DELETE, so it needs your hand. Backup of
+      It deletes the 31 kite **holdings** and the kite `oauth_tokens` row in one transaction,
+      then prints the corrected net worth (expect ~48 positions, ~₹57.1L). The `kite`
+      **snapshot row stays** — `snapshots` is append-only (trigger in `0001`, not `0004`), and
+      an empty snapshot contributes zero positions anyway. A first attempt that tried to
+      delete the snapshot was refused by the trigger and rolled back with nothing lost.
+      A Claude-side classifier blocks the production DELETE, so it needs your hand. Backup of
       everything it removes: `data/kite-snapshot-backup-2026-09-07.json` (gitignored).
       **Until it runs, the next digest reports the inflated ₹71.9L.** Delete `_retire-kite.mts`
       afterwards. Detail in `MEMORY.md § Kite retired`.

@@ -211,9 +211,15 @@ also reports). Net worth went ₹57,12,936 → ₹71,85,786 (+26%) with no money
   would never have picked it up regardless.
 - `'Brokerage / Kite'` upload labels and the bot's `kite`/`zerodha` caption keywords are
   KEPT — they route Zerodha *statement screenshots*, an unrelated path.
-- Cleanup of the bad rows is `_retire-kite.mts` (one transaction, deletes the kite snapshot,
-  its holdings and the kite `oauth_tokens` row). Backup of everything deleted:
-  `data/kite-snapshot-backup-2026-09-07.json`, gitignored via `data/*backup*.json`.
+- Cleanup of the bad rows is `_retire-kite.mts`. **`snapshots` is APPEND-ONLY and the trigger
+  lives in `0001` (lines 202–205), NOT in `0004`** — `0004` only adds RLS for it, so grepping
+  `0004` alone says "deletable" and is wrong. The first cleanup attempt tried to delete the
+  snapshot row and was correctly refused (`P0001: append-only table: snapshots may not be
+  DELETEd`); the transaction rolled back with nothing lost. Correct move: delete the
+  **holdings** (no trigger — `writeSnapshot` deletes them on every sync) and the
+  `oauth_tokens` row, and KEEP the snapshot as the immutable record that a sync happened. An
+  empty snapshot joins to zero holdings and contributes zero positions.
+  Backup: `data/kite-snapshot-backup-2026-09-07.json`, gitignored via `data/*backup*.json`.
 
 ---
 
