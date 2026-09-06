@@ -12,7 +12,24 @@ MEMORY.md; the code map lives in index.md.
       It was already red locally and was pushed knowingly rather than silenced. It now blocks a
       green badge, so the owner decision under "Waiting on OWNER" is the next thing to land.
 
-- [ ] **Kite connect — `Invalid api_key` FIXED (2026-09-07).** Root cause: `.env` held
+- [ ] **KITE RETIRED — INDmoney is the only portfolio source (owner decision 2026-09-07).**
+      The connect flow worked, which is how it surfaced that INDmoney already aggregates the
+      same Zerodha account: net worth jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money
+      moving. Code removal is DONE and verified (root+web tsc clean, suite 436/1-stale, all
+      pages 200, `/api/kite/*` now 404). **ONE STEP LEFT, OWNER MUST RUN IT:**
+
+          pnpm exec tsx --env-file=.env _retire-kite.mts
+
+      It deletes the `kite` snapshot, its 31 holdings and the kite `oauth_tokens` row in one
+      transaction, then prints the corrected net worth (expect ~48 positions, ~₹57.1L). A
+      Claude-side classifier blocks the production DELETE, so it needs your hand. Backup of
+      everything it removes: `data/kite-snapshot-backup-2026-09-07.json` (gitignored).
+      **Until it runs, the next digest reports the inflated ₹71.9L.** Delete `_retire-kite.mts`
+      afterwards. Detail in `MEMORY.md § Kite retired`.
+
+- [ ] ~~**Kite connect — `Invalid api_key` FIXED (2026-09-07).**~~ Superseded by the retirement
+      above; kept for the durable lesson, which is in `MEMORY.md § .env values must be UNQUOTED`.
+      Root cause: `.env` held
       `KITE_API_KEY="…"` **quoted**, and the running server had cached the quoted value, so the
       login redirect emitted `api_key=%22…%22` and Kite rejected it. `KITE_API_SECRET` was quoted
       too and would have broken the `/session/token` checksum at the next step. Fixed by removing

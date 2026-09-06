@@ -10,14 +10,13 @@ import { McpClient } from '../sources/mcp-client.js';
 import { ensureAccessToken, discoverMetadata, loadClientSecret, ReauthRequired } from '../sources/oauth.js';
 import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
-import { KiteSource } from '../sources/kite.js';
 import { assessStaleness, raiseIncidents } from '../sources/staleness.js';
 import { writeSnapshot, type Source } from '../sources/types.js';
 import { isMainModule } from '../util/main-module.js';
 import type { Purpose } from '../config/env.js';
 
 /**
- * This job reads DATABASE_URL, INDMONEY_SNAPSHOT_PATH and the optional Kite pair.
+ * This job reads DATABASE_URL and INDMONEY_SNAPSHOT_PATH.
  * It messages nobody and decrypts nothing, so it demands no purpose. Wiring
  * RemoteIndmoneySource (which reads stored OAuth tokens) adds 'crypto' here.
  */
@@ -171,9 +170,6 @@ if (isMainModule(import.meta.url)) {
   await installIps(db);
 
   const sources: Source[] = [await indmoneySource(db, env)];
-  if (env.kiteApiKey && env.kiteAccessToken) {
-    sources.push(new KiteSource({ apiKey: env.kiteApiKey, accessToken: env.kiteAccessToken }));
-  }
 
   const result = await runSync(db, {
     now: new Date().toISOString(),

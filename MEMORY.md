@@ -185,6 +185,38 @@ CI untouched). This supersedes the "throwaway preview, UI stays Phase 2" note ab
 
 ---
 
+## Kite retired — INDmoney is the only portfolio source (owner decision 2026-09-07)
+
+The web "Connect Kite" flow worked on its first real run and that is exactly how the bug
+surfaced: it wrote 31 holdings worth ₹14,72,851 as a `kite` snapshot, and **INDmoney already
+aggregates the same Zerodha account** (28 holdings, ₹8,07,773 — the gap is bonds, which Kite
+also reports). Net worth went ₹57,12,936 → ₹71,85,786 (+26%) with no money moving.
+
+- **Root cause is a precondition, not a defect.** `loadPositions` reconciles *seed vs live*
+  only; its own comment says "Live-live rows are never merged: each source manages its own
+  aggregation." Correct while INDmoney is the sole live source; adding a second live source
+  over the same account silently sums. The note now lives in the docstring above
+  `loadPositions` so the next source can't repeat it. Overlap also crosses account labels
+  (the bonds sit under INDmoney's `indmoney` account and Kite's `zerodha`), so keying on
+  `(canonical, account)` alone would not have caught it either.
+- **Owner's call: drop Kite entirely rather than build a precedence rule.** Removed:
+  `src/sources/kite.ts` + its tests, the `web/app/api/kite/*` routes, `web/lib/kite-auth.ts`,
+  the `/import` provider card, sync + telegram-bot wiring, the four `kite*` fields on `Env`,
+  `'kite'` from `KNOWN_PORTFOLIO_SOURCES`, and the workflow/`.env.example` entries. All of it
+  is recoverable from git history if Kite ever returns for Phase 3 order placement.
+- **Two Kite constraints that made it a poor fit anyway:** the access token expires 06:00 IST
+  daily and Kite returned **no refresh token**, so an unattended daily sync was never possible
+  — it needed a human click every morning. And `sync.ts` gated on the `KITE_ACCESS_TOKEN`
+  **env var** while the web flow stored the token in `oauth_tokens`, so the scheduled sync
+  would never have picked it up regardless.
+- `'Brokerage / Kite'` upload labels and the bot's `kite`/`zerodha` caption keywords are
+  KEPT — they route Zerodha *statement screenshots*, an unrelated path.
+- Cleanup of the bad rows is `_retire-kite.mts` (one transaction, deletes the kite snapshot,
+  its holdings and the kite `oauth_tokens` row). Backup of everything deleted:
+  `data/kite-snapshot-backup-2026-09-07.json`, gitignored via `data/*backup*.json`.
+
+---
+
 ## `.env` values must be UNQUOTED (2026-09-07)
 
 `DATABASE_URL`, `KITE_API_KEY` and `KITE_API_SECRET` were written into `.env` wrapped in

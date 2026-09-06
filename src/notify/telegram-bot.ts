@@ -2,7 +2,6 @@ import { type Db } from '../db/client.js';
 import { type TelegramEnv } from '../config/env.js';
 import { runSync } from '../jobs/sync.js';
 import { indmoneySource } from '../jobs/sync.js';
-import { KiteSource } from '../sources/kite.js';
 import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
 import { assessStaleness } from '../sources/staleness.js';
@@ -27,7 +26,7 @@ const SCREENSHOTS_DIR = 'data/screenshots';
 
 /** Commands the bot understands. */
 const COMMANDS = {
-  sync: 'Trigger an on-demand portfolio sync (Kite + INDmoney + FX)',
+  sync: 'Trigger an on-demand portfolio sync (INDmoney + FX)',
   holdings: 'List open positions with their /cost line numbers',
   cost: 'Record a holding\u2019s total cost from a statement: /cost <n> <inr> [YYYY-MM-DD]',
   confirm: 'Write LLM-read costs or Fidelity vests: /confirm all or /confirm <proposal#>',
@@ -542,9 +541,6 @@ export class TelegramBot {
       indmoneySnapshotPath: this.env.indmoneySnapshotPath,
       tokenEncryptionKey: this.env.tokenEncryptionKey,
     })];
-    if (this.env.kiteApiKey && this.env.kiteAccessToken) {
-      srcs.push(new KiteSource({ apiKey: this.env.kiteApiKey, accessToken: this.env.kiteAccessToken }));
-    }
     return srcs;
   }
 

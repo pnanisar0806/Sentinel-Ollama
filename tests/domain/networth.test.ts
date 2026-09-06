@@ -148,17 +148,17 @@ describe('loadPositions snapshot selection', () => {
 
   it('takes only the latest snapshot per source and merges across sources', async () => {
     await addSnapshot('manual-seed', '2026-07-01', '2026-07-01T00:00:00Z', 'NSE:NIFTYBEES', 111_11n);
-    await addSnapshot('kite', '2026-08-10', '2026-08-10T00:00:00Z', 'NSE:RPOWER', 222_22n, 'zerodha');
+    await addSnapshot('composite', '2026-08-10', '2026-08-10T00:00:00Z', 'NSE:RPOWER', 222_22n, 'zerodha');
 
     const positions = await loadPositions(db);
     const values = positions.map((p) => p.valuePaise);
 
     expect(values).not.toContain(111_11n);          // older same-source snapshot dropped
     expect(values.filter((v) => v === 222_22n)).toHaveLength(1); // other source merged in
-    // The kite RPOWER shares the seed RPOWER's canonical id AND account, so the
+    // The composite RPOWER shares the seed RPOWER's canonical id AND account, so the
     // seed placeholder retires (C-A): 20 seed rows - 1 retired + 1 live = 20.
     expect(positions.length).toBe(SEED_HOLDINGS.length);
-    expect(new Set(positions.map((p) => p.source))).toEqual(new Set(['manual-seed', 'kite']));
+    expect(new Set(positions.map((p) => p.source))).toEqual(new Set(['manual-seed', 'composite']));
   });
 
   /**
@@ -180,7 +180,7 @@ describe('loadPositions snapshot selection', () => {
 
   it('honours the businessDate cutoff', async () => {
     await addSnapshot('manual-seed', '2026-07-01', '2026-07-01T00:00:00Z', 'NSE:NIFTYBEES', 111_11n);
-    await addSnapshot('kite', '2026-08-10', '2026-08-10T00:00:00Z', 'NSE:RPOWER', 222_22n);
+    await addSnapshot('composite', '2026-08-10', '2026-08-10T00:00:00Z', 'NSE:RPOWER', 222_22n);
 
     const positions = await loadPositions(db, '2026-07-15');
     expect(positions.map((p) => p.valuePaise)).toEqual([111_11n]);

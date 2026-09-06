@@ -10,6 +10,8 @@ run-claude.ps1
 # for commit. The .example file beside it is the one that is tracked.
 data/indmoney-snapshot.json
 data/*.snapshot.json
+# Pre-deletion dumps of real holdings (e.g. the retired kite snapshot).
+data/*backup*.json
 
 data/screenshots/
 

@@ -64,7 +64,7 @@ describe('staleness engine', () => {
     // Derived, not restated: amfi/bhavcopy/screener are `unimplemented`, not stale, so
     // they raise nothing. Hard-coding 8 here is how this went stale when that changed.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(5); // manual-seed, kite, indmoney, composite, frankfurter
+    expect(expected).toBe(4); // manual-seed, indmoney, composite, frankfurter
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     expect(await raiseIncidents(db, rows)).toBe(0);
@@ -79,10 +79,10 @@ describe('staleness engine', () => {
       `insert into fx_rates (pair, as_of, rate_micros, source) values ('USD/INR', '2026-08-10', 95300000, 'frankfurter')`,
     );
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
-    // Portfolio sources (4) + frankfurter (stale at 5 days) = 5. Market sources are
+    // Portfolio sources (3) + frankfurter (stale at 5 days) = 4. Market sources are
     // unimplemented and raise nothing.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(5);
+    expect(expected).toBe(4);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     const open = await db.query<{ n: string }>(
@@ -97,9 +97,9 @@ describe('staleness engine', () => {
     const fresher = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
     await raiseIncidents(db, fresher);
 
-    // manual-seed recovers; kite/indmoney/composite/frankfurter still have no data at all.
+    // manual-seed recovers; indmoney/composite/frankfurter still have no data at all.
     const expected = fresher.filter((r) => r.stale).length;
-    expect(expected).toBe(4);
+    expect(expected).toBe(3);
     expect(fresher.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
 
     const open = await db.query<{ n: string }>(
@@ -121,10 +121,10 @@ describe('staleness engine', () => {
     await raiseIncidents(db, after);
 
     // frankfurter recovers (12.5h < 48h); manual-seed is 90h old and stays stale, as do
-    // the three portfolio sources that have never produced a row.
+    // the two portfolio sources that have never produced a row.
     expect(after.find((r) => r.source === 'frankfurter')!.stale).toBe(false);
     const expected = after.filter((r) => r.stale).length;
-    expect(expected).toBe(4);
+    expect(expected).toBe(3);
 
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,

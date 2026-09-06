@@ -14,7 +14,7 @@ beforeEach(async () => {
 });
 
 const failing: Source = {
-  name: 'kite',
+  name: 'composite',
   fetch: async () => { throw new Error('Invalid access token'); },
 };
 
@@ -34,7 +34,7 @@ describe('sync job', () => {
       sources: [failing, new FileIndmoneySource('tests/fixtures/indmoney-snapshot.json')],
     });
     expect(result.synced).toEqual(['indmoney']);
-    expect(result.failed[0]).toMatchObject({ source: 'kite' });
+    expect(result.failed[0]).toMatchObject({ source: 'composite' });
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'SYNC_FAILURE' and resolved_at is null`,
     );

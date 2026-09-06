@@ -22,7 +22,7 @@ const LIMIT_BY_SOURCE: Record<string, number> = {
 const NEVER = '1970-01-01T00:00:00.000Z';
 
 /** Sources that are expected to have data in the current schema. */
-const KNOWN_PORTFOLIO_SOURCES = ['manual-seed', 'kite', 'indmoney', 'composite'] as const;
+const KNOWN_PORTFOLIO_SOURCES = ['manual-seed', 'indmoney', 'composite'] as const;
 const KNOWN_FX_SOURCES = ['frankfurter'] as const;
 const KNOWN_MARKET_SOURCES = ['amfi', 'bhavcopy', 'screener'] as const;
 
@@ -80,7 +80,7 @@ async function getLatestFxAsOf(db: Db): Promise<Map<string, string>> {
 
 /**
  * Assesses staleness for all known sources.
- * - Portfolio sources (kite, indmoney, manual-seed, composite) from holdings
+ * - Portfolio sources (indmoney, manual-seed, composite) from holdings
  * - FX sources (frankfurter) from fx_rates
  * - Market sources (amfi, bhavcopy, screener) — no tables yet, reported as stale if no data
  */

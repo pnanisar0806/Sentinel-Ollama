@@ -37,7 +37,7 @@ export const CAPS = {
  * Emitted whenever part of the portfolio carries no `instruments.sector`, because the
  * single-sector cap can only see the part that does. Today's seed sectors only US:NOW
  * and NSE:RPOWER (~10.5% of value), so the cap is close to unevaluated.
- * TODO(Task 11B): the INDmoney/Kite sync supplies sectors for the rest.
+ * TODO(Task 11B): the INDmoney sync supplies sectors for the rest.
  */
 export const SECTOR_COVERAGE_CAVEAT =
   'SECTOR_COVERAGE: the single-sector cap was evaluated over only the part of the ' +

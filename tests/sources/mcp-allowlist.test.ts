@@ -4,7 +4,7 @@ import { McpClient } from '../../src/sources/mcp-client.js';
 /**
  * `callTool(name: string)` accepted any tool name at all. It is the one component in
  * the codebase that can invoke a NAMED REMOTE TOOL, and it got neither the method
- * allowlist nor the source scan KiteSource gets. Pointing it at Kite's MCP server —
+ * allowlist nor a source scan of its own. Pointing it at a broker's MCP server —
  * which exposes `place_order`, `modify_order`, `cancel_order`, `place_gtt_order` —
  * needed only a URL change.
  *

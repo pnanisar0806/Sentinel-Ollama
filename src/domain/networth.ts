@@ -87,12 +87,18 @@ function reconcileKey(row: HoldingRow): string {
  * One position set = the latest snapshot from each source, merged with C-A reconciliation.
  *
  * Reconciliation rules (owner decision 2026-08-23):
- * 1. Live source (kite, indmoney) wins per (canonical_id, account) when present.
+ * 1. The live source (indmoney) wins per (canonical_id, account) when present.
  * 2. Seed (manual-seed) fills gaps for instruments no live source reports.
  * 3. If a live source previously reported an instrument but stops, fall back to seed.
  *
  * Within a single source, NO deduplication — each source manages its own aggregation
- * (INDmoney aggregates in RemoteIndmoneySource, Kite returns one row per holding).
+ * (INDmoney aggregates in RemoteIndmoneySource).
+ *
+ * That rule holds only while exactly ONE live portfolio source exists. A second live
+ * source covering an account the first already aggregates is summed, not merged: adding
+ * Kite alongside INDmoney double-counted the Zerodha account by Rs 14,72,851 before it
+ * was retired (2026-09-07). Any new live source must either cover disjoint accounts or
+ * arrive with an explicit precedence rule.
  *
  * A stale source still contributes its last-known rows; the staleness engine (Task 12)
  * flags them — silently dropping them would understate net worth.
