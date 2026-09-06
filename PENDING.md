@@ -166,9 +166,9 @@ sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Su
    09:30 IST unchanged. **Weekly → Sunday 10:00 IST pending Phase 1 Task 11 + owner sign-off.**
 - **Secrets hygiene.** `TOKEN_ENCRYPTION_KEY` **rotated 2026-09-07** (new key in `.env` +
   GH Actions secret; the key-printing `recover-key.yml` written during the recovery attempt
-  was deleted unrun). **Owner action owed: `pnpm indmoney:login`** — until then the stored
-  INDmoney tokens are undecryptable and sync falls back to the file snapshot with a
-  `SYNC_FAILURE` incident. **Still un-rotated:** the Telegram bot token and Supabase DB
+  was deleted unrun). **`pnpm indmoney:login` re-run and verified** — tokens decrypt against
+  the new key, scope `portfolio:read`, refresh token present; the rotation loop is closed.
+  **Still un-rotated:** the Telegram bot token and Supabase DB
   password, both of which appeared in plaintext chat (2026-08-25) — BotFather `/token`;
   Supabase dashboard → then update the GH secret + local env.
 - Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.

@@ -261,13 +261,19 @@ possible and was deliberately **declined** in favour of rotation.
 - **Done:** new 32-byte key in `.env` (surgical one-line replace, other keys untouched) and
   pushed to the GH Actions secret via `gh secret set`. `sync.yml`/`weekly.yml` reference the
   secret by name, so they needed no edit; `.env.example`/docs carry no value.
-- **Still owed:** `pnpm indmoney:login` to re-mint tokens. Until then the stored ciphertext
-  is undecryptable in both `.pglite` and Supabase. **This degrades safely** — the decrypt
-  throws inside `ensureAccessToken` at `getToken()` time (not in `indmoneySource()`'s
-  try/catch, which only touches the null client secret), so it lands in `runSync`'s `step()`
-  as a `SYNC_FAILURE` incident (WARN, then BLOCK on the second run) and falls back to
-  `FileIndmoneySource`. The sync job still exits 0, so the digest still fires.
-- Re-login upserts over the dead row; no manual DELETE is required.
+- **Closed 2026-09-07:** `pnpm indmoney:login` re-minted the tokens against the new key and
+  `loadTokens(db,'indmoney',key)` decrypts OK (scope `portfolio:read`, refresh token present).
+  Re-login upserted over the dead row; no manual DELETE was needed. The existing
+  `oauth_clients` registration (`82e2a319…`, 2026-08-24) was reused — dynamic re-registration
+  did NOT happen, and `client_secret_enc` stays NULL.
+- Had it not been re-minted, the failure degrades safely: the decrypt throws inside
+  `ensureAccessToken` at `getToken()` time (not in `indmoneySource()`'s try/catch, which only
+  touches the null client secret), landing in `runSync`'s `step()` as a `SYNC_FAILURE`
+  incident (WARN, then BLOCK) and falling back to `FileIndmoneySource`. The job still exits 0,
+  so the digest still fires.
+- **Beware `.pglite` vs Supabase when spot-checking OAuth state.** The local embedded DB
+  carries its own stale `oauth_clients`/`oauth_tokens` rows with a DIFFERENT `client_id`
+  (`d421a08f…`). Reading one and reasoning about the other invents discrepancies.
 - Transcripts are unencrypted JSONL on disk. Treat anything ever pasted into a chat as
   burned — the Telegram bot token and Supabase DB password are still un-rotated (PENDING).
 
