@@ -6,6 +6,22 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [ ] **CI IS RED ON `main` (2026-09-07).** The whole `web/` + import + Kite body of work was
+      committed and pushed (`9420cba`, plus `779bd6c`). `tsc` passes; `pnpm test` fails on the
+      **one pre-existing** assertion below — `workflow-schedule.test.ts` → `no cron in digest.yml`.
+      It was already red locally and was pushed knowingly rather than silenced. It now blocks a
+      green badge, so the owner decision under "Waiting on OWNER" is the next thing to land.
+
+- [ ] **Kite connect — `Invalid api_key` FIXED (2026-09-07).** Root cause: `.env` held
+      `KITE_API_KEY="…"` **quoted**, and the running server had cached the quoted value, so the
+      login redirect emitted `api_key=%22…%22` and Kite rejected it. `KITE_API_SECRET` was quoted
+      too and would have broken the `/session/token` checksum at the next step. Fixed by removing
+      the surrounding quotes in `.env` (key is 16 chars, secret 32 — Kite's real formats) and
+      restarting; the redirect now emits a bare key. **Still pending:** the owner completing a real
+      login in the browser. `KITE_REDIRECT_URI` is unset so it defaults to
+      `http://localhost:3001/api/kite/callback` — that exact URL must be registered against this
+      api_key in the Kite developer console or the callback leg fails.
+
 - [ ] **Kite `/api/kite/login` + `/api/kite/callback` — 500s FIXED (2026-09-06).** Root cause:
       `NextResponse.redirect()` needs an **absolute** URL; both routes passed relative paths →
       `ERR_INVALID_URL`. Fixed via `req.nextUrl.origin`. Live: login (no key) → 307
@@ -23,7 +39,7 @@ MEMORY.md; the code map lives in index.md.
       After the 5-Sept test uploads with no key, the `/import` History shows 3 permanent
       `fake.png` entries (append-only record) — owner chose to keep them.
 
-- [ ] **Web redesign, v2 — AGAINST THE ArenaAI REFERENCE — BUILT, commit pending owner review (2026-09-06).**
+- [ ] **Web redesign, v2 — AGAINST THE ArenaAI REFERENCE — BUILT + COMMITTED (pushed 2026-09-07, `9420cba`) (2026-09-06).**
       Owner review of v1: "right half of each screen empty, no gaps between cards, two cards in a
       row, and where is the Kite authentication button?" Reference: `D:\Sentinel-ArenaAI.zip` →
       `C:\Users\Anirban\AppData\Local\Temp\opencode\arenaai`. **Root cause (confirmed):** pages use
@@ -41,16 +57,16 @@ MEMORY.md; the code map lives in index.md.
       enough? 2) visual fidelity — keep the current near-black/indigo glow or match ArenaAI's
       slate-950 flat panels exactly? Server running on :3001.
 
-- [ ] **Redesign + `/import` ingest flow — BUILT, commit pending owner review (2026-09-05).**
+- [ ] **Redesign + `/import` ingest flow — BUILT + COMMITTED (pushed 2026-09-07, `9420cba`) (2026-09-05).**
       The web app got a hand-rolled ultra-modern CSS theme (near-black base, indigo/violet
       glows, glass panels/sidebar; no Tailwind) and a new owner-gated **statement-import**
       flow at `/import`: upload brokerage or Fidelity RSU statements → LLM extraction into
       proposals → confirm/reject → real DB writes through the same platform functions as the
       Telegram bot (FR-02/03). Backing store = migration `0009_web_uploads.sql` (already
       applied to live by the first `/import` load). No-key degrade path verified (`unusable`).
-      **Owner: look it over + say whether to commit.**
+      **Now on `main`; review there.**
 
-- [ ] **The real app — BUILT, commit pending owner review.** After the 8081 preview the
+- [ ] **The real app — BUILT + COMMITTED (pushed 2026-09-07, `9420cba`).** After the 8081 preview the
       owner said "build the real app" (2026-09-05): PRD's Next.js product UI pulled forward
       as a standalone **`web/`** app, local + read-only. **16 routes live at
       http://127.0.0.1:3001** (`pnpm web`, `next dev -p 3001`), all verified 200 against the
@@ -58,8 +74,8 @@ MEMORY.md; the code map lives in index.md.
       `/rsu`, `/ips`, `/freshness`, `/audit` render live Phase 0 data through the same pure
       domain functions the jobs use; `/watchlist` (T6), `/signals` (T7), `/recommendations`
       (T10), `/maturity` (T1), `/narrative` (T11), `/scoring` (T12) are honest Task-N shells
-      with disabled, reason-named buttons; `/product` is the AREAS map. **Owner: look it
-      over + say whether to commit** (`web/`, docs, `.gitignore`, `package.json` script).
+      with disabled, reason-named buttons; `/product` is the AREAS map. **Now on `main`;
+      review there** (`web/`, docs, `.gitignore`, `package.json` script).
       Gotchas in `MEMORY.md § Local web app`. This SUPERSEDES Task 11A's throwaway shell as
       the UI vehicle (the 8081 preview stack still merges on its own turn).
 

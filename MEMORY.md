@@ -185,6 +185,26 @@ CI untouched). This supersedes the "throwaway preview, UI stays Phase 2" note ab
 
 ---
 
+## `.env` values must be UNQUOTED (2026-09-07)
+
+`DATABASE_URL`, `KITE_API_KEY` and `KITE_API_SECRET` were written into `.env` wrapped in
+double quotes. Node's `--env-file` strips those; **a hand-rolled loader does not**, and
+`web/next.config.ts` is hand-rolled. The result was a live bug: `/api/kite/login` emitted
+`api_key=%22…%22` and Kite answered `{"error_type":"InputException","message":"Invalid
+api_key."}`. `KITE_API_SECRET` was quoted too, which would have broken the sha256 checksum
+on `/session/token` at the next leg.
+
+- Quote-stripping was added to `next.config.ts`, but **do not rely on it** — write values
+  bare. Nothing in `.env` needs quoting: every loader here takes everything after the first
+  `=` to end of line, so spaces and `:/@` are all safe unquoted.
+- Real Kite formats, useful as a sanity check: **api_key 16 chars, api_secret 32**.
+- The file also carries a UTF-8 BOM on line 1. Harmless only because line 1 is blank — a
+  BOM directly in front of the first `KEY=` would make that key silently invisible.
+- **Restart the server after editing `.env`.** The running process had cached the quoted
+  value, so the config fix alone changed nothing until a restart.
+
+---
+
 ## Key rotation — `TOKEN_ENCRYPTION_KEY` (2026-09-07)
 
 Rotated after the old value was found sitting in plaintext in this repo's own Claude Code
