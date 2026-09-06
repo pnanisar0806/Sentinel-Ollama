@@ -12,8 +12,10 @@ MEMORY.md      durable state: decisions, contracts, gotchas, open questions
 index.md       this file
 migrations/    numbered .sql, applied in name order
 src/           implementation
+web/           local product app (Next.js 15) — pulled forward 2026-09-05; read-only, port 3001
 tests/         vitest, mirrors src/ layout
 docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do not read whole)
+docs/superpowers/plans/2026-09-05-sentinel-phase-1.md   Phase 1 ("Think") plan — 13 tasks, written 2026-09-05 (under review; not yet executed)
 docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflows)
 .superpowers/sdd/2026-08-12-sentinel-phase-0/           SDD workspace: briefs, review diffs, progress.md
 ```
@@ -40,6 +42,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/sources/owner-ingest.ts` | `parseCostCommand(text, positionCount, now?)`, `insertOwnerCostLot(db, opts)` → `{lotId, outcome, previousCostPaise?}`, `saveStatementPhoto(deps)` — owner-supplied cost basis, IDEMPOTENT BY VALUE: same cost open → `unchanged` (no-op), different → `superseded` (close old + insert new; migration 0006's partial unique index makes "one open owner lot per position" hold against raw SQL too), none → `created`. Cost lands as an OPEN LOT on `lots`, `source: 'owner-telegram'`, audit_log insert in the SAME transaction. Quantity defaults to 1 (aggregated-holdings convention). Photos archive to `data/screenshots/<updateId>.<ext>` (gitignored); `saveStatementPhoto` short-circuits when the local file already exists, so the callback path never re-fetches Telegram. **Audit payloads go in as OBJECTS, never JSON.stringify** — a pre-stringified param becomes an opaque jsonb scalar string under postgres-js |
 | `src/sources/llm-extract.ts` | `extractJsonFromImage(deps)`, `extractHoldingsFromImage(deps)`, `LlmProposal`, `LLM_MODEL_CHAIN`, `DEFAULT_LLM_MODEL` — vision extraction via OpenRouter free models, PROPOSAL-ONLY (nothing writes until the owner confirms in Telegram). `extractJsonFromImage` is the shared raw-JSON pass and returns ANY shape (brokerage `{items:[…]}`, Fidelity `{vests:[…]}`, …); `extractHoldingsFromImage` maps the brokerage schema, anchored against the current numbered `/holdings` list with `KNOWN SYMBOL MAPPINGS` overriding line-guess anchoring. Multiple images = pages of ONE statement, sent in a single request. Primary model retries once on 429 then the chain walks. Unreadable/non-positive costs are DROPPED, never guessed (FR-02). Optional env: `LLM_API_KEY`, `LLM_MODEL` |
 | `src/sources/fidelity-ingest.ts` | `FIDELITY_EXTRACTION_PROMPT`, `FidelityRsuVest`, `FidelityProposal`, `extractRsuVestsFromImage(deps)`, `fidelityVestsToProposals(vests, usdInrRate)`, `checkFidelityVestExists(db, grantId, vestOn)` — Fidelity RSU vest extraction. Parses `{vests:[…]}` via the shared `extractJsonFromImage` and prices it using the **same `UNITS_SCALE` / `toUnitsMicros` that `rsu.ts` exports**, so proposal gross literally equals `confirmVest`'s recomputed gross (net ≤ gross by construction). `extractRsuVestsFromImage` drops a vest unless grantId/date/units/price/withholding are sane. Production caller: the bot's fidelity queue → `/confirm` writes ACTUAL rows |
+| `src/sources/proposal-target.ts` | `displayOrder(positions)`, `resolveProposalTarget(proposals, positions)` — shared proposal-line numbering + ticker-anchored target resolution. Single source of truth for bot + web (avoids importing telegram-bot from web, which would pull in heavy deps). Bot re-exports these; web imports directly |
 | `src/domain/ips.ts` | `IPS_V1_TEXT`, `installIps(db, opts?)`, `currentIps(db)`, `ipsClause(text, clause)`, `renderIps(text, clause?)` — PRD §3.1–3.10 verbatim in `src/config/ips-v1.md`, versioned storage in `ips_versions`, idempotent install, clause extraction for FR-10 citations |
 | `src/domain/loans.ts` | `amortize`, `runCascade`, `interestPaid`, `nextMonth`, `persistSchedules`. Both schedules share the private `stepLoan()` month step |
 | `src/domain/surplus.ts` | `FIXED_OUTFLOWS`, `BASE_TAKE_HOME`, `BASE_TAKE_HOME_AS_OF`, `RENT_TO_EMI_FLAG`, `CHILD_DENT_NO_END_FLAG`, `PARTIAL_YEAR_FLAG`, `SurplusMonth`, `AnnualSurplus` (carries `monthCount` + `flags`), `loanOutflowByMonth`, `projectSurplus`, `projectAnnualSurplus`. `projectSurplus`'s coverage guard is derived from the outflow map's own key range, never from `closures` alone — see `MEMORY.md` |
@@ -57,6 +60,35 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
 | `src/jobs/weekly.ts` | CLI entrypoint — `pnpm weekly`. Loads `['telegram','crypto']` env, runs migrations + IPS install, composes weekly deep report (FR-51) with Opus 5 synthesis, sends via Telegram |
 
+## Web app (`web/` — Next.js 15, pulled forward 2026-09-05)
+
+Standalone app, **no workspace** (root CI untouched). Run `pnpm web` → `next dev -p 3001`.
+Owner asked for the real product after the 8081 preview; this supersedes Task 11A's shell.
+Read-only for all portfolio views (imports only read-only domain readers; mutating buttons
+are disabled `PendingButton`s). `/import` is the owner-gated write path for statement
+ingestion (upload → LLM extraction → owner confirm/reject → real DB writes via existing
+platform functions). Details/gotchas in `MEMORY.md § Local web app`.
+
+| File | Exports / role |
+|---|---|
+| `web/next.config.ts` | three things: parses repo-root `.env` itself (`KEY=value`, skips `#`, sets env only if unset) — **Next has no `envDir`**; `resolve.extensionAlias {'.js':['.ts','.tsx','.js']}` for src's ESM `.js` specifiers; swaps `src/domain/ips.js` for `web/lib/domain-ips-shim.js` via `NormalModuleReplacementPlugin` (webpack rewrites its `new URL(…, import.meta.url)` readFileSync into an inert asset handle that fails at runtime) |
+| `web/lib/data.ts` | memoized (60s) live readers: `buildDigestInput` for net worth/drift/staleness/holdings, `getRsu` (live price+FX), `getIps` (`currentIps(await db())`), `getRails`/`getGovernance`/`getMilestones`/`getLoans`/`getAuditRows`/`getFreshness` — DB via one per-process pool; `db()` exported for import routes; alongside optional `Db` for tests |
+| `web/lib/ui.tsx` | RSC primitives: `Page`, `PageHeader`, `Stat`, `StatGrid`, `Card`, `Section`, `Table`, `Badge`, `Bar`, `PendingButton` (disabled + reason tooltip), `NotYetBuild` ("Builds in Phase 1 — Task N") |
+| `web/lib/product.ts` | `AREAS` ledger of the product map (name/phase/task/status) rendered at `/product` |
+| `web/lib/domain-ips-shim.ts` | webpack-safe stand-in for `src/domain/ips.ts` (see next.config); reads the same immutable `src/config/ips-v1.md` and re-exports `IPS_V1_TEXT`, `currentIps`, `ipsClause`, `renderIps` |
+| `web/app/{page,holdings,allocation,buckets,rails,rsu,ips,freshness,audit}/page.tsx` | live Phase 0 views via the pure domain functions |
+| `web/app/{watchlist,signals,recommendations,maturity,narrative,scoring}/page.tsx` | honest shells ("builds in Task N") |
+| `web/app/product/page.tsx` | AREAS map |
+| `web/lib/ingest.ts` | server-only import helpers: `ensureWebIngestion` (applies migration 0009 on first `/import` load), `archiveFiles`, `insertUpload`, `extractBrokerage` (displayOrder + knownTickers + LLM + conflict detection), `extractFidelity` (LLM + FX + grant dedupe), `listUploads`, `confirmUpload` (brokerage via `insertOwnerCostLot`, fidelity via `persistVests`+`confirmVest`), `rejectUpload`, `resolveUpload` (status + audit_log) |
+| `web/lib/format.ts` | client-safe helpers: `fmtDate`, `fmtDateTime`, `relTime`, `rupees`, `unitsStr` |
+| `web/app/nav.tsx` | client nav: Portfolio / Intake (Import statements) / Governance / Phase 1 «soon» chips / System |
+| `web/app/import/page.tsx` | `/import` — pending + history sections; LLM-configured notice |
+| `web/app/import/upload-form.tsx` | multi-file upload: kind toggle (brokerage/fidelity), file picker, submit, refresh |
+| `web/app/import/review-panel.tsx` | per-proposal review: status badges, selectable subset confirm, reject-all, conflict badge |
+| `web/app/api/import/route.ts` | POST multipart → archive + extract (or `unusable` when `LLM_API_KEY` absent) |
+| `web/app/api/import/[id]/confirm/route.ts` | POST `{indexes?}` → write via existing platform functions + audit |
+| `web/app/api/import/[id]/reject/route.ts` | POST → mark rejected + audit |
+
 ## Migrations
 
 | File | Contents |
@@ -67,6 +99,25 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `migrations/0003_snapshot_uniqueness.sql` | `unique (business_date, source)` on `snapshots` — without it writeSnapshot's select-then-insert is check-then-act and two racing syncs double-count the portfolio |
 | `migrations/0004_immutability_and_rls.sql` | append-only triggers on `ips_versions` + `bucket_flows`; `sentinel_lots_immutable()` on `lots` (DELETE/TRUNCATE refused, UPDATE allowed **only** for `closed_on` — closing a lot is the FIFO disposal lifecycle); **RLS enabled on all 18 tables**, no policies, so anon/authenticated are denied and the owner role bypasses |
 | `migrations/0005_canonical_instrument.sql` | `instruments.canonical_id` column + index — the C-A reconciliation key. Live source wins per `(canonical_id, account)`; seed fills gaps; seed fallback when live stops reporting |
+| `migrations/0009_web_uploads.sql` | `web_uploads` queue (uuid pk, kind check, status check, proposals jsonb, summary, error, resolved_at). `sentinel_web_uploads_immutable()` trigger allows only status/summary/resolved_at updates. DELETE/TRUNCATE blocked via `sentinel_append_only()`. RLS enabled. Idempotent — triggers guarded in DO blocks (pg_trigger name checks), safe to re-apply |
+
+## Phase 1 (planned — see `2026-09-05-sentinel-phase-1.md`)
+
+| File | Role |
+|---|---|
+| `src/sources/bhavcopy.ts` | NSE EQ + index bhavcopy download/parse → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, not created) |
+| `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) |
+| `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) |
+| `src/sources/llm-narration.ts` | OpenRouter narrative step (PRD 6.7) — never originates numbers; env `WEEKLY_LLM_MODEL` |
+| `src/domain/engine.ts` | §6 satellite composite: quality gate (ROCE/FCF/D-E/red-flags) then valuation 30 / trend 30 / earnings 20 / fit 20; MF ranking (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10) |
+| `src/domain/alloc-engine.ts` | §6.4 monthly drift + tax-aware rebalance rec; April annual proposal (FR-13) |
+| `src/domain/sell-triggers.ts` | §6.5 triggers 1–5,7 monthly; 6 = documented Phase 2 stub (FR-15) |
+| `src/domain/maturities.ts` | bond redemption events + 14-day digest alert (Sammaan Task 1) |
+| `src/domain/recommendations.ts` | FR-11 builders (primary + exactly 2 alternates, ≤150w theses, IPS citations), FR-12 caps + 3 overrides, suppressions |
+| `src/domain/scoring.ts` | §13 benchmark-at-creation + 3/6/12-mo eval snapshots (harness; accrues over time) |
+| `src/notify/report.ts` | weekly deep report composition (FR-51): signal review / watchlist changes / rec pipeline / suppressed log / staleness |
+| `src/jobs/report.ts`, `src/jobs/screener-import.ts` | `pnpm report` (weekly, Sunday 10:00 IST pending sign-off), `pnpm screener:import <csv>` |
+| `migrations/0007_phase1_quotes.sql`, `0008_phase1_intel.sql` | prices_eod / index_prices_eod / navs / holidays; watchlist / screener_uploads / fundamentals / signal_scores / recommendations / suppressed_actions — all append-only + RLS |
 
 ## Tests
 
@@ -85,8 +136,8 @@ that caught the /cost line-number mismatch and the partial-confirm double-write.
 (5 tests) drive the Fidelity RSU flow against real PGlite + a seeded `rsu_grants` table and a
 stubbed Telegram (only `fx.js` mocked; screenshots pre-written so `saveStatementPhoto`
 short-circuits); `tests/notify/digest.test.ts` carries the ACTUAL-filter guard "no double
-forecast". Suite as of 2026-09-05: **444 passed / 1 stale-red** (the digest.yml-`workflow_run`
-cron assertion — surfaced, decision pending) across 58 files.
+forecast". Suite as of 2026-09-05: **449 passed / 1 stale-red** (the digest.yml-`workflow_run`
+cron assertion — surfaced, decision pending) across 59 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic
@@ -124,9 +175,10 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 
 ## Scripts
 
-`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `weekly` · `ips` · `telegram:bot` · `indmoney:login`
+`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `weekly` · `ips` ·
+`telegram:bot` · `indmoney:login` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
 
-`indmoney:login` runs `tsx --env-file=.env` — nothing else loads `.env` (no dotenv dep), so
-every other script still needs its vars exported. `.env` is gitignored and holds
-`DATABASE_URL=pglite://.pglite` and `TOKEN_ENCRYPTION_KEY`; without the former the refresh
-token lands in an in-memory PGlite and is discarded on exit.
+`indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`
+itself. No dotenv dep — every other script still needs its vars exported. `.env` is
+gitignored and holds `DATABASE_URL=pglite://.pglite` and `TOKEN_ENCRYPTION_KEY`; without
+the former the refresh token lands in an in-memory PGlite and is discarded on exit.

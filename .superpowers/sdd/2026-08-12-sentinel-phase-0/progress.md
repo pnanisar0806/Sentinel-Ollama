@@ -83,3 +83,98 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
   awaited (see `PENDING.md`); not silently edited.
 - RSU per-grant split true-up (₹57.05L vs PRD ₹53.25L) is now resolvable live: the next real
   Fidelity statement carries per-grant units/vest dates and doubles as the end-to-end live test.
+
+## 2026-09-05 (late session — Phase 1 kickoff)
+
+- **Phase 1 plan written**: `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`, 13 tasks
+  mirroring the Phase 0 plan shape (Sammaan maturity Task 1 → schema 0007/0008 → bhavcopy/AMFI/
+  screener sources → staleness extension → engine → FR-11 recs + paper mode → weekly report →
+  scoring harness → workflows/provisioning). Deliberately near-zero reference code (Phase 0's
+  snippets shipped 4 defects); interfaces + acceptance criteria are the contract.
+- Owner decisions captured (2026-09-05): watchlist advisor-owned; screener format-spec + fixture
+  with real CSV as live test; weekly LLM on existing OpenRouter key; Sammaan in Phase 1, legacy
+  cleanup/LTCG calendar Phase 2; weekly cadence → Sunday 10:00 IST in plan (sign-off pending).
+- Session docs updated (PENDING/MEMORY/index/progress). Phase 1 plan not yet briefed — awaiting
+  owner review + sign-off; suite remains 444 passed / 1 stale-red.
+- **Phase 1 plan amended (2026-09-05, post-review):** owner asked for the UI now, not Phase 2.
+  Plan gained **Scope Call 8** + **Task 11A** — a local read-only preview server (`pnpm ui`,
+  `tsx --env-file=.env src/ui/server.ts`, port **8081**) rendering the weekly-report sections as
+  HTML from the same pure composition, with a first slice (real net worth/drift/staleness/
+  holdings + "lights up in Task N" placeholders) deliverable before the engine tasks land. PRD's
+  Next.js product UI remains Phase 2; this shell is throwaway, content carries over. First slice
+  built this session.
+
+## 2026-09-05 (late session — preview + the real app)
+
+- **Task 11A preview UI SHIPPED + verified.** `src/ui/render.ts` + `src/ui/server.ts` (`pnpm ui`,
+  port 8081) render the digest sections as HTML from `compose`, reading the live Supabase DB.
+  5 new `tests/ui/*` tests (including real-data load + the read-only/no-mutate guard); no-catch-up
+  allowlist gains `src/ui/*`. Suite **446 passed / 1 stale-red** (the known `workflow-schedule`
+  digest.yml cron assertion). Server verified live on 127.0.0.1:8081 — but it only made the
+  owner's point: **"this is looking like a dashboard, build the real app."**
+- **Owner decision (supersedes the Task 11A note above):** pull PRD's real Next.js/Vercel app
+  forward NOW, locally. Built as a standalone **`web/`** Next.js 15 app — **no pnpm workspace**
+  (root CI untouched), root `.env` (Supabase pooler) loaded by `next.config.ts`, port 3001 via
+  `pnpm web`.
+- **16 routes, all 200 with real data:** `/` Overview · /holdings · /allocation · /buckets ·
+  /rails · /rsu · /ips · /freshness · /audit render live Phase 0 data through the same pure
+  domain functions the jobs use; /watchlist · /signals · /recommendations · /maturity ·
+  /narrative · /scoring are honest "builds in Task N" shells with disabled buttons that name
+  their reason; /product is the AREAS ledger. Read-only throughout — no mutating domain import.
+- **Webpack gotchas solved (MEMORY § Local app):** `.js`→`.ts` resolve alias (src's ESM
+  specifiers); `src/domain/ips.ts` swapped for `web/lib/domain-ips-shim.ts` via
+  NormalModuleReplacementPlugin (its top-level `import.meta.url` readFileSync cannot survive a
+  webpack node bundle); root `.env` parsed by next.config (no `envDir` option exists); 60s memo
+  on `buildDigestInput` (per-call live RSU fetch) keeps nav fast.
+- Session docs updated; **commit pending owner** (docs + `web/` + `.gitignore` + `package.json`
+  script).
+
+## 2026-09-05 (late session — redesign + `/import` ingest flow)
+
+- **Full redesign of the web app**: hand-rolled CSS theme (near-black `#070910`, indigo/violet
+  radial glows, translucent glass panels/sidebar), no Tailwind. New `nav.tsx` with grouped
+  nav + «soon» chips; `globals.css` rewritten; `format.ts` client-safe helpers.
+- **Owner-gated statement import shipped at `/import`**: upload brokerage/Kite or Fidelity RSU
+  statements → LLM extraction → per-proposal confirm/reject → real DB writes via the SAME
+  platform functions the Telegram bot uses (`insertOwnerCostLot` / `persistVests`+`confirmVest`,
+  FR-02/03). Backing store = migration `0009_web_uploads.sql` (idempotent; numbering 0009 as
+  0007/0008 are reserved by Phase 1). Web applies it to live via `ensureWebIngestion` on first
+  `/import` load (avoids importing `src/db/migrate.ts` — webpack `import.meta.url` risk).
+- `displayOrder`/`resolveProposalTarget` extracted to `src/sources/proposal-target.ts` so web
+  never imports telegram-bot; bot imports+re-exports (a bare `export … from` broke its internal
+  call — fixed).
+- **LIVE verification** (against real Supabase): `/import` 200 + new nav; no-key POST →
+  `unusable` + archived file; confirm/reject guard rail returns proper 404s; terminal rows
+  refuse re-resolution. **LLM_API_KEY is in the shell env, not `.env`** — the first "no-key"
+  probe actually hit a server still holding the key (PS5.1 `Get-Process` has no CommandLine
+  property, so the port-owner kill silently didn't match; kill by `netstat` port owner). A
+  properly-stripped server confirmed the `unusable` path. Test junk (3 web_uploads rows: 2
+  rejected + 1 unusable) left as terminal records; archived 1×1 PNGs in gitignored
+  `data/screenshots/`.
+- `pnpm --dir web exec tsc --noEmit` clean. Full vitest run: **449 passed / 1 stale-red** (the
+  known workflow-schedule cron assertion, present at clean HEAD too — pre-existing, untouched).
+  telegram-bot-ingest suite 8/8 green after the proposal-target extraction.
+- Session docs updated (PENDING/MEMORY/index/progress). **Commit pending owner.**
+
+## 2026-09-06 (LLM provider swap → revert, Kite 500 fixed)
+
+- **opencode Zen swap investigated then aborted.** Probed every free Zen `chat/completions`
+  model with the extractor's real image payload: ling-3.0-flash-fin-free / nemotron-3-ultra-free /
+  nemotron-3.5-lightning-free → 400 `No endpoints found that support image input`; deepseek-v4-flash-free
+  → unavailable; big-pickle / mimo-v2.5-free → 429. Only `deepseek-v4-flash-vision-exp` takes images but
+  is paid (account has no payment method → 401). **Owner decision: revert to OpenRouter free.**
+- **Root cause of "LLM not working" found & fixed:** the OpenRouter key existed only as a shell env var,
+  never in repo-root `.env` — `web/next.config.ts` loads `.env` at startup, so any Next server not launched
+  from that terminal ran with extraction dormant (amber "LLM not configured" card). **Fix: key moved into
+  `.env`** (gitignored) + `.env.example` updated. Live probe with the real key: gemma `:free` 429
+  (normal shared free-pool saturation → chain walks), minimax/minimax-m3:free → **200** with a clean
+  JSON extraction from a real image. Revert verified byte-identical to HEAD (src + tests), tsc clean,
+  17/17 extraction/fidelity tests green.
+- **Kite 500 root cause fixed:** both `/api/kite/login` and `/api/kite/callback` passed *relative*
+  URLs to `NextResponse.redirect()` → Next throws `ERR_INVALID_URL` (500). Fixed by deriving
+  `req.nextUrl.origin` and building absolute redirect URLs (login:6 call sites, callback:6 call sites).
+  Live: login (no key) → 307 `/import?kite=error&reason=no-api-key`; callback (no params) → 307
+  `/import?error&reason=no-request-token`; `/import` renders both the error and `kite=ok&rows=N`
+  notices correctly. tsc clean; suite 449/1-stale.
+- 3 fake web_uploads rows (2 rejected + 1 unusable, 5-Sept probes) — owner chose to **keep** for now
+  (append-only table; no UI delete). New uploads: `proposed`→Pending until confirm/reject, then History.

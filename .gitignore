@@ -17,3 +17,12 @@ data/screenshots/
 .claude/
 .serena/
 *.mp4
+
+# Local preview web app (Next.js) — build artefacts and deps.
+web/node_modules/
+web/.next/
+web/tsconfig.tsbuildinfo
+
+# Dev-server capture from `pnpm web`; local only.
+.next-dev-out.log
+.next-dev-err.log

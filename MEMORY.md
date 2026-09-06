@@ -79,6 +79,184 @@ scripts deleted. Working tree clean apart from intended changes.
 
 ---
 
+## Phase 1 kickoff — 2026-09-05 (late session)
+
+Plan written: `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md` — 13 tasks, mirrors the
+Phase 0 plan shape (Goal / Global constraints / **Scope Calls** / File structure / tasks with
+interfaces + acceptance criteria, deliberately near-zero reference code — Phase 0's snippets
+shipped defects 4×). **13 tasks**: Sammaan maturity (1, time-boxed — bond matures 26-Sep-2026
+~3 weeks out) → schema 0007/0008 (2) → bhavcopy + index series (3) → AMFI NAV (4) → staleness
+extension w/ blocked-by-stale **DoD proof** (5) → watchlist + screener importer (6) → signal
+engine (7) → alloc engine (8) → sell triggers (9) → FR-11 recommendations + paper mode (10) →
+weekly report + narration + schedule re-derive (11) → scoring harness (12) → workflows/env/
+README/provisioning (13). DoD from PRD §14: first weekly report ≥1 fully-formed FR-11 paper
+recommendation with all timestamps, and a deliberately stale price provably blocks a
+recommendation.
+
+**Owner decisions (2026-09-05, do not re-litigate):**
+- **Watchlist is advisor-owned.** Owner curates only at setup; quarterly revision = an advisor
+  *proposal* (adds from screening, removals for failed gate / red flag / sustained
+  underperformance) surfaced in the weekly report for sign-off. No auto-mutation; every change
+  logged in `watchlist` (source + reason).
+- **Screener CSV: pinned format spec + committed fixture now; the owner's real export is the
+  live test** (same pattern as the Fidelity statement). Real exports may add columns — parser
+  consolidates with a warnings list shown in the weekly report.
+- **Weekly-review LLM runs on the existing OpenRouter key**, not a new Anthropic API key
+  (PRD §12.1 names Anthropic; OpenRouter hosts same-class models, zero new secrets). Model id
+  is env-driven (`WEEKLY_LLM_MODEL`, default `anthropic/claude-sonnet-4-5`). Narration only
+  (PRD 6.7); the LLM never originates a number or rank.
+- **Sammaan maturity = Phase 1 Task 1.** Legacy cleanup queue + LTCG harvest calendar (FR-14)
+  stay Phase 2 per owner; sell trigger 6 is the documented no-op stub.
+- **Weekly cadence Sat 08:00 → Sunday 10:00 IST (PRD §12.2)** is in the plan but requires owner
+  sign-off; the same step re-derives the stale `workflow-schedule` digest.yml assertion and
+  reports the owner-decision, never silently.
+- **Local preview UI added (Task 11A, port 8081).** PRD's real Next.js UI stays Phase 2; Phase 1
+  gets a throwaway read-only `tsx`+`node:http` preview (`pnpm ui`, `tsx --env-file=.env
+  src/ui/server.ts`) that renders the weekly-report sections as HTML from the same pure
+  composition, reading the local PGlite DB. First slice = real data (net worth/drift/staleness/
+  holdings) + "lights up in Task N" placeholders. No mutating path imported. Content functions
+  carry into Phase 2's Next.js app untouched. **(SUPERSEDED 2026-09-05 (same session's later
+  turn) — the owner pulled the real Next.js app forward instead; see `§ Local web app` below.**
+  The 8081 preview was the trigger, not the destination.)
+
+**Schema note:** Phase 0's 16 tables have NO `prices_eod`, `navs`, `fundamentals`,
+`recommendations`, `signal_scores`, `watchlist`, or holiday calendar — that's what 0007/0008
+add. `blockedInstruments` + `ipsClause` already exist and are the Phase 1 choke points.
+
+---
+
+## Local web app — pulled forward 2026-09-05
+
+PRD's real Next.js product UI is built NOW, as a standalone **`web/`** app for local review
+only — still no deployment, still single-user, still read-only. **No pnpm workspace** (root
+CI untouched). This supersedes the "throwaway preview, UI stays Phase 2" note above.
+
+- **Run:** `pnpm web` → `pnpm --dir web dev` (`next dev -p 3001`). 16 routes, all verified
+  200 against the live Supabase pooler: `/` Overview · `/holdings` · `/allocation` ·
+  `/buckets` · `/rails` · `/rsu` · `/ips` · `/freshness` · `/audit` render real data through
+  the same pure domain functions the jobs use; `/watchlist` (T6) · `/signals` (T7) ·
+  `/recommendations` (T10) · `/maturity` (T1) · `/narrative` (T11) · `/scoring` (T12) are
+  honest "builds in Task N" shells with disabled buttons that name their reason; `/product`
+  is the AREAS ledger.
+- **Read-only by construction.** `web/lib/data.ts` imports only read-only readers — never
+  `raiseIncidents`/`installIps`/`confirmVest`/`persistVests`/`writeSnapshot`. Buttons are
+  inert `PendingButton`s with reason tooltips; there is no mutating path.
+- **Env.** Next has **no `envDir` option**. `web/next.config.ts` parses repo-root `.env`
+  itself (`resolve(process.cwd(), '..', '.env')`, `KEY=value` lines, skips `#` comments,
+  sets `process.env` only when unset) so the Supabase pooler `DATABASE_URL` +
+  `TOKEN_ENCRYPTION_KEY` + `LLM_API_KEY` (OpenRouter) reach the server bundle. Tests/jobs
+  still use `loadEnv` per job; the app has its own loader and is NOT covered by
+  `workflow-env.test.ts`. **Server must be restarted after `.env` changes** — env is read
+  at process start and cached.
+  **Never overwrite `.env` with `Set-Content`** — it's gitignored with no backup or history,
+  and clobbered it wiped `DATABASE_URL` + `TOKEN_ENCRYPTION_KEY` on 2026-09-06 (only
+  `LLM_API_KEY`/`KITE_*` survived). Only append or surgically edit one key at a time. GitHub
+  secrets can't be read back at all, so a clobbered key is gone — **rotate, don't recover**
+  (`TOKEN_ENCRYPTION_KEY` was rotated this way 2026-09-07; see § Key rotation below). A
+  `recover-key.yml` workflow that echoed the secret into a run log was written and then
+  deleted unrun — never reintroduce it: it converts one lost secret into a permanent leak.
+- **Two webpack quirks, both solved in `web/next.config.ts`:** (1) `resolve.extensionAlias =
+  {'.js': ['.ts', '.tsx', '.js', '.jsx']}` — `src/` uses ESM-style `.js` specifiers;
+  (2) `src/domain/ips.ts` does `readFileSync(new URL('../config/ips-v1.md',
+  import.meta.url))` at import time — webpack rewrites that `new URL` into an inert asset
+  handle that dies at runtime — so the bundle swaps the module for
+  `web/lib/domain-ips-shim.ts` via `NormalModuleReplacementPlugin(/\/domain\/ips\.js$/)`
+  (use the real webpack constructor from the hook's context arg; `next/dist/compiled/webpack`
+  does not expose it). The seed text lives in `src/config/ips-v1.md` (not repo-root
+  `config/`); the shim re-exports `IPS_V1_TEXT`/`currentIps`/`ipsClause`/`renderIps`.
+- **Perf:** `web/lib/data.ts` memoizes the expensive live build (RSU price + FX fetch) 60s
+  so page navs are fast.
+- **Layout gotcha (2026-09-06):** layout primitives are hand-rolled in `web/app/globals.css`
+  (no Tailwind). Pages depend on `.grid` (2-col, 24px gap), `.two-thirds` (2fr/1fr wide+rail),
+  `.stats`, `.stack`, `.one`, `.span-2`, `.legend`, `.ips-text`, `.tr-*` row tones — all defined
+  there. ArenaAI reference (owner's design source): `C:\Users\Anirban\AppData\Local\Temp\opencode\arenaai`.
+  Kite "auth" today = env-status card + statement upload on `/import`; real OAuth connect is
+  Phase 2 (no stored passwords — human-in-loop unlock is the security model). **App Router
+  gotcha:** `NextResponse.redirect()` in API route handlers (`app/api/*/route.ts`) requires
+  an **absolute** URL (e.g. `${req.nextUrl.origin}/import?...`) — a bare relative path
+  like `/import?...` throws `ERR_INVALID_URL` (500). Both `kite/login` and
+  `kite/callback` were fixed for this (2026-09-06).
+- Files: `web/lib/{ui,data,product}.ts(x)`, `web/lib/domain-ips-shim.ts`, `web/app/*/page.tsx`,
+  `web/next.config.ts`. `.gitignore` gained `web/node_modules/` + `web/.next/`;
+  `web/pnpm-lock.yaml` and `web/next-env.d.ts` are tracked. **Commit pending owner.**
+- Known benign boot warnings: Next "inferred workspace root / multiple lockfiles" (could be
+  silenced with `outputFileTracingRoot`); `web/tsconfig.json` was auto-given
+  `exclude: ['node_modules']` — keep.
+
+---
+
+## Key rotation — `TOKEN_ENCRYPTION_KEY` (2026-09-07)
+
+Rotated after the old value was found sitting in plaintext in this repo's own Claude Code
+transcripts (`~/.claude/projects/D--Sentinel-Ollama/*.jsonl`, 6 of 11 files). Recovery was
+possible and was deliberately **declined** in favour of rotation.
+
+- **Blast radius is `oauth_tokens` only.** `oauth_clients.client_secret_enc` is NULL — the
+  INDmoney OAuth client is public — so no dynamic re-registration is needed and `client_id`
+  (plaintext) survives. Nothing else in the schema is encrypted.
+- **Done:** new 32-byte key in `.env` (surgical one-line replace, other keys untouched) and
+  pushed to the GH Actions secret via `gh secret set`. `sync.yml`/`weekly.yml` reference the
+  secret by name, so they needed no edit; `.env.example`/docs carry no value.
+- **Still owed:** `pnpm indmoney:login` to re-mint tokens. Until then the stored ciphertext
+  is undecryptable in both `.pglite` and Supabase. **This degrades safely** — the decrypt
+  throws inside `ensureAccessToken` at `getToken()` time (not in `indmoneySource()`'s
+  try/catch, which only touches the null client secret), so it lands in `runSync`'s `step()`
+  as a `SYNC_FAILURE` incident (WARN, then BLOCK on the second run) and falls back to
+  `FileIndmoneySource`. The sync job still exits 0, so the digest still fires.
+- Re-login upserts over the dead row; no manual DELETE is required.
+- Transcripts are unencrypted JSONL on disk. Treat anything ever pasted into a chat as
+  burned — the Telegram bot token and Supabase DB password are still un-rotated (PENDING).
+
+---
+
+## Owner-gated statement import via `/import` (2026-09-05, same session) + visual redesign
+
+The local app is no longer strictly read-only: an owner-gated **statement-import flow** lives
+at `/import` — upload brokerage/Kite or Fidelity RSU statements → LLM extraction into
+proposals → owner confirm/reject → real DB writes through the **same platform functions the
+Telegram bot uses** (FR-02/FR-03 discipline). Redesigned with an ultra-modern hand-rolled CSS
+theme (near-black `#070910` base, indigo/violet radial glows, translucent glass panels/sidebar;
+no Tailwind — `web/app/globals.css`).
+
+- **Backing store = migration `0009_web_uploads.sql`** (`web_uploads` queue). Numbering is
+  0009 because 0007/0008 are reserved by the Phase 1 plan. First `/import` load
+  self-applies 0009 to the **live** Supabase via `ensureWebIngestion` (reads the 0009 file
+  and `db.exec`s it — deliberately NOT importing `src/db/migrate.ts`, sidestepping a webpack
+  `import.meta.url` risk). The file is idempotent (triggers guarded in DO blocks), so a later
+  CLI `pnpm migrate` re-apply is harmless — but `schema_migrations` won't record the web-applied
+  run. **The `/import` live load ALREADY applied 0009 to live Supabase** (2026-09-05 session).
+- **Confirm semantics mirror the bot exactly.** Brokerage = `insertOwnerCostLot(via:'llm')`
+  per proposal (skip when instrumentId null; outcomes created/superseded/unchanged). Fidelity =
+  grant-exists check → PROJECTED `persistVests` → `confirmVest`. Each resolution writes an
+  `audit_log` row (`entity 'web_upload'`, actor `owner`). `web_uploads` trigger allows only
+  status/summary/resolved_at updates; DELETE/TRUNCATE blocked.
+- **Web must not import `telegram-bot.ts`** (heavy telegram/jobs deps would break webpack).
+  Shared `displayOrder`/`resolveProposalTarget` live in new `src/sources/proposal-target.ts`;
+  the bot imports+re-exports them (local import for internal `/holdings`/`/cost` AND `export`
+  for `tests/notify/telegram-bot-ingest.test.ts`; a bare `export … from` broke the internal
+  call at runtime — fixed).
+- **Verification (live, 2026-09-05):** `/import` 200 + nav renders; POST `/api/import`
+  (no-key) → `unusable` + archived `data/screenshots/web-<uuid>.png`; confirm/reject on a
+  terminal row → `{"error":"that upload is not pending"}`; bad index → 404 `index out of
+  range`; unknown id → 404 `no such upload`. **Earlier key-state confusion:** `LLM_API_KEY`
+  living only in the shell env (not `.env`) made extraction dormant for any Next server not
+  started from that terminal; **fixed 2026-09-06** by moving the OpenRouter key into `.env`
+  (gitignored, read by `web/next.config.ts` at startup). Python PS5.1's `Get-Process` has no
+  `CommandLine` property, so the `Where-Object` filter matched nothing and the original
+  key-bearing server kept port 3001. Kill by the port owner from `netstat -ano`.
+- **BigInt in proposals** must be stringified (`costPaise`, `priceUsdCents`, `usdInrMicros`,
+  `grossPaise`, `netPaise` as strings; convert back with `BigInt()` at confirm).
+- **`web/app/api/import/[id]/confirm|reject/route.ts` import `lib/ingest` via
+  `../../../../../lib/…`** (one level deeper than the other routes — they live under `[id]/`).
+- **tsc/typecheck:** root `package.json` has no typecheck script; web verification is
+  `pnpm --dir web exec tsc --noEmit` (clean as of 2026-09-05).
+- Files added: `web/lib/{ingest,format,product}.ts`, `web/app/nav.tsx`,
+  `web/app/import/{page,upload-form,review-panel}.tsx`,
+  `web/app/api/import/route.ts`, `[id]/confirm/route.ts`, `[id]/reject/route.ts`,
+  `migrations/0009_web_uploads.sql`, `src/sources/proposal-target.ts`.
+
+---
+
 ## Where we are
 
 Phase 0, 17 tasks (1–11, 11A, 11B, 12–15). Plan:

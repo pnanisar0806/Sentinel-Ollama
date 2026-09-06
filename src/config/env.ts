@@ -4,9 +4,13 @@ export interface Env {
   telegramOwnerChatId: string | undefined;
   kiteApiKey: string | undefined;
   kiteAccessToken: string | undefined;
+  /** Required for the web "Connect Kite" login flow (checksum in session/token). */
+  kiteApiSecret: string | undefined;
+  /** Redirect URI registered in the Kite connect console; defaults to localhost. */
+  kiteRedirectUri: string | undefined;
   indmoneySnapshotPath: string;
   tokenEncryptionKey: string | undefined;
-  /** Optional: enables LLM statement extraction in the Telegram bot (OpenRouter). */
+  /** Optional: enables LLM statement extraction in the Telegram bot + web import (OpenRouter). */
   llmApiKey: string | undefined;
   /** Optional: overrides the default free vision model. */
   llmModel: string | undefined;
@@ -80,6 +84,8 @@ export function loadEnv(
     telegramOwnerChatId: read(source, 'TELEGRAM_OWNER_CHAT_ID', need),
     kiteApiKey: source.KITE_API_KEY,
     kiteAccessToken: source.KITE_ACCESS_TOKEN,
+    kiteApiSecret: source.KITE_API_SECRET,
+    kiteRedirectUri: source.KITE_REDIRECT_URI,
     indmoneySnapshotPath: source.INDMONEY_SNAPSHOT_PATH ?? 'data/indmoney-snapshot.json',
     tokenEncryptionKey: read(source, 'TOKEN_ENCRYPTION_KEY', need),
     llmApiKey: source.LLM_API_KEY,

@@ -84,6 +84,8 @@ const ALLOWED = new Set([
   'src/notify/dashboard.ts', // renders HTML dashboard with funded status
   'src/jobs/digest.ts',      // the digest CLI entrypoint
   'src/jobs/weekly.ts',      // the weekly deep report CLI entrypoint
+  'src/ui/render.ts',        // local preview: renders the report + digest to the owner, never sizes
+  'src/ui/server.ts',        // local preview: serving entrypoint over render.ts
 ]);
 
 /** A module whose name says it decides how much to buy, or how much risk to take. */
