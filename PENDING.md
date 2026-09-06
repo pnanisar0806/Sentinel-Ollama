@@ -12,23 +12,16 @@ MEMORY.md; the code map lives in index.md.
       It was already red locally and was pushed knowingly rather than silenced. It now blocks a
       green badge, so the owner decision under "Waiting on OWNER" is the next thing to land.
 
-- [ ] **KITE RETIRED — INDmoney is the only portfolio source (owner decision 2026-09-07).**
-      The connect flow worked, which is how it surfaced that INDmoney already aggregates the
-      same Zerodha account: net worth jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money
-      moving. Code removal is DONE and verified (root+web tsc clean, suite 436/1-stale, all
-      pages 200, `/api/kite/*` now 404). **ONE STEP LEFT, OWNER MUST RUN IT:**
-
-          pnpm exec tsx --env-file=.env _retire-kite.mts
-
-      It deletes the 31 kite **holdings** and the kite `oauth_tokens` row in one transaction,
-      then prints the corrected net worth (expect ~48 positions, ~₹57.1L). The `kite`
-      **snapshot row stays** — `snapshots` is append-only (trigger in `0001`, not `0004`), and
-      an empty snapshot contributes zero positions anyway. A first attempt that tried to
-      delete the snapshot was refused by the trigger and rolled back with nothing lost.
-      A Claude-side classifier blocks the production DELETE, so it needs your hand. Backup of
-      everything it removes: `data/kite-snapshot-backup-2026-09-07.json` (gitignored).
-      **Until it runs, the next digest reports the inflated ₹71.9L.** Delete `_retire-kite.mts`
-      afterwards. Detail in `MEMORY.md § Kite retired`.
+- [x] **KITE RETIRED — INDmoney is the only portfolio source. DONE 2026-09-07.** The connect
+      flow worked, which is how it surfaced that INDmoney already aggregates the same Zerodha
+      account: net worth had jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money moving.
+      Code removed and data cleaned; **verified back to 48 positions / ₹57,12,936 assets /
+      ₹20,90,960 net, sources `manual-seed, indmoney` only**, digest composes clean with no
+      kite row in staleness. The empty `kite` snapshot row remains by design (`snapshots` is
+      append-only — trigger in `0001`, not `0004`) and contributes zero positions. The orphaned
+      kite `STALE_DATA/BLOCK` incident was resolved too. Backup of the deleted rows:
+      `data/kite-snapshot-backup-2026-09-07.json` (gitignored). Detail + the two durable
+      lessons in `MEMORY.md § Kite retired`.
 
 - [ ] ~~**Kite connect — `Invalid api_key` FIXED (2026-09-07).**~~ Superseded by the retirement
       above; kept for the durable lesson, which is in `MEMORY.md § .env values must be UNQUOTED`.
@@ -135,6 +128,16 @@ MEMORY.md; the code map lives in index.md.
       ₹27,000 redeems to cash, retiring half the bond bucket and pushing CASH above its
       band. 14-day digest alert + IPS routing recommendation. All inputs owner-verified
       in seed data. Pure TDD task, no owner input required.
+
+- [ ] **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
+      `FRESHNESS_HOURS.fx = 48h`, but frankfurter publishes ECB rates on weekdays only, so a
+      normal Fri→Mon gap is ~72h. Observed Sunday 2026-09-06: open `STALE_DATA/BLOCK` on
+      `frankfurter` at 63.4h with **no** `SYNC_FAILURE` — the fetch is fine, the limit is wrong
+      for the publication calendar. Separately the Friday 09-04 rate looks never ingested
+      (latest stored is Thu 09-03) — that part is unexplained. Same "widen the band vs fix the
+      model" call as the digest cron test: do NOT just raise 48h without deciding which it is.
+      `composite` is also permanently BLOCK having never produced a row — arguably it belongs
+      in the `unimplemented` state alongside amfi/bhavcopy/screener.
 
 ## Waiting on OWNER
 

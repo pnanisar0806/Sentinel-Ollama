@@ -211,7 +211,13 @@ also reports). Net worth went ₹57,12,936 → ₹71,85,786 (+26%) with no money
   would never have picked it up regardless.
 - `'Brokerage / Kite'` upload labels and the bot's `kite`/`zerodha` caption keywords are
   KEPT — they route Zerodha *statement screenshots*, an unrelated path.
-- Cleanup of the bad rows is `_retire-kite.mts`. **`snapshots` is APPEND-ONLY and the trigger
+- **Removing a source means resolving its incidents in the same breath.** `raiseIncidents`
+  only ever resolves a subject that `assessStaleness` still returns (`staleness.ts:167`), so
+  dropping `'kite'` from `KNOWN_PORTFOLIO_SOURCES` stranded its open `STALE_DATA/BLOCK`
+  forever — the precise failure the `unimplemented` state exists to prevent ("trains the owner
+  to ignore the loudest safety signal"). Caught and resolved during cleanup. Any future source
+  removal must do the same.
+- Cleanup of the bad rows was `_retire-kite.mts` (run 2026-09-07, then deleted). **`snapshots` is APPEND-ONLY and the trigger
   lives in `0001` (lines 202–205), NOT in `0004`** — `0004` only adds RLS for it, so grepping
   `0004` alone says "deletable" and is wrong. The first cleanup attempt tried to delete the
   snapshot row and was correctly refused (`P0001: append-only table: snapshots may not be
