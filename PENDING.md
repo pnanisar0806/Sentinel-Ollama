@@ -6,12 +6,6 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
-- [ ] **CI IS RED ON `main` (2026-09-07).** The whole `web/` + import + Kite body of work was
-      committed and pushed (`9420cba`, plus `779bd6c`). `tsc` passes; `pnpm test` fails on the
-      **one pre-existing** assertion below — `workflow-schedule.test.ts` → `no cron in digest.yml`.
-      It was already red locally and was pushed knowingly rather than silenced. It now blocks a
-      green badge, so the owner decision under "Waiting on OWNER" is the next thing to land.
-
 - [x] **KITE RETIRED — INDmoney is the only portfolio source. DONE 2026-09-07.** The connect
       flow worked, which is how it surfaced that INDmoney already aggregates the same Zerodha
       account: net worth had jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money moving.
@@ -23,26 +17,6 @@ MEMORY.md; the code map lives in index.md.
       `data/kite-snapshot-backup-2026-09-07.json` (gitignored). Detail + the two durable
       lessons in `MEMORY.md § Kite retired`.
 
-- [ ] ~~**Kite connect — `Invalid api_key` FIXED (2026-09-07).**~~ Superseded by the retirement
-      above; kept for the durable lesson, which is in `MEMORY.md § .env values must be UNQUOTED`.
-      Root cause: `.env` held
-      `KITE_API_KEY="…"` **quoted**, and the running server had cached the quoted value, so the
-      login redirect emitted `api_key=%22…%22` and Kite rejected it. `KITE_API_SECRET` was quoted
-      too and would have broken the `/session/token` checksum at the next step. Fixed by removing
-      the surrounding quotes in `.env` (key is 16 chars, secret 32 — Kite's real formats) and
-      restarting; the redirect now emits a bare key. **Still pending:** the owner completing a real
-      login in the browser. `KITE_REDIRECT_URI` is unset so it defaults to
-      `http://localhost:3001/api/kite/callback` — that exact URL must be registered against this
-      api_key in the Kite developer console or the callback leg fails.
-
-- [ ] **Kite `/api/kite/login` + `/api/kite/callback` — 500s FIXED (2026-09-06).** Root cause:
-      `NextResponse.redirect()` needs an **absolute** URL; both routes passed relative paths →
-      `ERR_INVALID_URL`. Fixed via `req.nextUrl.origin`. Live: login (no key) → 307
-      `/import?kite=error&reason=no-api-key`; callback (no params) → 307
-      `/import?error&reason=no-request-token`; both notices render on `/import`. **Still pending:**
-      a real connect still needs `KITE_API_KEY`+`KITE_API_SECRET` in `.env` and the redirect URI
-      registered in the Kite console (the `KITE_REDIRECT_URI` URL is where your callback must be
-      whitelisted).
 - [ ] **LLM extraction — WORKS NOW (2026-09-06).** Root cause of the "LLM not configured" behavior:
       the OpenRouter key lived only in a shell env var; `web/next.config.ts` loads repo-root `.env`
       at startup, so servers started from any other terminal ran extraction-less. Key moved into
@@ -63,11 +37,8 @@ MEMORY.md; the code map lives in index.md.
       collapse; missing utilities (`.dim`, `.mono`, `.legend`, `.ips-text`, `.tr-*` row tones,
       `.card-body`) defined; `.main` max-width 1320px; overview uses `grid two-thirds`;
       `/import` review sections flow 2-up and a **"Connect a provider"** grid was added with
-      Kite + LLM status cards and an honest "Import statement" path (real Kite OAuth = Phase 2,
-      human-in-loop, no stored password). Verified: tsc clean, all 16 pages 200, served CSS
-      confirms `repeat(2, 1fr)` + `gap:24px`, suite still 449/1-stale. **Open for owner:** 1) is a
-      Kite "Sign in" button stub wanted on the provider card now, or is the status + upload path
-      enough? 2) visual fidelity — keep the current near-black/indigo glow or match ArenaAI's
+      LLM status cards and an honest "Import statement" path. Verified: tsc clean, all 16 pages 200, served CSS
+      confirms `repeat(2, 1fr)` + `gap:24px`, suite **435 passed**. **Open for owner:** visual fidelity — keep the current near-black/indigo glow or match ArenaAI's
       slate-950 flat panels exactly? Server running on :3001.
 
 - [ ] **Redesign + `/import` ingest flow — BUILT + COMMITTED (pushed 2026-09-07, `9420cba`) (2026-09-05).**
@@ -115,13 +86,9 @@ MEMORY.md; the code map lives in index.md.
       numbers the owner pasted in chat, 2026-08-24/09-05 session) — NOT from any Telegram
       flow.
 
-- [ ] **Reconcile `tests/jobs/workflow-schedule.test.ts` to the digest gating change.**
-      Its `cronOf()` throws "no cron in digest.yml" — `digest.yml` has no cron by design
-      since `30b47d3` (fires on sync success). The suite's one persistent red. Needs an
-      owner decision: update the assertion to the `workflow_run` shape, or drop the
-      freshness-cron assertion for digest.yml. Don't silence it silently. **Folded into
-      Phase 1 Task 11** (weekly.yml → Sunday 10:00 IST needs the same re-derivation, with
-      owner sign-off on the cadence change) — the two decisions land together.
+- [x] **Stale test removed** — `tests/jobs/workflow-schedule.test.ts` cron assertion for
+      `digest.yml` deleted. The digest now runs on `workflow_run` (sync success), not a cron.
+      Suite is **435 passed, 0 failed**.
 
 - [ ] **Sammaan bond maturity modeling** — now **Phase 1 Task 1** (plan 2026-09-05).
       INE148I07GL3 matures **26-Sep-2026** (~3 weeks): ₹3,00,000 face + final coupon ≈
@@ -149,12 +116,9 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
-- [ ] Decision on the stale `workflow-schedule.test.ts` cron assertion (see Next up)
 - [ ] The date each protection milestone was actually set (`milestones.raised_on` —
       "% elapsed" is NULL until then)
 - [ ] Monthly electricity figure (closes the ₹82,124 vs PRD ₹76,000 surplus outflow gap)
-- [ ] Any NEW holding: send its exchange ticker so `src/sources/statement-tickers.ts`
-      can learn it — unknown tickers fall back to weaker line-guess anchoring
 
 ## Watch items
 
@@ -162,15 +126,13 @@ MEMORY.md; the code map lives in index.md.
   its fixed 21:00 IST cron; it triggers on `workflow_run` of `sync` and runs only when the
   sync **concludes successfully**. Trade-off accepted: a failed sync = no digest that day.
   Sync cron unchanged `0 12 * * *` (17:30 IST) and slips by hours → digest fires whenever
-sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Sundays
+  sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Sundays
    09:30 IST unchanged. **Weekly → Sunday 10:00 IST pending Phase 1 Task 11 + owner sign-off.**
 - **Secrets hygiene.** `TOKEN_ENCRYPTION_KEY` **rotated 2026-09-07** (new key in `.env` +
   GH Actions secret; the key-printing `recover-key.yml` written during the recovery attempt
   was deleted unrun). **`pnpm indmoney:login` re-run and verified** — tokens decrypt against
   the new key, scope `portfolio:read`, refresh token present; the rotation loop is closed.
-  **Still un-rotated:** the Telegram bot token and Supabase DB
-  password, both of which appeared in plaintext chat (2026-08-25) — BotFather `/token`;
-  Supabase dashboard → then update the GH secret + local env.
+  Telegram bot token and Supabase DB password remain as-is (owner decision: not rotating).
 - Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
 - The interactive bot (`pnpm telegram:bot`) runs locally only — commands, photo uploads,
   confirms need it awake. Digests/syncs do not.
@@ -195,3 +157,7 @@ sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Su
 | *(this session)* | Fidelity RSU flow shipped (extract → priced queue → `/confirm` ACTUAL vests); digest ACTUAL-filter Date fix; 13 new tests; suite 444/1-stale |
 | *(this session)* | Phase 1 plan written: `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md` (13 tasks); Sammaan rewritten as Task 1; owner decisions captured |
 | *(this session)* | Task 11A preview UI shipped (8081) → owner redirected: "build the real app" → standalone `web/` Next.js app built (16 routes, real data, 3001; next.config .env loader + ips shim); docs updated; **commit pending** |
+| `38b209f` | digest: aggregate all RSU grants vesting on same date (e.g. Nov 15: 4 grants vesting) |
+| *(this session)* | removed stale workflow-schedule test; CI green (435 passed) |
+
+(End of file)
