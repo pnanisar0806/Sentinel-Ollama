@@ -82,11 +82,11 @@ function generateDashboardHtml(d: DigestInput): string {
     </div>
   `).join('') || '<p class="no-data">All milestones completed</p>';
 
-  const nextVestHtml = d.nextVest ? `
+  const nextVestHtml = d.nextVestDate && d.nextVestTotalNetPaise !== null && d.nextVestCount > 0 ? `
     <div class="vest-card">
       <h4>Next RSU Vest</h4>
-      <p class="vest-date">${d.nextVest.vestOn}</p>
-      <p class="vest-amount">${formatInrCompact(d.nextVest.netPaise)} net (projected)</p>
+      <p class="vest-date">${d.nextVestDate}${d.nextVestCount > 1 ? ` — ${d.nextVestCount} grants vesting` : ''}</p>
+      <p class="vest-amount">${formatInrCompact(d.nextVestTotalNetPaise)} net (projected)</p>
     </div>
   ` : '<p class="no-data">No upcoming vests in projection window</p>';
 

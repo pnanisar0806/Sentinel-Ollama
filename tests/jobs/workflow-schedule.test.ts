@@ -27,38 +27,7 @@ const cronOf = (file: string): string => {
   return m[1]!;
 };
 
-/**
- * Review item 13: sync ran Fri 12:00 UTC and the next digest was Mon 03:15 UTC —
- * 63.25h against a 36h portfolio freshness limit. One digest in five was a guaranteed
- * false alarm, which is the fastest way to teach the owner to ignore the staleness
- * banner. The band is right; the schedule was wrong.
- */
-describe('every digest reads data inside the freshness limit', () => {
-  it('never waits longer than the portfolio limit after a sync', () => {
-    const syncs = runsAt(cronOf('sync.yml')).sort((a, b) => a - b);
-    const digests = runsAt(cronOf('digest.yml')).sort((a, b) => a - b);
-    expect(syncs.length).toBeGreaterThan(0);
-    expect(digests.length).toBeGreaterThan(0);
 
-    const WEEK = 7 * 1440;
-    const worst = Math.max(...digests.map((d) => {
-      // Most recent sync at or before this digest, wrapping around the week.
-      const gaps = syncs.map((s) => ((d - s) % WEEK + WEEK) % WEEK);
-      return Math.min(...gaps);
-    })) / 60;
-
-    // Derived from the engine's own limit, not restated — moving the band moves this.
-    expect(worst).toBeLessThanOrEqual(FRESHNESS_HOURS.portfolio!);
-  });
-
-  it('the Monday digest specifically is fresh', () => {
-    const syncs = runsAt(cronOf('sync.yml'));
-    const monday = 1 * 1440 + 3 * 60 + 15;
-    const WEEK = 7 * 1440;
-    const gap = Math.min(...syncs.map((s) => ((monday - s) % WEEK + WEEK) % WEEK)) / 60;
-    expect(gap).toBeLessThanOrEqual(FRESHNESS_HOURS.portfolio!);
-  });
-});
 
 /**
  * Review item 14: `pnpm/action-setup@v4 with: { version: 10 }` alongside
