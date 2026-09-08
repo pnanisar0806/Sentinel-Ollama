@@ -14,8 +14,18 @@ export default async function RsuPage() {
       <div className="stats">
         <Stat
           label="Next vest"
-          value={r.nextVest ? <>{r.nextVest.vestOn}</> : '—'}
-          sub={r.nextVest ? <>{r.nextVest.units} units · <Money p={r.nextVest.netPaise} /></> : 'none projected'}
+          value={r.nextVestDate ? (
+            <>
+              {r.nextVestDate}
+              {r.nextVestCount > 1 && <span className="dim"> — {r.nextVestCount} grants</span>}
+            </>
+          ) : '—'}
+          sub={r.nextVestTotalNetPaise !== null ? (
+            <>
+              <Money p={r.nextVestTotalNetPaise} />
+              {r.nextVestCount > 1 && <span className="dim"> total net</span>}
+            </>
+          ) : 'none projected'}
         />
         <Stat label="Projected future value" value={<Money p={r.projectedRemainingPaise} />} sub="next 12 tranches, net" />
         <Stat label="NOW price" value={`$${r.priceUsd.toFixed(2)}`} sub={`USD/INR ${r.usdInr.toFixed(2)}`} />

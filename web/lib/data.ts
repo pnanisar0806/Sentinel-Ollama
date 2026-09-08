@@ -79,6 +79,9 @@ export interface RsuData {
   priceUsd: number;
   usdInr: number;
   nextVest: VestEvent | null;
+  nextVestDate: string | null;
+  nextVestTotalNetPaise: Paise | null;
+  nextVestCount: number;
   grants: { id: string; grantedOn: string; units: number; note: string | null }[];
   upcoming: VestEvent[];
   confirmed: { vestOn: string; units: number; netPaise: Paise }[];
@@ -124,6 +127,9 @@ export async function getRsu(): Promise<RsuData> {
     priceUsd,
     usdInr,
     nextVest: input.nextVest,
+    nextVestDate: input.nextVestDate,
+    nextVestTotalNetPaise: input.nextVestTotalNetPaise,
+    nextVestCount: input.nextVestCount,
     grants,
     upcoming,
     confirmed,
