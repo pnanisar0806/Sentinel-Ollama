@@ -28,6 +28,9 @@ export interface DigestInput {
   milestones: MilestoneStatus[];
   staleness: StalenessRow[];
   nextVest: VestEvent | null;
+  nextVestDate: string | null;
+  nextVestTotalNetPaise: Paise | null;
+  nextVestCount: number;
   ipsVersion: number;
   funded: { floorRatio: number; stretchRatio: number };
 }
@@ -135,6 +138,22 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
   }));
   const unconfirmed = vests.filter((v) => !confirmedKeys.has(`${v.grantId}|${v.vestOn}`));
 
+  // Group unconfirmed vests by vest date, find earliest date with vests
+  const byDate = new Map<string, VestEvent[]>();
+  for (const v of unconfirmed) {
+    const arr = byDate.get(v.vestOn) ?? [];
+    arr.push(v);
+    byDate.set(v.vestOn, arr);
+  }
+  const sortedDates = [...byDate.keys()].sort();
+  const nextVestDate = sortedDates[0] ?? null;
+  const nextVestGroup = nextVestDate ? byDate.get(nextVestDate)! : [];
+  const nextVest = nextVestGroup[0] ?? null;
+  const nextVestTotalNetPaise = nextVestGroup.length > 0
+    ? nextVestGroup.reduce((sum, v) => (sum + v.netPaise) as Paise, 0n) as Paise
+    : null;
+  const nextVestCount = nextVestGroup.length;
+
   const liabilities = await outstandingLiabilities(db, `${businessDate.slice(0, 7)}-01`);
   const nw = netWorth(positions, liabilities);
 
@@ -151,7 +170,10 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     buckets: await bucketStatuses(db),
     milestones: await milestoneStatuses(db, businessDate),
     staleness: await assessStaleness(db, now),
-    nextVest: unconfirmed[0] ?? null,
+    nextVest,
+    nextVestDate,
+    nextVestTotalNetPaise,
+    nextVestCount,
     ipsVersion: (await currentIps(db)).version,
     funded: fundedStatus(nw.assetsPaise),
   };
@@ -229,12 +251,19 @@ export function composeDigest(d: DigestInput): string {
     lines.push('');
   }
 
-  if (d.nextVest) {
+  if (d.nextVestDate && d.nextVestTotalNetPaise !== null && d.nextVestCount > 0) {
     lines.push('*Next RSU vest*');
-    lines.push(
-      `${d.nextVest.vestOn}: ~${formatInr(d.nextVest.netPaise, { compact: true })} net (projected)`,
-      '',
-    );
+    if (d.nextVestCount === 1) {
+      lines.push(
+        `${d.nextVestDate}: ~${formatInr(d.nextVestTotalNetPaise, { compact: true })} net (projected)`,
+        '',
+      );
+    } else {
+      lines.push(
+        `${d.nextVestDate}: ~${formatInr(d.nextVestTotalNetPaise, { compact: true })} net (projected) — ${d.nextVestCount} grants vesting`,
+        '',
+      );
+    }
   }
 
   lines.push('*Data freshness*');
