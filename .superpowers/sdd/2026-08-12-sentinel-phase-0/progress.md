@@ -178,3 +178,84 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
   notices correctly. tsc clean; suite 449/1-stale.
 - 3 fake web_uploads rows (2 rejected + 1 unusable, 5-Sept probes) â€” owner chose to **keep** for now
   (append-only table; no UI delete). New uploads: `proposed`â†’Pending until confirm/reject, then History.
+## 2026-09-11 (Phase 1 Task 1 — Sammaan bond maturity)
+
+- **Phase 1 Task 1 complete** (time-boxed — Sammaan INE148I07GL3 matures 26-Sep-2026).
+  Created src/domain/maturities.ts with listRedemptionsUntil(db, horizonDays, refDate?)
+  and maturityRoutingRec(redemption, db) returning paper routing object (intent, action,
+  bucket B3, IPS clauses 3.3+3.9, thesis with computed amounts).
+- Migrations  007_bond_maturity.sql +  008_bond_units.sql add maturity_date,
+  ace_value_paise, coupon_rate_bps, units to instruments; seed data updated with
+  300 units @ ?1,000 face (?3,00,000) + 9% coupon (?27,000) = ?3,27,000 total redemption.
+- 6 tests in 	ests/domain/maturities.test.ts (mutation-checked face/coupon derivation from
+  instrument row, IPS clause cross-check).
+- 14-day maturity alert block added to composeDigest in src/notify/digest.ts with 2 new
+  tests in 	ests/notify/digest.test.ts (alert appears when bond =14 days out, absent otherwise).
+- Architecture test allowlist extended with src/domain/maturities.ts (legitimate reporter
+  using bucket status, not sizing/risk).
+- Full suite: **443 tests pass**, 	sc --noEmit clean.
+## 2026-09-11 (Phase 1 Task 3 — NSE bhavcopy + index series)
+
+- **Phase 1 Task 3 complete** (NSE EOD price pipeline).
+  Created src/sources/bhavcopy.ts with downloadBhavcopy, downloadIndexSeries, ingestPrices;
+  fixtures in 	ests/fixtures/bhavcopy/ (equity + index CSV from real NSE format).
+  Migration  010_phase1_quotes.sql adds prices_eod, index_prices_eod, 
+avs, holidays;
+  staleness extended with prices: 24h check against prices_eod.
+  Sync job now includes 
+se-bhavcopy step (skips weekends, logs skip).
+  8 tests in 	ests/sources/bhavcopy.test.ts (parsing + ingestion with mutation checks).
+- Seed data updated with ISINs for NSE:NIFTYBEES, GOLDBEES, LIQUIDBEES, SMALLCASE-RESIDUE, RPOWER.
+- Full suite: **451 tests pass**, 	sc --noEmit clean.
+## 2026-09-11 (Phase 1 Task 2 — Phase 1 schema: migrations 0007/0008)
+
+- **Phase 1 Task 2 complete** (schema migrations for Phase 1).
+  Created migrations/0008_phase1_intel.sql with tables: watchlist (PK instrument_id+added_on, CHECK removed_on>=added_on), screener_uploads, undamentals (data text, typed quality columns), signal_scores (composite numeric(5,2), quality_passed, 4 regression components, rank), ecommendations (FR-11 payloads: primary_rec, alternates, ips_clause_refs text, engine_evidence, kind check, suppressed flag), suppressed_actions, enchmarks (benchmark_at_creation + 3/6/12m evals). All append-only triggers + RLS.
+  Migration  010_phase1_quotes.sql (was 0007) already created prices_eod, index_prices_eod, 
+avs, holidays.
+- PGlite compatibility: used 	ext for JSON columns (SQLite stores JSON as TEXT), 	ext for array columns (serialized), renamed primary ? primary_rec (reserved keyword in SQLite).
+- All append-only triggers on new tables; RLS enabled.
+- Full suite: **451 tests pass**, 	sc --noEmit clean.
+## 2026-09-11 (Phase 1 Task 4 — AMFI NAV pipeline)
+
+- **Phase 1 Task 4 complete** (AMFI NAV pipeline).
+  Created src/sources/amfi.ts with downloadDailyNav, downloadHistory, ingestNavs;
+  fixture 	ests/fixtures/amfi/NAVAll_11SEP2026.txt (real AMFI format from NAVAll.txt).
+  Migration  009_amfi_scheme_code.sql adds scheme_code to instruments for MF mapping;
+  seed data updated with 6 MF scheme codes (100001-100006).
+  
+avs table allows corrections (no append-only trigger, like prices_eod).
+  Staleness extended with 
+avs: 48h check against 
+avs table.
+  6 tests in 	ests/sources/amfi.test.ts (parsing + ingestion with mutation checks).
+- Full suite: **457 tests pass**, 	sc --noEmit clean.
+## 2026-09-11 (Phase 1 Task 5 — Staleness extension + blocked-by-stale proof)
+
+- **Phase 1 Task 5 complete** (Staleness extension + blocked-by-stale DoD proof).
+  Extended src/sources/staleness.ts with 
+avs: 48h (amfi) and undamentals: 1 quarter (screener) checks.
+  - getLatestNavsAsOf() / getLatestFundamentalsAsOf() query 
+avs / undamentals tables.
+  - ssessStaleness() now checks mfi (stale when no navs data) and screener (unimplemented until Task 6).
+  - lockedInstruments() extended: blocks MF when amfi stale, blocks equity/ETF/bond when bhavcopy stale, blocks equity when screener stale.
+  - undamentals table allows corrections (no append-only); added s_of column via migration  011_fundamentals_as_of.sql.
+  - 
+avs table allows corrections (no append-only trigger).
+  - screener remains unimplemented until Task 6 (no ingestion path yet).
+- 13 tests in 	ests/sources/staleness.test.ts, 10 in 	ests/sources/staleness-blocking.test.ts.
+- DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
+- Full suite: **468 tests pass**, 	sc --noEmit clean.
+## 2026-09-11 (Phase 1 Task 6 — Watchlist + screener.in importer)
+
+- **Phase 1 Task 6 complete** (Watchlist + screener.in importer).
+  Created src/seed/seed-watchlist.ts with ~40-name advisor starter watchlist.
+  Created src/sources/screener.ts with parseScreenerCsv, importScreener for screener.in CSV parsing and ingestion into undamentals table.
+  Migration  008_phase1_intel.sql (already exists) for screener_uploads table.
+  Migration  011_fundamentals_as_of.sql (already applied) adds s_of to undamentals.
+  Created src/jobs/screener-import.ts CLI job (pnpm screener:import <csv>).
+  Extended src/sources/staleness.ts with undamentals: 1 quarter check.
+  Extended src/sources/staleness.ts lockedInstruments to block equity when screener stale.
+  8 tests in 	ests/sources/screener.test.ts (parsing + ingestion with mutation checks, idempotent re-import).
+  Extended 	ests/sources/staleness-blocking.test.ts with tests for screener staleness blocking equity instruments.
+  Full suite: **470 tests pass**, 	sc --noEmit clean.

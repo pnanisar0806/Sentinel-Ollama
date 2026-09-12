@@ -49,7 +49,7 @@ export interface StalenessRow {
  * Returns the latest as_of per source from holdings (portfolio sources).
  * PGlite returns date columns as Date objects; normalize to ISO string.
  */
-async function getLatestHoldingsAsOf(db: Db): Promise<Map<string, string>> {
+export async function getLatestHoldingsAsOf(db: Db): Promise<Map<string, string>> {
   const rows = await db.query<{ source: string; as_of: string | Date }>(
     `select source, max(as_of) as as_of from holdings group by source`,
   );
@@ -79,16 +79,56 @@ async function getLatestFxAsOf(db: Db): Promise<Map<string, string>> {
 }
 
 /**
+ * Returns the latest as_of for prices_eod (bhavcopy source).
+ * trade_date is a date column; we use the max trade_date with its as_of.
+ */
+async function getLatestPricesAsOf(db: Db): Promise<string | undefined> {
+  const rows = await db.query<{ as_of: string | Date }>(
+    `select max(as_of) as as_of from prices_eod`,
+  );
+  if (rows.length === 0 || rows[0]?.as_of === null) return undefined;
+  const asOf = rows[0]!.as_of;
+  return asOf instanceof Date ? asOf.toISOString() : asOf;
+}
+
+/**
+ * Returns the latest as_of for navs (amfi source).
+ */
+async function getLatestNavsAsOf(db: Db): Promise<string | undefined> {
+  const rows = await db.query<{ as_of: string | Date }>(
+    `select max(as_of) as as_of from navs`,
+  );
+  if (rows.length === 0 || rows[0]?.as_of === null) return undefined;
+  const asOf = rows[0]!.as_of;
+  return asOf instanceof Date ? asOf.toISOString() : asOf;
+}
+
+/**
+ * Returns the latest as_of for fundamentals (screener source).
+ */
+async function getLatestFundamentalsAsOf(db: Db): Promise<string | undefined> {
+  const rows = await db.query<{ as_of: string | Date }>(
+    `select max(as_of) as as_of from fundamentals`,
+  );
+  if (rows.length === 0 || rows[0]?.as_of === null) return undefined;
+  const asOf = rows[0]!.as_of;
+  return asOf instanceof Date ? asOf.toISOString() : asOf;
+}
+
+/**
  * Assesses staleness for all known sources.
  * - Portfolio sources (indmoney, manual-seed, composite) from holdings
  * - FX sources (frankfurter) from fx_rates
- * - Market sources (amfi, bhavcopy, screener) — no tables yet, reported as stale if no data
+ * - Market sources (bhavcopy from prices_eod, amfi from navs, screener from fundamentals)
  */
 export async function assessStaleness(db: Db, now: string): Promise<StalenessRow[]> {
   const nowMs = Date.parse(now);
 
   const holdingsMap = await getLatestHoldingsAsOf(db);
   const fxMap = await getLatestFxAsOf(db);
+  const pricesAsOf = await getLatestPricesAsOf(db);
+  const navsAsOf = await getLatestNavsAsOf(db);
+  const fundamentalsAsOf = await getLatestFundamentalsAsOf(db);
 
   const results: StalenessRow[] = [];
 
@@ -120,17 +160,21 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
     results.push(assess(source, fxMap.get(source), FRESHNESS_HOURS.fx!));
   }
 
-  // No table, no ingestion path: report the gap honestly rather than as rotten data.
-  for (const source of KNOWN_MARKET_SOURCES) {
-    results.push({
-      source,
-      asOf: NEVER,
-      ageHours: Infinity,
-      limitHours: LIMIT_BY_SOURCE[source]!,
-      state: 'unimplemented',
-      stale: false,
-    });
-  }
+  // bhavcopy from prices_eod table (Phase 1 Task 3)
+  results.push(assess('bhavcopy', pricesAsOf, FRESHNESS_HOURS.prices!));
+
+  // amfi from navs table (Phase 1 Task 4)
+  results.push(assess('amfi', navsAsOf, FRESHNESS_HOURS.navs!));
+
+  // screener: no ingestion path yet (Task 6) → unimplemented, not stale
+  results.push({
+    source: 'screener',
+    asOf: NEVER,
+    ageHours: Infinity,
+    limitHours: LIMIT_BY_SOURCE.screener!,
+    state: 'unimplemented',
+    stale: false,
+  });
 
   return results;
 }
@@ -185,21 +229,36 @@ export async function raiseIncidents(db: Db, rows: StalenessRow[]): Promise<numb
  * The half of FR-31 that actually gates recommendations was blind, and the suite
  * encoded the false negative as expected behaviour.
  *
- * Two inputs are checked today:
+ * Inputs checked for each position:
  *   - the portfolio source that supplied the position
  *   - FX, for any position not denominated in INR (without a rate it has no rupee value)
- *
- * NAV and price sources are `unimplemented` in Phase 0, so they do not block. When an
- * ingestion path exists they become `stale`-capable and belong here too.
+ *   - NAV, for MF positions
+ *   - Price (bhavcopy), for equity/ETF/bond positions (non-MF, non-CASH, non-EPF)
+ *   - Fundamentals, for equity positions (screening/quality gate)
  */
 export function blockedInstruments(rows: StalenessRow[], positions: Position[]): string[] {
   const staleSources = new Set(rows.filter((r) => r.stale).map((r) => r.source));
   const fxStale = rows.some((r) => r.stale && FX_SOURCE_NAMES.has(r.source));
+  const navStale = staleSources.has('amfi');
+  const priceStale = staleSources.has('bhavcopy');
+  const fundamentalsStale = staleSources.has('screener');
 
   return [
     ...new Set(
       positions
-        .filter((p) => staleSources.has(p.source) || (fxStale && p.currency !== 'INR'))
+        .filter((p) => {
+          // Portfolio source stale
+          if (staleSources.has(p.source)) return true;
+          // FX stale for non-INR
+          if (fxStale && p.currency !== 'INR') return true;
+          // NAV stale for MF
+          if (navStale && p.kind === 'MF') return true;
+          // Price stale for equity/ETF/bond (non-MF, non-CASH, non-EPF, non-RSU, non-GOLD, non-LOAN)
+          if (priceStale && ['EQUITY', 'ETF', 'BOND'].includes(p.kind)) return true;
+          // Fundamentals stale for equity (quality gate)
+          if (fundamentalsStale && p.kind === 'EQUITY') return true;
+          return false;
+        })
         .map((p) => p.instrumentId),
     ),
   ].sort();

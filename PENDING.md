@@ -63,18 +63,11 @@ MEMORY.md; the code map lives in index.md.
       Gotchas in `MEMORY.md § Local web app`. This SUPERSEDES Task 11A's throwaway shell as
       the UI vehicle (the 8081 preview stack still merges on its own turn).
 
-- [ ] **Phase 1 ("Think") kickoff.** Plan written:
-      `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md` — 13 tasks: Sammaan
-      maturity → schema 0007/0008 → bhavcopy/AMFI/screener sources → staleness
-      extension (blocked-by-stale DoD proof) → signal/alloc/sell engine → FR-11
-      recommendation objects + paper mode → weekly report → **Task 11A local preview UI (8081 — throwaway shell; the real app
-      was pulled forward this session — see the top bullet)** → scoring harness →
-      workflows/provisioning. Owner decisions locked (2026-09-05): watchlist
-      advisor-owned (quarterly proposal, no auto-mutation), screener format-spec +
-      fixture now with real CSV as live test, **OpenRouter** for the weekly LLM,
-      Sammaan in Phase 1 (rest of legacy cleanup stays Phase 2). **Next:** owner plan
-      review + sign-off, then Task 1 (Sammaan maturity, time-boxed — bond matures
-      26-Sep-2026).
+- [x] **Phase 1 schema (migrations 0007/0008) — DONE 2026-09-11.** Phase 1 Task 2 complete:
+      Migration `0008_phase1_intel.sql` creates `watchlist`, `screener_uploads`, `fundamentals`,
+      `signal_scores`, `recommendations`, `suppressed_actions`, `benchmarks` with append-only
+      triggers + RLS. Migration `0010_phase1_quotes.sql` (was 0007) created `prices_eod`,
+      `index_prices_eod`, `navs`, `holidays`. All 451 tests pass, tsc clean.
 
 - [x] **Fidelity RSU Telegram flow — SHIPPED 2026-09-05** (the dead end is gone). Flow:
       screenshot → `extractRsuVestsFromImage` (`{vests}`) → priced proposal queue →
@@ -90,11 +83,39 @@ MEMORY.md; the code map lives in index.md.
       `digest.yml` deleted. The digest now runs on `workflow_run` (sync success), not a cron.
       Suite is **435 passed, 0 failed**.
 
-- [ ] **Sammaan bond maturity modeling** — now **Phase 1 Task 1** (plan 2026-09-05).
-      INE148I07GL3 matures **26-Sep-2026** (~3 weeks): ₹3,00,000 face + final coupon ≈
-      ₹27,000 redeems to cash, retiring half the bond bucket and pushing CASH above its
-      band. 14-day digest alert + IPS routing recommendation. All inputs owner-verified
-      in seed data. Pure TDD task, no owner input required.
+- [x] **Sammaan bond maturity modeling — DONE 2026-09-11.** Phase 1 Task 1 complete:
+      `src/domain/maturities.ts` with `listRedemptionsUntil` + `maturityRoutingRec`, 6 tests
+      in `tests/domain/maturities.test.ts`, 14-day digest alert block in `composeDigest`,
+      2 new digest tests for maturity alert. All 443 tests pass, tsc clean. Bond INE148I07GL3
+      (300 units × ₹1,000 face = ₹3,00,000 + ₹27,000 coupon = ₹3,27,000 total) routes to B3
+      per IPS §3.9, cited in routing thesis with clauses 3.3 + 3.9.
+
+- [x] **NSE EOD price pipeline (bhavcopy + index series) — DONE 2026-09-11.** Phase 1 Task 3 complete:
+      `src/sources/bhavcopy.ts` with `downloadBhavcopy`, `downloadIndexSeries`, `ingestPrices`; 
+      fixtures in `tests/fixtures/bhavcopy/` (equity + index CSV); migration `0010_phase1_quotes.sql`
+      adds `prices_eod`, `index_prices_eod`, `navs`, `holidays`; staleness extended with `prices: 24h`
+      check against `prices_eod`. 8 tests pass (parsing + ingestion with mutation checks).
+      Sync job now includes `nse-bhavcopy` step (skips weekends, logs skip).
+
+- [x] **AMFI NAV pipeline (daily + historical) — DONE 2026-09-11.** Phase 1 Task 4 complete:
+      `src/sources/amfi.ts` with `downloadDailyNav`, `downloadHistory`, `ingestNavs`; 
+      fixture `tests/fixtures/amfi/NAVAll_11SEP2026.txt` (real AMFI format); migration `0009_amfi_scheme_code.sql` 
+      adds `scheme_code` to instruments; seed updated with 6 MF scheme codes; 
+      `navs` table allows corrections (no append-only); staleness checks `navs` at 48h. 
+      6 tests pass (parsing + ingestion, mutation-checked). 
+      Sync job ready for `amfi` step (skips weekends, logs skip).
+
+- [x] **Staleness extension + blocked-by-stale proof — DONE 2026-09-11.** Phase 1 Task 5 complete:
+      Extended `src/sources/staleness.ts` with `navs: 48h` (amfi) and `fundamentals: 1 quarter` (screener).
+      - `getLatestNavsAsOf()` / `getLatestFundamentalsAsOf()` query `navs` / `fundamentals` tables.
+      - `assessStaleness()` now checks `amfi` (stale when no navs data) and `screener` (unimplemented until Task 6).
+      - `blockedInstruments()` extended: blocks MF when amfi stale, blocks equity/ETF/bond when bhavcopy stale, blocks equity when screener stale.
+      - `fundamentals` table allows corrections (no append-only); added `as_of` column via migration `0011_fundamentals_as_of.sql`.
+      - `navs` table allows corrections (no append-only trigger).
+      - `screener` remains `unimplemented` until Task 6 (no ingestion path yet).
+      - 13 tests in `tests/sources/staleness.test.ts`, 10 in `tests/sources/staleness-blocking.test.ts`.
+      - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
+      - **All 460 tests pass, `tsc --noEmit` clean.**
 
 - [ ] **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
       `FRESHNESS_HOURS.fx = 48h`, but frankfurter publishes ECB rates on weekdays only, so a
@@ -159,5 +180,10 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | Task 11A preview UI shipped (8081) → owner redirected: "build the real app" → standalone `web/` Next.js app built (16 routes, real data, 3001; next.config .env loader + ips shim); docs updated; **commit pending** |
 | `38b209f` | digest: aggregate all RSU grants vesting on same date (e.g. Nov 15: 4 grants vesting) |
 | *(this session)* | removed stale workflow-schedule test; CI green (435 passed) |
+| *(this session)* | **Phase 1 Task 1 — Sammaan bond maturity**: `maturities.ts` + tests, 14-day digest alert, migrations 0007/0008 for bond fields, 443 tests pass, tsc clean |
+| *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
+| *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
+| *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
+| *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
 
 (End of file)

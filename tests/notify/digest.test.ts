@@ -111,4 +111,28 @@ describe('daily digest', () => {
     expect(after.nextVest!.grantId).not.toBe(target.grantId);
     expect(after.nextVest!.vestOn).toBe(target.vestOn);
   });
+
+  it('shows 14-day bond maturity alert when a bond is maturing soon', async () => {
+    // Sammaan 2026 bond matures 2026-09-26; use 2026-09-20 (6 days before)
+    const input = await buildDigestInput(db, '2026-09-20T08:45:00+05:30');
+    expect(input.upcomingMaturities.length).toBeGreaterThan(0);
+    const sammaan = input.upcomingMaturities.find(m => m.instrumentId === 'BOND:SAMMAAN-2026');
+    expect(sammaan).toBeDefined();
+    expect(sammaan!.daysUntil).toBeLessThanOrEqual(14);
+
+    const text = composeDigest(input);
+    expect(text).toMatch(/Bond maturities — 14-day alert/);
+    expect(text).toContain('Sammaan Capital');
+    expect(text).toContain('INE148I07GL3');
+    expect(text).toMatch(/Per IPS §3\.9/);
+  });
+
+  it('does not show bond maturity alert when no bonds are maturing within 14 days', async () => {
+    // Use seed date 2026-08-12, which is ~45 days before Sammaan maturity
+    const input = await buildDigestInput(db, '2026-08-12T08:45:00+05:30');
+    expect(input.upcomingMaturities.length).toBe(0);
+
+    const text = composeDigest(input);
+    expect(text).not.toMatch(/Bond maturities — 14-day alert/);
+  });
 });

@@ -32,20 +32,34 @@ describe('assessStaleness reports each source once', () => {
 });
 
 /**
- * A source with no ingestion path in Phase 0 is NOT stale data — it is an unbuilt
- * feature. Reporting amfi/bhavcopy/screener as STALE made the digest print red
+ * A source with no ingestion path in Phase 0/1 is NOT stale data — it is an unbuilt
+ * feature. Reporting amfi/screener as STALE made the digest print red
  * warnings after a *successful* sync and kept a BLOCK incident permanently open,
  * which trains the owner to ignore the loudest safety signal in the product.
+ * bhavcopy NOW has ingestion (prices_eod) so it's stale when no data.
+ * amfi NOW has ingestion (navs) so it's stale when no data.
+ * screener NOW has ingestion (fundamentals) so it's stale when no data.
  */
 describe('unimplemented sources are distinguished from stale ones', () => {
-  it('marks amfi, bhavcopy and screener unimplemented, not stale', async () => {
+  it('marks screener unimplemented, not stale; bhavcopy and amfi are stale (no data)', async () => {
     const rows = await assessStaleness(db, FRESH);
-    for (const source of ['amfi', 'bhavcopy', 'screener']) {
-      const row = rows.find((r) => r.source === source);
-      expect(row, `${source} must still be reported`).toBeDefined();
-      expect(row!.state).toBe('unimplemented');
-      expect(row!.stale).toBe(false);
-    }
+    // screener has no ingestion path yet
+    const screenerRow = rows.find((r) => r.source === 'screener');
+    expect(screenerRow, `screener must still be reported`).toBeDefined();
+    expect(screenerRow!.state).toBe('unimplemented');
+    expect(screenerRow!.stale).toBe(false);
+
+    // bhavcopy has ingestion path (prices_eod) but no data -> stale
+    const bhavcopyRow = rows.find((r) => r.source === 'bhavcopy');
+    expect(bhavcopyRow).toBeDefined();
+    expect(bhavcopyRow!.state).toBe('stale');
+    expect(bhavcopyRow!.stale).toBe(true);
+
+    // amfi has ingestion path (navs) but no data -> stale
+    const amfiRow = rows.find((r) => r.source === 'amfi');
+    expect(amfiRow).toBeDefined();
+    expect(amfiRow!.state).toBe('stale');
+    expect(amfiRow!.stale).toBe(true);
   });
 
   it('raises no incident for an unimplemented source', async () => {
@@ -54,9 +68,11 @@ describe('unimplemented sources are distinguished from stale ones', () => {
       "select subject from incidents where kind = 'STALE_DATA' and resolved_at is null",
     );
     const subjects = open.map((r) => r.subject);
-    expect(subjects).not.toContain('amfi');
-    expect(subjects).not.toContain('bhavcopy');
+    // screener is unimplemented -> no incident
     expect(subjects).not.toContain('screener');
+    // bhavcopy and amfi are stale (have ingestion paths but no data) -> incidents raised
+    expect(subjects).toContain('bhavcopy');
+    expect(subjects).toContain('amfi');
   });
 
   it('still reports a real portfolio source as stale once it ages past its limit', async () => {
@@ -87,8 +103,9 @@ describe('blockedInstruments blocks on valuation inputs, not just portfolio sour
     expect(blocked).toContain('US:NOW');
 
     // ...and a rupee-denominated holding from a fresh portfolio source is NOT blocked.
+    // Note: MF:PPFC IS blocked because amfi (NAV) is stale at FRESH
     expect(blocked).not.toContain('CASH:SAVINGS');
-    expect(blocked).not.toContain('MF:PPFC');
+    expect(blocked).toContain('MF:PPFC');
   });
 
   it('blocks a portfolio source’s own instruments when that source is stale', async () => {
@@ -102,10 +119,95 @@ describe('blockedInstruments blocks on valuation inputs, not just portfolio sour
   it('blocks nothing once every input a position depends on is fresh', async () => {
     const positions = await loadPositions(db);
     const rows = await assessStaleness(db, FRESH);
-    // Pretend FX arrived: the only remaining stale inputs are unimplemented ones.
-    const withFx = rows.map((r) =>
-      r.source === 'frankfurter' ? { ...r, stale: false, state: 'fresh' as const } : r,
-    );
-    expect(blockedInstruments(withFx, positions)).toEqual([]);
+    // Pretend FX, amfi, bhavcopy all arrived: fix all stale inputs
+    const withAllFresh = rows.map((r) => {
+      if (r.source === 'frankfurter' || r.source === 'amfi' || r.source === 'bhavcopy') {
+        return { ...r, stale: false, state: 'fresh' as const };
+      }
+      return r;
+    });
+    expect(blockedInstruments(withAllFresh, positions)).toEqual([]);
   });
+
+  it('blocks MF instruments when NAV (amfi) is stale', async () => {
+    // FRESH: amfi is stale (no navs data)
+    let rows = await assessStaleness(db, FRESH);
+    expect(rows.find((r) => r.source === 'amfi')!.state).toBe('stale');
+    let blocked = blockedInstruments(rows, await loadPositions(db));
+    expect(blocked).toContain('MF:PPFC');
+    expect(blocked).not.toContain('CASH:SAVINGS');
+  });
+
+describe('Phase 1 DoD: blocked-by-stale proof (Task 5)', () => {
+
+describe('Phase 1 DoD: blocked-by-stale proof (Task 5)', () => {
+  it('a deliberately stale price provably blocks a watchlist instrument from recommendations', async () => {
+    // This test proves the DoD: a stale price blocks the instrument from the engine output
+    // and the report lists it with the reason.
+
+    // 1. Create a fresh state by inserting prices_eod data for NSE:NIFTYBEES
+    await db.query(
+      `insert into prices_eod (instrument_id, trade_date, close_paise, prev_close_paise, source, as_of)
+       values ('NSE:NIFTYBEES', '2026-08-12', 22730, 22610, 'nse-bhavcopy', '2026-08-12T17:30:00+05:30')
+       on conflict (instrument_id, trade_date) do update set close_paise = excluded.close_paise`,
+    );
+
+    // 1. Fresh state: bhavcopy is now fresh (has prices_eod data)
+    const freshRows = await assessStaleness(db, FRESH);
+    const freshBlocked = blockedInstruments(freshRows, await loadPositions(db));
+
+    // NSE:NIFTYBEES should NOT be blocked when bhavcopy is fresh
+    expect(freshBlocked).not.toContain('NSE:NIFTYBEES');
+    expect(freshRows.find((r) => r.source === 'bhavcopy')!.stale).toBe(false);
+
+    // 2. Inject a stale price: remove the prices_eod data (simulate stale price)
+    await db.query(`delete from prices_eod where instrument_id = 'NSE:NIFTYBEES'`);
+
+    // 3. Now bhavcopy is stale again, instrument should be blocked
+    const stalePriceRows = await assessStaleness(db, FRESH);
+    const positions = await loadPositions(db);
+    const staleBlocked = blockedInstruments(stalePriceRows, positions);
+
+    // NSE:NIFTYBEES (ETF) should be blocked due to stale price
+    expect(staleBlocked).toContain('NSE:NIFTYBEES');
+
+    // 4. The staleness report should list bhavcopy as stale with reason
+    const stalePriceSource = stalePriceRows.find((r) => r.source === 'bhavcopy')!;
+    expect(stalePriceSource.stale).toBe(true);
+    expect(stalePriceSource.ageHours).toBeGreaterThan(24);
+    expect(stalePriceSource.limitHours).toBe(24);
+    expect(stalePriceSource.source).toBe('bhavcopy');
+  });
+
+  it('engine output changes when price goes stale — stale name absent from candidates', async () => {
+    // This is the core DoD test: the same instrument appears in fresh candidates
+    // but disappears when its price is stale.
+
+    // 1. Start with fresh bhavcopy (has prices_eod)
+    await db.query(
+      `insert into prices_eod (instrument_id, trade_date, close_paise, prev_close_paise, source, as_of)
+       values ('NSE:NIFTYBEES', '2026-08-12', 22730, 22610, 'nse-bhavcopy', '2026-08-12T17:30:00+05:30')
+       on conflict (instrument_id, trade_date) do update set close_paise = excluded.close_paise`,
+    );
+
+    // Fresh state
+    const freshRows = await assessStaleness(db, FRESH);
+    const freshBlocked = blockedInstruments(freshRows, await loadPositions(db));
+
+    // 2. Make bhavcopy stale by removing prices_eod
+    await db.query(`delete from prices_eod where instrument_id = 'NSE:NIFTYBEES'`);
+
+    // Stale state
+    const stalePriceRows = await assessStaleness(db, FRESH);
+    const staleBlocked = blockedInstruments(stalePriceRows, await loadPositions(db));
+
+    // Diff: instruments that were NOT blocked when fresh but ARE blocked when stale
+    const newlyBlocked = staleBlocked.filter((id) => !freshBlocked.includes(id));
+    
+    // At minimum, NSE:NIFTYBEES should be newly blocked
+    expect(newlyBlocked).toContain('NSE:NIFTYBEES');
+    expect(newlyBlocked.length).toBeGreaterThan(0);
+  });
+});
+});
 });

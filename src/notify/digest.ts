@@ -9,6 +9,7 @@ import { loadPositions, netWorth, outstandingLiabilities } from '../domain/netwo
 import { projectVests, type VestEvent } from '../domain/rsu.js';
 import { assessStaleness, type StalenessRow } from '../sources/staleness.js';
 import { fetchLiveRsuInputs } from '../sources/rsu-live.js';
+import { listRedemptionsUntil, type Redemption } from '../domain/maturities.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import { formatInr, type Paise, cents } from '../money/paise.js';
 import { usdToInr } from '../money/fx.js';
@@ -33,6 +34,8 @@ export interface DigestInput {
   nextVestCount: number;
   ipsVersion: number;
   funded: { floorRatio: number; stretchRatio: number };
+  /** Bond maturities within 14 days */
+  upcomingMaturities: Redemption[];
 }
 
 /**
@@ -156,6 +159,8 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
 
   const liabilities = await outstandingLiabilities(db, `${businessDate.slice(0, 7)}-01`);
   const nw = netWorth(positions, liabilities);
+  const refDate = new Date(`${businessDate}T00:00:00+05:30`);
+  const upcomingMaturities = await listRedemptionsUntil(db, 14, refDate);
 
   return {
     businessDate,
@@ -176,6 +181,7 @@ export async function buildDigestInput(db: Db, now: string): Promise<DigestInput
     nextVestCount,
     ipsVersion: (await currentIps(db)).version,
     funded: fundedStatus(nw.assetsPaise),
+    upcomingMaturities,
   };
 }
 
@@ -261,6 +267,19 @@ export function composeDigest(d: DigestInput): string {
     } else {
       lines.push(
         `${d.nextVestDate}: ~${formatInr(d.nextVestTotalNetPaise, { compact: true })} net (projected) — ${d.nextVestCount} grants vesting`,
+        '',
+      );
+    }
+  }
+
+  if (d.upcomingMaturities.length > 0) {
+    lines.push('*Bond maturities — 14-day alert*');
+    for (const m of d.upcomingMaturities) {
+      const total = (m.facePaise + (m.couponDuePaise ?? 0n)) as Paise;
+      lines.push(
+        `🔔 ${escapeMarkdown(m.symbol)} (${m.isin}) matures ${m.maturityDate} — ${m.daysUntil} days`,
+        `   Face: ${formatInr(m.facePaise, { compact: true })} + Coupon: ${m.couponDuePaise ? formatInr(m.couponDuePaise, { compact: true }) : '₹0'} = ${formatInr(total, { compact: true })}`,
+        `   Per IPS §3.9: proceeds → B3 (Emergency fund)`,
         '',
       );
     }

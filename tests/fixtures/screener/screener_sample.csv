@@ -1,0 +1,36 @@
+Name,Symbol,Industry,Current Price,Market Cap,P/E,P/B,Div Yield %,ROCE %,ROE %,Debt to Equity,EPS,Sales 5Y CAGR %,Profit 5Y CAGR %,FCF 5Y,Red Flags,Promoter Holding %,FII Holding %,DII Holding %
+Reliance Industries Ltd,RELIANCE,Oil & Gas,2865.50,1937000,28.5,2.1,0.3,15.2,12.8,0.45,95.5,12.5,18.2,positive,0,50.3,22.1,8.2
+Tata Consultancy Services Ltd,TCS,IT Services,4165.25,1512000,32.1,14.2,1.2,48.5,42.1,0.05,128.5,10.2,14.8,positive,0,72.4,15.3,4.1
+HDFC Bank Ltd,HDFCBANK,Banking,1658.75,945000,22.8,3.2,0.9,18.2,16.5,0.0,72.5,18.5,20.1,positive,0,25.6,32.4,12.5
+Infosys Ltd,INFY,IT Services,1758.50,728000,28.5,9.8,1.8,35.2,31.2,0.1,58.2,9.8,12.5,positive,0,14.8,28.3,8.7
+ICICI Bank Ltd,ICICIBANK,Banking,1156.25,815000,18.5,2.8,0.7,16.8,15.2,0.0,62.3,22.1,25.4,positive,0,0.0,45.2,18.3
+Larsen & Toubro Ltd,LT,Construction,3565.00,492000,35.2,4.5,0.6,18.5,14.8,0.65,98.5,15.2,18.7,positive,0,13.8,22.1,15.4
+Bajaj Finance Ltd,BAJFINANCE,NBFC,7850.00,485000,32.5,8.2,0.4,22.1,20.5,3.2,245.0,25.8,30.1,positive,0,52.1,18.7,6.2
+Kotak Mahindra Bank Ltd,KOTAKBANK,Banking,1850.00,368000,24.5,3.8,0.5,20.1,17.8,0.0,82.5,14.2,18.9,positive,0,26.3,28.9,10.1
+Axis Bank Ltd,AXISBANK,Banking,1150.00,355000,16.8,2.5,0.6,15.2,13.8,0.0,68.2,18.7,22.4,positive,0,0.0,42.5,16.8
+State Bank of India,SBIN,Banking,785.00,702000,12.5,1.8,0.8,12.8,11.2,0.0,52.5,12.5,15.8,positive,0,57.2,12.8,8.9
+Hindustan Unilever Ltd,HINDUNILVR,FMCG,2650.00,625000,65.2,12.5,1.4,92.5,85.2,0.0,42.5,8.5,10.2,positive,0,61.9,18.7,4.5
+ITC Ltd,ITC,FMCG,450.00,562000,22.5,6.8,3.2,28.5,24.2,0.0,14.8,6.2,8.5,positive,0,29.1,15.6,8.2
+Sun Pharmaceutical Industries Ltd,SUNPHARMA,Pharma,1450.00,348000,38.2,5.2,0.7,18.2,15.5,0.15,58.5,12.5,18.9,positive,0,53.2,22.1,7.8
+Maruti Suzuki India Ltd,MARUTI,Automobile,11250.00,338000,32.8,5.8,0.9,18.5,16.2,0.08,345.0,8.2,12.5,positive,0,56.2,22.8,9.1
+Titan Company Ltd,TITAN,Jewellery,3450.00,308000,85.2,22.5,0.3,28.5,24.5,0.05,42.5,18.5,22.1,positive,0,52.9,18.7,6.5
+Asian Paints Ltd,ASIANPAINT,Paints,3250.00,312000,72.5,14.5,0.8,32.5,28.5,0.02,52.5,12.5,14.2,positive,0,52.8,22.4,7.8
+Avenue Supermarts Ltd,DMART,Retail,4250.00,278000,115.2,18.5,0.0,18.5,14.5,0.02,18.5,22.5,25.8,positive,0,74.5,12.5,3.2
+Zomato Ltd,ZOMATO,Food Delivery,185.00,162000,0.0,8.5,0.0,-5.2,-3.2,0.45,-2.5,45.2,0.0,positive,1,42.5,18.5,4.2
+Paytm,PAYTM,Payments,785.00,50500,0.0,4.2,0.0,-12.5,-8.5,0.85,-8.5,0.0,0.0,positive,2,9.5,22.1,5.8
+Nykaa,NYKAA,Beauty E-commerce,165.00,78500,0.0,9.2,0.0,-8.2,-5.8,0.35,-5.2,0.0,0.0,positive,1,52.5,15.2,3.8
+Policybazaar,POLICYBZR,Insurance Aggregator,850.00,37500,0.0,6.8,0.0,-15.2,-10.5,0.55,-8.2,0.0,0.0,positive,1,12.5,28.5,4.5
+Persistent Systems Ltd,PERSISTENT,IT Services,5850.00,448000,48.5,12.5,0.6,28.5,24.5,0.05,185.0,22.5,28.5,positive,0,32.1,28.5,8.7
+Coforge Ltd,COFORGE,IT Services,5450.00,332000,42.5,10.8,0.8,32.5,28.2,0.02,198.5,18.5,22.5,positive,0,34.5,25.8,7.2
+Mphasis Ltd,MPHASIS,IT Services,2850.00,535000,35.5,8.5,1.2,25.5,22.1,0.05,125.0,15.2,18.8,positive,0,56.2,22.4,6.8
+LTIMindtree Ltd,LTIM,IT Services,5250.00,1555000,38.5,11.2,1.1,30.5,26.5,0.02,158.5,18.2,22.1,positive,0,68.5,18.5,5.8
+Trent Ltd,TRENT,Retail,4250.00,152000,85.5,18.5,0.2,22.5,18.5,0.05,52.5,28.5,35.2,positive,0,32.5,22.1,8.2
+Dixon Technologies Ltd,DIXON,EMS,5250.00,312000,65.5,14.5,0.1,28.5,24.5,0.02,185.0,35.2,42.5,positive,0,28.5,22.1,5.8
+Amber Enterprises Ltd,AMBER,EMS,3850.00,132000,58.5,10.5,0.0,22.5,18.5,0.15,98.5,38.5,45.2,positive,0,38.2,18.5,6.2
+Kajaria Ceramics Ltd,KAJARIACER,Ceramics,1250.00,198000,42.5,6.5,0.8,25.5,22.1,0.02,38.5,15.2,18.5,positive,0,48.5,18.7,7.2
+Supreme Industries Ltd,SUPREMEIND,Plastics,4850.00,612000,48.5,8.5,0.6,28.5,24.5,0.02,195.0,18.5,22.1,positive,0,52.5,18.7,6.8
+Astral Ltd,ASTRAL,Piping,2250.00,302000,65.5,12.5,0.4,28.5,24.5,0.02,42.5,18.5,22.1,positive,0,55.2,18.7,7.1
+Procter & Gamble Hygiene Ltd,PGHH,FMCG,16500.00,538000,85.5,28.5,1.2,32.5,28.5,0.0,65.5,8.5,10.2,positive,0,65.2,12.5,3.5
+Nestle India Ltd,NESTLEIND,FMCG,24500.00,2350000,95.2,32.5,1.1,35.5,30.2,0.0,72.5,10.5,12.5,positive,0,62.8,15.8,4.2
+Britannia Industries Ltd,BRITANNIA,FMCG,5250.00,1260000,58.5,18.5,1.2,28.5,24.5,0.02,85.5,10.5,12.5,positive,0,50.5,18.7,5.8
+Godrej Consumer Products Ltd,GODREJCP,FMCG,1150.00,118000,45.5,8.5,1.2,22.5,18.5,0.15,32.5,12.5,15.2,positive,0,63.2,18.5,4.8

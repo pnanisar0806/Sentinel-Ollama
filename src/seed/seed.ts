@@ -6,6 +6,7 @@ import {
 } from './seed-data.js';
 import { isMainModule } from '../util/main-module.js';
 import { DEFAULT_OWNER_RAILS } from '../domain/rails.js';
+import { seedWatchlist } from './seed-watchlist.js';
 
 const SOURCE = 'manual-seed';
 
@@ -20,13 +21,14 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
 
   for (const i of SEED_INSTRUMENTS) {
     await db.query(
-      `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer, canonical_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `insert into instruments (id, kind, name, currency, isin, sector, issuer, is_employer, canonical_id, maturity_date, face_value_paise, coupon_rate_bps, units, scheme_code)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        on conflict (id) do update set name = excluded.name, isin = excluded.isin,
          sector = excluded.sector, issuer = excluded.issuer,
-         is_employer = excluded.is_employer, canonical_id = excluded.canonical_id`,
+         is_employer = excluded.is_employer, canonical_id = excluded.canonical_id,
+         maturity_date = excluded.maturity_date, face_value_paise = excluded.face_value_paise, coupon_rate_bps = excluded.coupon_rate_bps, units = excluded.units, scheme_code = excluded.scheme_code`,
       [i.id, i.kind, i.name, i.currency, i.isin ?? null, i.sector ?? null, i.issuer ?? null,
-       i.isEmployer ?? false, i.canonicalId ?? null],
+       i.isEmployer ?? false, i.canonicalId ?? null, i.maturityDate ?? null, i.faceValuePaise?.toString() ?? null, i.couponRateBps ?? null, i.units ?? null, i.schemeCode ?? null],
     );
   }
 
@@ -94,6 +96,8 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
       [g.id, g.grantedOn, g.units, g.note],
     );
   }
+
+  await seedWatchlist(db);
 
   // Append audit log entry on every run by design (audit trail records each seeding; this is not an idempotency issue)
   // Owner rails (settings_rails), distinct from the IPS. Idempotent: an existing rail

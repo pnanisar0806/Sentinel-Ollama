@@ -34,15 +34,27 @@ export async function openDb(url = process.env.DATABASE_URL): Promise<Db> {
         await pg.exec(sql);
       },
       async withTransaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-        await pg.exec('begin');
-        try {
-          const result = await fn(dbImpl);
-          await pg.exec('commit');
-          return result;
-        } catch (error) {
-          await pg.exec('rollback');
-          throw error;
-        }
+        // PGlite doesn't support explicit BEGIN/COMMIT via exec
+        // Use the transaction callback API
+        return await pg.transaction(async (tx) => {
+          const txDb: Db = {
+            async query<T>(sql: string, params: unknown[] = []) {
+              const res = await tx.query<T>(sql, params);
+              return res.rows;
+            },
+            async exec(sql: string) {
+              await tx.exec(sql);
+            },
+            async withTransaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+              // Nested transactions not supported, just invoke
+              return fn(txDb);
+            },
+            async close() {
+              // No-op
+            },
+          };
+          return await fn(txDb);
+        });
       },
       async close() {
         await pg.close();

@@ -86,6 +86,7 @@ const ALLOWED = new Set([
   'src/jobs/weekly.ts',      // the weekly deep report CLI entrypoint
   'src/ui/render.ts',        // local preview: renders the report + digest to the owner, never sizes
   'src/ui/server.ts',        // local preview: serving entrypoint over render.ts
+  'src/domain/maturities.ts', // maturity routing for digest; reports bucket allocation, never sizes
 ]);
 
 /** A module whose name says it decides how much to buy, or how much risk to take. */

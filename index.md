@@ -98,20 +98,25 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `migrations/0003_snapshot_uniqueness.sql` | `unique (business_date, source)` on `snapshots` — without it writeSnapshot's select-then-insert is check-then-act and two racing syncs double-count the portfolio |
 | `migrations/0004_immutability_and_rls.sql` | append-only triggers on `ips_versions` + `bucket_flows`; `sentinel_lots_immutable()` on `lots` (DELETE/TRUNCATE refused, UPDATE allowed **only** for `closed_on` — closing a lot is the FIFO disposal lifecycle); **RLS enabled on all 18 tables**, no policies, so anon/authenticated are denied and the owner role bypasses |
 | `migrations/0005_canonical_instrument.sql` | `instruments.canonical_id` column + index — the C-A reconciliation key. Live source wins per `(canonical_id, account)`; seed fills gaps; seed fallback when live stops reporting |
+| `migrations/0007_bond_maturity.sql` | adds `maturity_date`, `face_value_paise`, `coupon_rate_bps` to `instruments` for bond maturity tracking |
+| `migrations/0008_bond_units.sql` | adds `units` column to `instruments` for bond unit counts |
+| `migrations/0009_amfi_scheme_code.sql` | adds `scheme_code` column to `instruments` for AMFI MF scheme code mapping |
 | `migrations/0009_web_uploads.sql` | `web_uploads` queue (uuid pk, kind check, status check, proposals jsonb, summary, error, resolved_at). `sentinel_web_uploads_immutable()` trigger allows only status/summary/resolved_at updates. DELETE/TRUNCATE blocked via `sentinel_append_only()`. RLS enabled. Idempotent — triggers guarded in DO blocks (pg_trigger name checks), safe to re-apply |
+| `migrations/0010_phase1_quotes.sql` | `prices_eod`, `index_prices_eod`, `navs`, `holidays` — Phase 1 quote tables. prices_eod/index_prices_eod allow corrections; navs append-only. RLS on all. |
+| `migrations/0008_phase1_intel.sql` | `watchlist`, `screener_uploads`, `fundamentals`, `signal_scores`, `recommendations`, `suppressed_actions`, `benchmarks` — Phase 1 intel tables. All append-only + RLS. |
 
 ## Phase 1 (planned — see `2026-09-05-sentinel-phase-1.md`)
 
 | File | Role |
 |---|---|
-| `src/sources/bhavcopy.ts` | NSE EQ + index bhavcopy download/parse → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, not created) |
-| `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) |
-| `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) |
+| `src/sources/bhavcopy.ts` | NSE EQ + index bhavcopy download/parse → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, not created) — **implemented 2026-09-11** |
+| `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) — **implemented 2026-09-11** |
+| `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) — **implemented 2026-09-11** |
 | `src/sources/llm-narration.ts` | OpenRouter narrative step (PRD 6.7) — never originates numbers; env `WEEKLY_LLM_MODEL` |
 | `src/domain/engine.ts` | §6 satellite composite: quality gate (ROCE/FCF/D-E/red-flags) then valuation 30 / trend 30 / earnings 20 / fit 20; MF ranking (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10) |
 | `src/domain/alloc-engine.ts` | §6.4 monthly drift + tax-aware rebalance rec; April annual proposal (FR-13) |
 | `src/domain/sell-triggers.ts` | §6.5 triggers 1–5,7 monthly; 6 = documented Phase 2 stub (FR-15) |
-| `src/domain/maturities.ts` | bond redemption events + 14-day digest alert (Sammaan Task 1) |
+| `src/domain/maturities.ts` | bond redemption events + 14-day digest alert (Sammaan Task 1) — **implemented 2026-09-11** |
 | `src/domain/recommendations.ts` | FR-11 builders (primary + exactly 2 alternates, ≤150w theses, IPS citations), FR-12 caps + 3 overrides, suppressions |
 | `src/domain/scoring.ts` | §13 benchmark-at-creation + 3/6/12-mo eval snapshots (harness; accrues over time) |
 | `src/notify/report.ts` | weekly deep report composition (FR-51): signal review / watchlist changes / rec pipeline / suppressed log / staleness |
@@ -135,8 +140,10 @@ that caught the /cost line-number mismatch and the partial-confirm double-write.
 (5 tests) drive the Fidelity RSU flow against real PGlite + a seeded `rsu_grants` table and a
 stubbed Telegram (only `fx.js` mocked; screenshots pre-written so `saveStatementPhoto`
 short-circuits); `tests/notify/digest.test.ts` carries the ACTUAL-filter guard "no double
-forecast". Suite as of 2026-09-05: **449 passed / 1 stale-red** (the digest.yml-`workflow_run`
-cron assertion — surfaced, decision pending) across 59 files.
+forecast" and maturity alert tests. `tests/sources/bhavcopy.test.ts` (8 tests) covers
+parsing + ingestion with mutation checks. `tests/sources/amfi.test.ts` (6 tests) covers
+parsing + ingestion with mutation checks. `tests/sources/screener.test.ts` (8 tests) covers
+parsing + ingestion with mutation checks. Suite: **470 passed** across 64 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic

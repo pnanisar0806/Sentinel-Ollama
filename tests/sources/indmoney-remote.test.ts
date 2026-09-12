@@ -147,6 +147,7 @@ describe('RemoteIndmoneySource', () => {
     const { rows } = await source(stubOnce(capture('BOND')), ['BOND']).fetch();
 
     const seededIsins = SEED_INSTRUMENTS
+      .filter((i) => i.kind === 'BOND')
       .map((i) => i.isin)
       .filter((x): x is string => typeof x === 'string');
     expect(seededIsins.length).toBeGreaterThan(0);

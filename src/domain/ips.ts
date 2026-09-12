@@ -62,16 +62,14 @@ export async function installIps(
 export async function currentIps(
   db: Db,
 ): Promise<{ version: number; fullText: string; effectiveAt: string }> {
-  const [row] = await db.query<{ version: number; full_text: string; effective_at: string }>(
+  const [row] = await db.query<{ version: number; full_text: string; effective_at: string | null }>(
     'select version, full_text, effective_at from ips_versions order by version desc limit 1',
   );
   if (!row) throw new Error('no IPS installed — run installIps() before generating anything');
   return {
     version: Number(row.version),
     fullText: row.full_text,
-    effectiveAt: typeof row.effective_at === 'string'
-      ? row.effective_at
-      : new Date(row.effective_at).toISOString(),
+    effectiveAt: row.effective_at ?? new Date().toISOString(),
   };
 }
 
@@ -86,4 +84,16 @@ export function ipsClause(fullText: string, clause: string): string {
 
 export function renderIps(fullText: string, clause?: string): string {
   return clause ? ipsClause(fullText, clause) : fullText;
+}
+
+export function getIpsClauseIndex(fullText: string): { id: string; text: string }[] {
+  const clauses: { id: string; text: string }[] = [];
+  const lines = fullText.split('\n');
+  for (const line of lines) {
+    const match = line.match(/^## (\d+\.\d+) /);
+    if (match && match[1]) {
+      clauses.push({ id: match[1], text: line.trim() });
+    }
+  }
+  return clauses;
 }

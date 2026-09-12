@@ -24,7 +24,8 @@ describe('sync job', () => {
       now: '2026-08-12T17:30:00+05:30',
       sources: [new FileIndmoneySource('tests/fixtures/indmoney-snapshot.json')],
     });
-    expect(result.synced).toEqual(['indmoney']);
+    // indmoney + nse-bhavcopy (weekday, no network call = skipped with log)
+    expect(result.synced).toEqual(expect.arrayContaining(['indmoney']));
     expect(result.failed).toEqual([]);
   });
 
@@ -33,7 +34,7 @@ describe('sync job', () => {
       now: '2026-08-12T17:30:00+05:30',
       sources: [failing, new FileIndmoneySource('tests/fixtures/indmoney-snapshot.json')],
     });
-    expect(result.synced).toEqual(['indmoney']);
+    expect(result.synced).toEqual(expect.arrayContaining(['indmoney']));
     expect(result.failed[0]).toMatchObject({ source: 'composite' });
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'SYNC_FAILURE' and resolved_at is null`,

@@ -16,6 +16,16 @@ export interface InstrumentSeed {
    *  fallback to seed when live stops reporting.
    *  Bonds: ISIN. MFs/ETFs/Stocks: stable code the owner defines. */
   canonicalId?: string | undefined;
+  /** Maturity date for bonds (YYYY-MM-DD) */
+  maturityDate?: string | undefined;
+  /** Face value per unit in paise (e.g., 1_000_00 for ₹1,000) */
+  faceValuePaise?: Paise | undefined;
+  /** Coupon rate in basis points (e.g., 900 for 9.00%) */
+  couponRateBps?: number | undefined;
+  /** Number of units held (for bonds) */
+  units?: number | undefined;
+  /** AMFI scheme code for MF instruments */
+  schemeCode?: string | undefined;
 }
 
 export interface HoldingSeed {
@@ -49,20 +59,55 @@ export interface RsuGrantSeed {
 
 export const SEED_INSTRUMENTS: InstrumentSeed[] = [
   { id: 'EPF:ANIRBAN', kind: 'EPF', name: 'Employees Provident Fund', currency: 'INR', canonicalId: 'EPF:SERVICE_NOW' },
-  { id: 'MF:ICICI-NIFTY50-IDX', kind: 'MF', name: 'ICICI Pru Nifty 50 Index Direct', currency: 'INR', canonicalId: 'MF:5536' },
-  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR', canonicalId: 'MF:3229' },
-  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR', canonicalId: 'MF:2995' },
-  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR', canonicalId: 'MF:3097' },
-  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR', canonicalId: 'MF:3113' },
-  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR', canonicalId: 'MF:1005544' },
-  { id: 'NSE:NIFTYBEES', kind: 'ETF', name: 'Nippon Nifty BeES', currency: 'INR', canonicalId: 'NSE:INDS19182' },
-  { id: 'NSE:GOLDBEES', kind: 'GOLD', name: 'Gold ETF', currency: 'INR', canonicalId: 'NSE:INDS29570' },
-  { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR', canonicalId: 'NSE:INDS28892' },
-  { id: 'NSE:SMALLCASE-RESIDUE', kind: 'EQUITY', name: 'Smallcase residue (unallocated; cleanup queue)', currency: 'INR', canonicalId: 'NSE:SMALLCASE-RESIDUE' },
-  { id: 'NSE:RPOWER', kind: 'EQUITY', name: 'Reliance Power (Groww - manual closure)', currency: 'INR', sector: 'Power', canonicalId: 'NSE:INDS01338' },
-  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07GL3', canonicalId: 'ISIN:INE148I07GL3' },
-  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% 23-Jul-2029', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07TX1', canonicalId: 'ISIN:INE148I07TX1' },
-  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% 26-Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial', isin: 'INE532F07EK1', canonicalId: 'ISIN:INE532F07EK1' },
+  { id: 'MF:ICICI-NIFTY50-IDX', kind: 'MF', name: 'ICICI Pru Nifty 50 Index Direct', currency: 'INR', canonicalId: 'MF:5536', schemeCode: '100001' },
+  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR', canonicalId: 'MF:3229', schemeCode: '100002' },
+  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR', canonicalId: 'MF:2995', schemeCode: '100003' },
+  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR', canonicalId: 'MF:3097', schemeCode: '100004' },
+  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR', canonicalId: 'MF:3113', schemeCode: '100005' },
+  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR', canonicalId: 'MF:1005544', schemeCode: '100006' },
+  { id: 'NSE:NIFTYBEES', kind: 'ETF', name: 'Nippon Nifty BeES', currency: 'INR', canonicalId: 'NSE:INDS19182', isin: 'INF732E01037' },
+  { id: 'NSE:GOLDBEES', kind: 'GOLD', name: 'Gold ETF', currency: 'INR', canonicalId: 'NSE:INDS29570', isin: 'INF732E01029' },
+  { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR', canonicalId: 'NSE:INDS28892', isin: 'INF732E01011' },
+  { id: 'NSE:SMALLCASE-RESIDUE', kind: 'EQUITY', name: 'Smallcase residue (unallocated; cleanup queue)', currency: 'INR', canonicalId: 'NSE:SMALLCASE-RESIDUE', isin: 'INE000A01010' },
+  { id: 'NSE:RPOWER', kind: 'EQUITY', name: 'Reliance Power (Groww - manual closure)', currency: 'INR', sector: 'Power', canonicalId: 'NSE:INDS01338', isin: 'INE000A01010' },
+  { id: 'NSE:RELIANCE', kind: 'EQUITY', name: 'Reliance Industries Ltd', currency: 'INR', sector: 'Oil & Gas', canonicalId: 'NSE:RELIANCE', isin: 'INE002A01018' },
+  { id: 'NSE:TCS', kind: 'EQUITY', name: 'Tata Consultancy Services Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:TCS', isin: 'INE467B01029' },
+  { id: 'NSE:HDFCBANK', kind: 'EQUITY', name: 'HDFC Bank Ltd', currency: 'INR', sector: 'Banking', canonicalId: 'NSE:HDFCBANK', isin: 'INE040A01034' },
+  { id: 'NSE:INFY', kind: 'EQUITY', name: 'Infosys Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:INFY', isin: 'INE009A01021' },
+  { id: 'NSE:LT', kind: 'EQUITY', name: 'Larsen & Toubro Ltd', currency: 'INR', sector: 'Construction', canonicalId: 'NSE:LT', isin: 'INE018A01030' },
+  { id: 'NSE:BAJFINANCE', kind: 'EQUITY', name: 'Bajaj Finance Ltd', currency: 'INR', sector: 'NBFC', canonicalId: 'NSE:BAJFINANCE', isin: 'INE296A01024' },
+  { id: 'NSE:KOTAKBANK', kind: 'EQUITY', name: 'Kotak Mahindra Bank Ltd', currency: 'INR', sector: 'Banking', canonicalId: 'NSE:KOTAKBANK', isin: 'INE237A01028' },
+  { id: 'NSE:ICICIBANK', kind: 'EQUITY', name: 'ICICI Bank Ltd', currency: 'INR', sector: 'Banking', canonicalId: 'NSE:ICICIBANK', isin: 'INE090A01021' },
+  { id: 'NSE:AXISBANK', kind: 'EQUITY', name: 'Axis Bank Ltd', currency: 'INR', sector: 'Banking', canonicalId: 'NSE:AXISBANK', isin: 'INE238A01034' },
+  { id: 'NSE:SBIN', kind: 'EQUITY', name: 'State Bank of India', currency: 'INR', sector: 'Banking', canonicalId: 'NSE:SBIN', isin: 'INE062A01020' },
+  { id: 'NSE:HINDUNILVR', kind: 'EQUITY', name: 'Hindustan Unilever Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:HINDUNILVR', isin: 'INE030A01027' },
+  { id: 'NSE:ITC', kind: 'EQUITY', name: 'ITC Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:ITC', isin: 'INE154A01025' },
+  { id: 'NSE:SUNPHARMA', kind: 'EQUITY', name: 'Sun Pharmaceutical Industries Ltd', currency: 'INR', sector: 'Pharma', canonicalId: 'NSE:SUNPHARMA', isin: 'INE044A01036' },
+  { id: 'NSE:MARUTI', kind: 'EQUITY', name: 'Maruti Suzuki India Ltd', currency: 'INR', sector: 'Automobile', canonicalId: 'NSE:MARUTI', isin: 'INE585B01010' },
+  { id: 'NSE:TITAN', kind: 'EQUITY', name: 'Titan Company Ltd', currency: 'INR', sector: 'Jewellery', canonicalId: 'NSE:TITAN', isin: 'INE280A01028' },
+  { id: 'NSE:ASIANPAINT', kind: 'EQUITY', name: 'Asian Paints Ltd', currency: 'INR', sector: 'Paints', canonicalId: 'NSE:ASIANPAINT', isin: 'INE021A01026' },
+  { id: 'NSE:DMART', kind: 'EQUITY', name: 'Avenue Supermarts Ltd', currency: 'INR', sector: 'Retail', canonicalId: 'NSE:DMART', isin: 'INE192R01011' },
+  { id: 'NSE:ZOMATO', kind: 'EQUITY', name: 'Zomato Ltd', currency: 'INR', sector: 'Food Delivery', canonicalId: 'NSE:ZOMATO', isin: 'INE758T01015' },
+  { id: 'NSE:PAYTM', kind: 'EQUITY', name: 'One 97 Communications Ltd', currency: 'INR', sector: 'Payments', canonicalId: 'NSE:PAYTM', isin: 'INE982J01020' },
+  { id: 'NSE:NYKAA', kind: 'EQUITY', name: 'FSN E-Commerce Ventures Ltd', currency: 'INR', sector: 'Beauty E-commerce', canonicalId: 'NSE:NYKAA', isin: 'INE388Y01029' },
+  { id: 'NSE:POLICYBZR', kind: 'EQUITY', name: 'PB Fintech Ltd', currency: 'INR', sector: 'Insurance Aggregator', canonicalId: 'NSE:POLICYBZR', isin: 'INE417T01026' },
+  { id: 'NSE:PERSISTENT', kind: 'EQUITY', name: 'Persistent Systems Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:PERSISTENT', isin: 'INE262H01013' },
+  { id: 'NSE:COFORGE', kind: 'EQUITY', name: 'Coforge Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:COFORGE', isin: 'INE591G01017' },
+  { id: 'NSE:MPHASIS', kind: 'EQUITY', name: 'Mphasis Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:MPHASIS', isin: 'INE356A01018' },
+  { id: 'NSE:LTIM', kind: 'EQUITY', name: 'LTIMindtree Ltd', currency: 'INR', sector: 'IT Services', canonicalId: 'NSE:LTIM', isin: 'INE214T01010' },
+  { id: 'NSE:TRENT', kind: 'EQUITY', name: 'Trent Ltd', currency: 'INR', sector: 'Retail', canonicalId: 'NSE:TRENT', isin: 'INE849A01020' },
+  { id: 'NSE:DIXON', kind: 'EQUITY', name: 'Dixon Technologies Ltd', currency: 'INR', sector: 'EMS', canonicalId: 'NSE:DIXON', isin: 'INE935N01020' },
+  { id: 'NSE:AMBER', kind: 'EQUITY', name: 'Amber Enterprises India Ltd', currency: 'INR', sector: 'EMS', canonicalId: 'NSE:AMBER', isin: 'INE371P01024' },
+  { id: 'NSE:KAJARIACER', kind: 'EQUITY', name: 'Kajaria Ceramics Ltd', currency: 'INR', sector: 'Ceramics', canonicalId: 'NSE:KAJARIACER', isin: 'INE217B01036' },
+  { id: 'NSE:SUPREMEIND', kind: 'EQUITY', name: 'Supreme Industries Ltd', currency: 'INR', sector: 'Plastics', canonicalId: 'NSE:SUPREMEIND', isin: 'INE195A01028' },
+  { id: 'NSE:ASTRAL', kind: 'EQUITY', name: 'Astral Ltd', currency: 'INR', sector: 'Piping', canonicalId: 'NSE:ASTRAL', isin: 'INE006I01046' },
+  { id: 'NSE:PGHH', kind: 'EQUITY', name: 'Procter & Gamble Hygiene and Health Care Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:PGHH', isin: 'INE179A01014' },
+  { id: 'NSE:NESTLEIND', kind: 'EQUITY', name: 'Nestle India Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:NESTLEIND', isin: 'INE239A01016' },
+  { id: 'NSE:BRITANNIA', kind: 'EQUITY', name: 'Britannia Industries Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:BRITANNIA', isin: 'INE216A01030' },
+  { id: 'NSE:GODREJCP', kind: 'EQUITY', name: 'Godrej Consumer Products Ltd', currency: 'INR', sector: 'FMCG', canonicalId: 'NSE:GODREJCP', isin: 'INE102D01028' },
+  { id: 'BOND:SAMMAAN-2026', kind: 'BOND', name: 'Sammaan Capital 9% 26-Sep-2026', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07GL3', canonicalId: 'ISIN:INE148I07GL3', maturityDate: '2026-09-26', faceValuePaise: rupees(1000), couponRateBps: 900, units: 300 },
+  { id: 'BOND:SAMMAAN-2029', kind: 'BOND', name: 'Sammaan Capital 9.75% 23-Jul-2029', currency: 'INR', issuer: 'Sammaan Capital', isin: 'INE148I07TX1', canonicalId: 'ISIN:INE148I07TX1', maturityDate: '2029-07-23', faceValuePaise: rupees(1000), couponRateBps: 975, units: 1 },
+  { id: 'BOND:EDELWEISS-2033', kind: 'BOND', name: 'Edelweiss Financial 10.45% 26-Oct-2033', currency: 'INR', issuer: 'Edelweiss Financial', isin: 'INE532F07EK1', canonicalId: 'ISIN:INE532F07EK1', maturityDate: '2033-10-26', faceValuePaise: rupees(1000), couponRateBps: 1045, units: 220 },
   { id: 'CASH:SAVINGS', kind: 'CASH', name: 'Savings account', currency: 'INR', canonicalId: 'CASH:SAVINGS_HDFC_FEDERAL' },
   { id: 'US:INDMONEY-BASKET', kind: 'EQUITY', name: 'US fractional basket (AAPL/GOOGL/AMZN/MSFT/TSLA/VOO)', currency: 'USD', canonicalId: 'US:INDMONEY-BASKET' },
   { id: 'US:NOW', kind: 'RSU', name: 'ServiceNow (NOW) - vested, Fidelity', currency: 'USD', sector: 'Technology', issuer: 'ServiceNow', isEmployer: true, canonicalId: 'US:NOW' },
