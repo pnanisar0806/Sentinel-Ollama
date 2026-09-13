@@ -369,3 +369,38 @@ avs table allows corrections (no append-only trigger).
 - Note: `announceMaturity` takes the routing decision as DATA rather than calling
   `maturityRoutingRec`, so this sizing module never reaches `buckets.ts` → `funded-status.ts`.
   Same firewall lesson as Task 9, applied before the test had to catch it.
+
+## 2026-09-13 (Phase 1 Task 11 — weekly deep report, narration, Sunday 10:00 IST)
+
+- **Phase 1 Task 11 complete, and the Phase 1 DoD is met.** `src/notify/report.ts`
+  (`buildReportInput` + pure `composeReport`/`reportBullets`), `src/jobs/report.ts`
+  (`pnpm report [--as-of YYYY-MM-DD]`), `src/sources/llm-narration.ts`.
+- **DoD proof, both halves, in `tests/notify/report.test.ts`:** with fresh seeded state the
+  report carries fully-formed paper recommendations — primary + exactly 2 alternates, every
+  thesis inside 150 words, every IPS citation checked against the rendered index — and every
+  data timestamp on the page (as-of, generated-at, each source's own `as_of`). Then the ONLY
+  change is the price feed ageing past its limit: the name leaves the scored set, leaves every
+  live recommendation, and appears under staleness with `bhavcopy … against a 24h limit`. The
+  diff between the two reports is the proof, and dropping the filter turns the test red.
+- **New rule the DoD forced out:** FR-31 is not only about *generating* a recommendation. One
+  raised last week on data that has since gone stale is not actionable either, so open
+  recommendations whose instrument is blocked today move to `pipeline.withheld` and are shown
+  under staleness. They are withheld, not deleted — silence would be worse than either.
+- **Narration (§6.7) cannot corrupt a number.** `narrate` receives the finished engine output
+  and returns prose; nothing feeds back. No key, a non-200, or a throw all return `null` and the
+  report ships its deterministic bullets. The report build never touches the network in tests.
+- **Owner signed off on the cadence change (2026-09-13): weekly moves Sat 08:00 → Sunday 10:00
+  IST** (`30 4 * * 0`, PRD §12.2). `workflow-schedule.test.ts` is **re-derived from the new
+  YAML** — it converts the cron to IST and reads back Sunday 10:00 rather than restating the
+  string — and now also pins the digest's `workflow_run` gating, replacing the assertion that
+  was deleted (and reported, never silently edited) when the digest left its fixed cron.
+- **`src/jobs/weekly.ts` and `pnpm weekly` are retired.** The old job sent the daily digest plus
+  a TODO where this report belonged; leaving it would have left two weekly entrypoints to drift.
+  `report.ts` took over the dashboard write, and `weekly.yml` runs `pnpm report`.
+- **Firewall, again:** `jobs/report.ts` replaced `jobs/weekly.ts` on the funded-status allowlist
+  (a reporting entrypoint, reaching it only through maturity routing), and a NEW assertion keeps
+  `notify/report.ts` — which drives the sizing engines — permanently off that list.
+- `GSEC_YIELD_PCT` blank/absent means "not configured": the report states the signal review did
+  not run rather than scoring against `Number('') === 0`, a 0% risk-free rate that would make
+  every name look cheap. Documented in `.env.example`; `weekly.yml` passes it as a repo var.
+- 14 tests. Suite **551 passed**, `tsc --noEmit` clean.

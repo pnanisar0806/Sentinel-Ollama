@@ -15,7 +15,7 @@ src/           implementation
 web/           local product app (Next.js 15) — pulled forward 2026-09-05; read-only, port 3001
 tests/         vitest, mirrors src/ layout
 docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do not read whole)
-docs/superpowers/plans/2026-09-05-sentinel-phase-1.md   Phase 1 ("Think") plan — 13 tasks, written 2026-09-05 (under review; not yet executed)
+docs/superpowers/plans/2026-09-05-sentinel-phase-1.md   Phase 1 ("Think") plan — 13 tasks, written 2026-09-05; tasks 1-11 executed (11A superseded by `web/`), 12-13 open
 docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflows)
 .superpowers/sdd/2026-08-12-sentinel-phase-0/           SDD workspace: briefs, review diffs, progress.md
 ```
@@ -57,7 +57,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/notify/telegram-bot.ts` | `TelegramBot`, `displayOrder(positions)`, `resolveProposalTarget(proposals, positions)` — long-polling command bot (`/sync`, `/status`, `/holdings`, `/cost`, `/confirm`, `/reject`, `/fidelity`, `/help`), owner-locked; builds sync sources from the exported `indmoneySource`. Statement photos: single images extract immediately; **albums buffer by `media_group_id`** and flush as one multi-page LLM pass after a short silence. Cost proposals queue until the owner replies `/confirm`; confirmed AND skipped entries leave the queue (a repeat confirm used to double-write). `/holdings` and `/cost` share `displayOrder` — two divergent orderings once wrote a cost to the wrong instrument. Without `LLM_API_KEY` photos are archived and the bot walks the owner through manual `/cost`. **Fidelity RSU path (2026-09-05):** `/fidelity` or an upload hitting `handleFidelity` → `extractRsuVestsFromImage` → `fidelityVestsToProposals` priced at live FX → queued in `fidelityPending`; `/confirm <#>|all` dispatches to the fidelity queue first and writes ACTUAL `rsu_vests` via a PROJECTED `persistVests` ensure + `confirmVest` (grants never auto-created; missing-grant and confirmed entries are consumed so later cost confirms are never blocked); `/reject` clears both queues. Entrypoint is `jobs/telegram-bot.ts` only |
 | `src/jobs/keepalive.ts` | CLI entrypoint — weekly `audit_log` insert to keep the Supabase free tier awake (it is a DB write, not an HTTP ping) |
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
-| `src/jobs/weekly.ts` | CLI entrypoint — `pnpm weekly`. Loads `['telegram','crypto']` env, runs migrations + IPS install, composes weekly deep report (FR-51) with Opus 5 synthesis, sends via Telegram |
+
 
 ## Web app (`web/` — Next.js 15, pulled forward 2026-09-05)
 
@@ -112,7 +112,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/sources/bhavcopy.ts` | NSE EQ + index bhavcopy download/parse → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, not created) — **implemented 2026-09-11** |
 | `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) — **implemented 2026-09-11** |
 | `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) — **implemented 2026-09-11** |
-| `src/sources/llm-narration.ts` | OpenRouter narrative step (PRD 6.7) — never originates numbers; env `WEEKLY_LLM_MODEL` |
+| `src/sources/llm-narration.ts` | `NARRATION_PROMPT`, `DEFAULT_NARRATION_MODEL`, `narrate(deps)` — PRD 6.7 narration over OpenRouter. Receives the finished engine output and rewrites it; **nothing it returns feeds back**, so a hallucinated figure can never move a score or a size. Returns `null` (never throws) with no key or on any failure, and the report falls back to its deterministic bullets — **implemented 2026-09-13** |
 | `src/domain/engine.ts` | `SATELLITE_WEIGHTS`, `MF_WEIGHTS`, `BANDS`, `QUALITY`, `FINANCE_SECTORS`, `scoreSatellite`, `sectorMedianPe`, `rankMfs`, `persistSignalScores`, `loadEngineInputs` — §6 satellite composite (quality gate → valuation 30 / trend 30 / earnings 20 / fit 20) + MF ranking (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10). `scoreSatellite` returns **null when the name is blocked by a stale input** (FR-31) and a row with `composite: null, qualityPassed: false` when the gate fails. Returns derive from `bigint` paise / nav micros through integer bps, never a float. `gsecYieldPct` is a **required caller input** — no ingestion source exists for it — **implemented 2026-09-13** |
 | `src/domain/alloc-engine.ts` | `TAX_POLICY_NOTE`, `isRebalanceTarget`, `sellCandidates`, `rebalanceRec(state, monthYear)` — §6.4 monthly drift as a *recommendation* + the April annual proposal (FR-13). Takes the Phase 0 `NetWorth` as its basis and **throws if the positions disagree with it**; sizes every move at the drift to the nearest band edge, never past it. Tax preference is one rule — new money before a sale, trims ordered losses-first, unknown cost basis last — and `TAX_POLICY_NOTE` states what it does *not* compute. EPF is never a target in either direction (owner decision); the Kolkata property is a liability line, so it cannot reach the engine — **implemented 2026-09-13** |
 | `src/domain/sell-triggers.ts` | `evaluateExits(db, state, month)`, `ExitCandidate`, `FalsificationCondition`, `MINIMUM_HOLD_MONTHS`, `BETTER_ALTERNATIVE_MARGIN`, `LEGACY_QUEUE_STUB` — §6.5 triggers 1–5 and 7 evaluated monthly (FR-15); trigger 6 is the documented Phase 2 stub. Data is cut at **month END**, so a run reviews the whole month. Falsification conditions are read out of `recommendations.primary_rec` JSON (`{instrumentId, falsification:{metric,op,value}}`) and an **untestable condition is never an exit**. Only triggers 1–3 override IPS §3.7's 12-month hold; 4 and 5 surface with `blockedByMinimumHold` rather than being dropped. Blocked instruments (FR-31) produce nothing — **implemented 2026-09-13** |
@@ -120,8 +120,9 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/domain/maturities.ts` | `maturityRoutingRec` + a re-export of `listRedemptionsUntil`/`Redemption` from `redemptions.ts`; 14-day digest alert (Sammaan Task 1) — **implemented 2026-09-11, reader split out 2026-09-13** |
 | `src/domain/recommendations.ts` | `buildRecommendation`, `validateRecommendation`, `announceMaturity`, `gateRecommendation`, `persistRecommendation`, `isPaperMode`, `scanForExecutionPaths`, `MAX_THESIS_WORDS`/`MAX_RECS_PER_MONTH`/`MIN_HOLD_MONTHS`/`OVERRIDE_EVENTS`/`INDEX_ROUTE_INSTRUMENT` — FR-11 objects (primary + **exactly 2** alternates: A1 same intent/different instrument or the index route, A2 a different intent defaulting to do-nothing; ≤150-word theses; every `ips_clause_refs` entry checked against `getIpsClauseIndex`). FR-12 caps (≤4/month, 12-month repeat-BUY hold, 3 override events) **log to `suppressed_actions` rather than dropping**. Paper mode defaults TRUE when the rail is absent. `primary_rec` is written in the shape `sell-triggers` reads back — **implemented 2026-09-13** |
 | `src/domain/scoring.ts` | §13 benchmark-at-creation + 3/6/12-mo eval snapshots (harness; accrues over time) |
-| `src/notify/report.ts` | weekly deep report composition (FR-51): signal review / watchlist changes / rec pipeline / suppressed log / staleness |
-| `src/jobs/report.ts`, `src/jobs/screener-import.ts` | `pnpm report` (weekly, Sunday 10:00 IST pending sign-off), `pnpm screener:import <csv>` |
+| `src/notify/report.ts` | `buildReportInput(db, asOf, opts)` + pure `composeReport`/`reportBullets`, `MAX_LIST_ITEMS`, `REDEMPTION_HORIZON_DAYS` — FR-51's five sections (signal review / watchlist changes / recommendation pipeline / staleness / narrative). Runs the week's pipeline: scores, sizes, gates and persists. **Withholds an open recommendation whose instrument is blocked today** into `pipeline.withheld`. Same impure-gather / pure-compose split as `digest.ts`, and deliberately NOT on the funded-status allowlist — **implemented 2026-09-13** |
+| `src/jobs/report.ts` | CLI entrypoint — `pnpm report [--as-of YYYY-MM-DD]`. Replaces the retired `pnpm weekly`. Assembles maturity ROUTING recommendations (the one thing that reads bucket status) and hands them to `buildReportInput` as data, writes `docs/dashboard.html`, sends via Telegram. `parseGsecYield` treats a blank env var as unconfigured, never 0% — **implemented 2026-09-13** |
+| `src/jobs/screener-import.ts` | `pnpm screener:import <csv>` |
 | `migrations/0007_phase1_quotes.sql`, `0008_phase1_intel.sql` | prices_eod / index_prices_eod / navs / holidays; watchlist / screener_uploads / fundamentals / signal_scores / recommendations / suppressed_actions — all append-only + RLS |
 
 ## Tests
@@ -153,7 +154,9 @@ shortfall, the tax preference and the April proposal. `tests/domain/sell-trigger
 round-trip through an appended `recommendations` row. `tests/domain/recommendations.test.ts`
 (17 tests) asserts both the acceptance and the rejection path of the FR-11 validator, the FR-12
 caps against stored rows, and a cross-task round-trip proving Task 9 reads what Task 10 writes.
-Suite: **532 passed** across 66 files.
+`tests/notify/report.test.ts` (13 tests) carries the **Phase 1 DoD**: a fully-formed paper
+recommendation with every timestamp shown, and a diff proving a deliberately stale price keeps
+a name out of every live recommendation. Suite: **551 passed** across 67 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic
@@ -183,7 +186,7 @@ the allowlist there, or the suite goes red.
 | `.github/workflows/ci.yml` | on push + PR | `tsc --noEmit` then `pnpm test`. Nothing enforced the suite before |
 | `.github/workflows/sync.yml` | `0 12 * * *` — **daily** | Weekday-only left the Monday digest reading Friday's data, 63.25h against a 36h limit |
 | `.github/workflows/digest.yml` | `workflow_run` on **sync success** — no fixed cron | Daily digest (FR-50), now runs after the day's sync completes so it never reads stale snapshots; a failed sync = no digest that day. Manual `workflow_dispatch` remains |
-| `.github/workflows/weekly.yml` | `30 2 * * 6` — **Sat 08:00 IST** | Weekly deep report (FR-51); supplement to daily |
+| `.github/workflows/weekly.yml` | `30 4 * * 0` — **Sun 10:00 IST** | Weekly deep report (FR-51) via `pnpm report`. Moved from Sat 08:00 per PRD 12.2 with owner sign-off 2026-09-13 |
 | `.github/workflows/keepalive.yml` | `0 4 * * 0` | Largely subsumed by the daily sync; kept as a belt-and-braces Supabase ping |
 
 None of them pin a pnpm `version:` — `package.json`'s `packageManager` is the single
@@ -191,7 +194,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 
 ## Scripts
 
-`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `weekly` · `ips` ·
+`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` ·
 `telegram:bot` · `indmoney:login` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
 
 `indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`

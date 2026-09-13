@@ -117,6 +117,23 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 11 — weekly deep report + narration + SUNDAY 10:00 IST — DONE 2026-09-13.**
+      `src/notify/report.ts` (`buildReportInput` + pure `composeReport`) renders FR-51's five
+      sections; `src/jobs/report.ts` is the CLI (`pnpm report [--as-of YYYY-MM-DD]`);
+      `src/sources/llm-narration.ts` is the PRD 6.7 narration step (no key or any failure →
+      `null` → deterministic bullets; **nothing it returns feeds back into the engine**).
+      **PHASE 1 DoD MET:** the report carries a fully-formed paper recommendation (primary + 2
+      alternates, ≤150w theses, real IPS citations) with every data timestamp shown, and a
+      deliberately stale price keeps that name out of every live recommendation — proven by a
+      diff between the two reports, and mutation-checked.
+      **Owner sign-off applied: weekly moved Sat 08:00 → Sunday 10:00 IST** (`30 4 * * 0`, PRD
+      §12.2). `workflow-schedule.test.ts` is re-derived from the new YAML — it now converts the
+      cron to IST and reads back Sunday 10:00, and pins the digest's `workflow_run` gating in
+      place of the assertion deleted earlier. `pnpm weekly` and `src/jobs/weekly.ts` are RETIRED
+      (one weekly entrypoint, so the two cannot drift). 14 tests, **551 passed**, tsc clean.
+      **New:** an open recommendation whose instrument is blocked today is *withheld*, not
+      listed as actionable — FR-31 applies to yesterday's recommendations too.
+
 - [x] **Phase 1 Task 10 — FR-11/FR-12 recommendation objects + paper mode — DONE 2026-09-13.**
       `src/domain/recommendations.ts`: `buildRecommendation` (primary + exactly 2 alternates —
       A1 same intent/different instrument or the **index route** fallback, A2 a different intent
@@ -186,10 +203,11 @@ MEMORY.md; the code map lives in index.md.
 
 ## Waiting on OWNER
 
-- [ ] **Phase 1 plan review + sign-off** — `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`
-      (scope calls 1–7 on the first page; esp. the weekly cadence change Sat→Sunday 10:00 IST
-      per PRD §12.2, Task 11) and the ~40-name starter watchlist (Task 6 seed, before the
-      first weekly report)
+- [x] **Weekly cadence Sat 08:00 → Sunday 10:00 IST — SIGNED OFF 2026-09-13, shipped in Task 11.**
+- [ ] **Starter watchlist review** — the ~40 advisor-seeded names in `src/seed/seed-watchlist.ts`
+      (Task 6) are unreviewed; they drive what the weekly report scores.
+- [ ] **Phase 1 plan review** — `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`
+      scope calls 1–7 on the first page.
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
@@ -213,13 +231,14 @@ MEMORY.md; the code map lives in index.md.
   sync **concludes successfully**. Trade-off accepted: a failed sync = no digest that day.
   Sync cron unchanged `0 12 * * *` (17:30 IST) and slips by hours → digest fires whenever
   sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Sundays
-   09:30 IST unchanged. **Weekly → Sunday 10:00 IST pending Phase 1 Task 11 + owner sign-off.**
+   09:30 IST unchanged. **Weekly is now Sunday 10:00 IST (`30 4 * * 0`) running `pnpm report`** —
+  owner signed off 2026-09-13; `pnpm weekly` no longer exists.
 - **Secrets hygiene.** `TOKEN_ENCRYPTION_KEY` **rotated 2026-09-07** (new key in `.env` +
   GH Actions secret; the key-printing `recover-key.yml` written during the recovery attempt
   was deleted unrun). **`pnpm indmoney:login` re-run and verified** — tokens decrypt against
   the new key, scope `portfolio:read`, refresh token present; the rotation loop is closed.
   Telegram bot token and Supabase DB password remain as-is (owner decision: not rotating).
-- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sat 08:00 IST** (`30 2 * * 6`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
+- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sun 10:00 IST** (`30 4 * * 0`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
 - The interactive bot (`pnpm telegram:bot`) runs locally only — commands, photo uploads,
   confirms need it awake. Digests/syncs do not.
 - When extraction misbehaves: check `lots` audit trail (`action='ingest'` /
@@ -249,7 +268,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode**: `domain/recommendations.ts` (builder + validator, caps → `suppressed_actions`, paper mode, execution-path scan), 17 tests; 532 passed, tsc clean |
+| *(this session)* | **Phase 1 Task 11 — weekly deep report (FR-51)**: `notify/report.ts` + `jobs/report.ts` + `sources/llm-narration.ts`, weekly cron → Sunday 10:00 IST, `pnpm weekly` retired, schedule test re-derived, 14 tests; **Phase 1 DoD met**; 551 passed |
+| `e9ec6e5` | **Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode**: `domain/recommendations.ts` (builder + validator, caps → `suppressed_actions`, paper mode, execution-path scan), 17 tests; 532 passed, tsc clean |
 | `b081ee9` | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |
 | `08c296f` | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
 | `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |

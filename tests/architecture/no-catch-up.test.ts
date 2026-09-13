@@ -83,7 +83,11 @@ const ALLOWED = new Set([
   'src/notify/digest.ts',    // renders funded status to the owner
   'src/notify/dashboard.ts', // renders HTML dashboard with funded status
   'src/jobs/digest.ts',      // the digest CLI entrypoint
-  'src/jobs/weekly.ts',      // the weekly deep report CLI entrypoint
+  // The FR-51 weekly report CLI (replaced jobs/weekly.ts, 2026-09-13). It reaches funded
+  // status only through maturity ROUTING, which reports bucket allocation. The report's
+  // own composition — `notify/report.ts`, which drives the sizing engines — is NOT on this
+  // list and must never be: that is where the firewall actually has to hold.
+  'src/jobs/report.ts',
   'src/ui/render.ts',        // local preview: renders the report + digest to the owner, never sizes
   'src/ui/server.ts',        // local preview: serving entrypoint over render.ts
   'src/domain/maturities.ts', // maturity routing for digest; reports bucket allocation, never sizes
@@ -121,6 +125,13 @@ describe('funded_status is unreadable outside the reporting surface', () => {
     // A stale entry is a licence granted to a module that no longer needs it, and it
     // is how an allowlist quietly stops meaning anything.
     expect([...ALLOWED].sort()).toEqual([...reachers()].sort());
+  });
+
+  it('keeps the weekly report COMPOSITION off the list — it drives the sizing engines', () => {
+    // The job entrypoint is a reporting surface and is allowed; `notify/report.ts` runs
+    // the signal, allocation and exit engines, so it must never see funded status.
+    expect(ALLOWED.has('src/notify/report.ts')).toBe(false);
+    expect([...reachers()]).not.toContain('src/notify/report.ts');
   });
 
   it('no sizing, risk or order module is on the allowlist', () => {

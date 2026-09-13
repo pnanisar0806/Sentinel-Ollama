@@ -1362,3 +1362,34 @@ in the weekly report, never executed.
 - `announceMaturity` takes the routing decision as DATA instead of calling `maturityRoutingRec`,
   keeping this sizing module clear of `buckets.ts` → `funded-status.ts`. Same firewall lesson as
   Task 9, applied before the architecture test had to catch it.
+
+---
+
+## Phase 1 Task 11 — weekly deep report + narration + Sunday cadence (2026-09-13)
+
+`src/notify/report.ts` (gather + pure compose, same split as `digest.ts`), `src/jobs/report.ts`
+(`pnpm report [--as-of YYYY-MM-DD]`), `src/sources/llm-narration.ts`. **The Phase 1 DoD is met**
+— see the ledger entry for the proof.
+
+- **OWNER DECISION 2026-09-13: the weekly deep report moved Sat 08:00 IST → SUNDAY 10:00 IST**
+  (`30 4 * * 0`, PRD §12.2). Signed off explicitly; do not re-litigate.
+  `tests/jobs/workflow-schedule.test.ts` is re-derived from the YAML — it converts the cron to
+  IST and reads back Sunday 10:00 — and now also pins the digest's `workflow_run` gating, which
+  is the replacement for the assertion deleted back when the digest lost its fixed cron.
+- **`src/jobs/weekly.ts` and `pnpm weekly` are RETIRED.** `pnpm report` is the only weekly
+  entrypoint; it also writes `docs/dashboard.html` for the Pages step. Two entrypoints for one
+  job is how they drift.
+- **FR-31 covers yesterday's recommendations too.** An open recommendation whose instrument is
+  blocked *today* moves to `pipeline.withheld` and is shown under staleness: you cannot act on a
+  recommendation you cannot value. Withheld, never deleted.
+- **Narration cannot corrupt a number.** `narrate` gets the finished engine output and returns
+  prose; **nothing feeds back**. No key, non-200 or throw → `null` → the report ships its
+  deterministic bullets. A missing narrative must never cost the owner the report.
+- **`GSEC_YIELD_PCT` blank means NOT CONFIGURED, never 0.** `Number('')` is 0, and an unset
+  GitHub Actions var interpolates to `''` — a 0% risk-free rate would score every name as cheap.
+  `parseGsecYield` rejects blank/non-finite/≤0, and the report states the signal review did not
+  run. Same class of bug as the blank `DATABASE_URL` that produced a confident ₹0 digest.
+- **Firewall, third time:** `jobs/report.ts` took `jobs/weekly.ts`'s place on the funded-status
+  allowlist (a reporting entrypoint; it reaches funded status only via maturity routing), and a
+  new assertion keeps **`notify/report.ts` permanently OFF** that list — that module drives the
+  signal, allocation and exit engines, and is where the firewall actually has to hold.

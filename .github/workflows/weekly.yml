@@ -1,9 +1,10 @@
 name: weekly-report
 on:
   schedule:
-    # 02:30 UTC = 08:00 IST, Saturday (weekly deep report)
+    # 04:30 UTC = 10:00 IST, Sunday (weekly deep report, PRD 12.2).
+    # Owner signed off on the Saturday 08:00 -> Sunday 10:00 move on 2026-09-13.
     # GitHub Actions cron is best-effort — expect a few minutes of slip.
-    - cron: '30 2 * * 6'
+    - cron: '30 4 * * 0'
   workflow_dispatch:
 
 permissions:
@@ -23,12 +24,17 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm weekly
+      - run: pnpm report
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          # Optional. Absent or blank => no narration / no satellite scoring, stated in
+          # the report rather than guessed (an unset secret interpolates to '').
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          WEEKLY_LLM_MODEL: ${{ vars.WEEKLY_LLM_MODEL }}
+          GSEC_YIELD_PCT: ${{ vars.GSEC_YIELD_PCT }}
       # The weekly job writes dashboard.html to docs/
       # Upload it as a Pages artifact
       - name: Upload dashboard artifact

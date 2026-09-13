@@ -5,6 +5,7 @@ import { loadEnv, type Purpose } from '../../src/config/env.js';
 import { ENV_PURPOSES as SYNC_PURPOSES } from '../../src/jobs/sync.js';
 import { ENV_PURPOSES as DIGEST_PURPOSES } from '../../src/jobs/digest.js';
 import { ENV_PURPOSES as KEEPALIVE_PURPOSES } from '../../src/jobs/keepalive.js';
+import { ENV_PURPOSES as REPORT_PURPOSES } from '../../src/jobs/report.js';
 
 /**
  * Every scheduled job crashed on startup because it demanded credentials its own
@@ -36,6 +37,7 @@ const JOBS: Array<{ workflow: string; purposes: Purpose[] }> = [
   { workflow: 'sync.yml', purposes: SYNC_PURPOSES },
   { workflow: 'digest.yml', purposes: DIGEST_PURPOSES },
   { workflow: 'keepalive.yml', purposes: KEEPALIVE_PURPOSES },
+  { workflow: 'weekly.yml', purposes: REPORT_PURPOSES },
 ];
 
 describe('scheduled jobs start under their own workflow environment', () => {
