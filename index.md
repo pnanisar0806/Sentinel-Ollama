@@ -32,6 +32,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/money/paise.ts` | `Paise`, `Cents`, `rupees`, `paise`, `dollars`, `cents`, `addP`, `subP`, `mulP`, `pctOf`, `formatInr` |
 | `src/money/fx.ts` | `rateMicros`, `usdToInr` |
 | `src/seed/seed-data.ts` | `SEED_INSTRUMENTS`, `SEED_HOLDINGS`, `SEED_LOANS`, `SEED_BUCKETS`, `SEED_MILESTONES`, `SEED_RSU_GRANTS` — the owner's real balance sheet. All loan and bond figures are owner-verified against lender/broker portals; see `MEMORY.md`. `InstrumentSeed` carries optional `isin` (populated for the three bonds; Task 11B matches on it) |
+| `src/seed/seed-holidays.ts` | `SEED_HOLIDAYS_2026`, `seedHolidays(db)`, `isTradingDay(db, date)` — the NSE trading calendar. A weekday is open unless the calendar closes it; a weekend is closed unless the calendar OPENS it (Muhurat). **Second-hand provenance — see the docstring**; with an empty table it degrades to the weekend rule, which is wrong in the loud direction |
 | `src/seed/seed.ts` | `seed(db, opts?)` — idempotent; one snapshot per (business_date, source); writes `instruments.isin` |
 | `src/sources/types.ts` | `SourceRow`, `Source` interface, `writeSnapshot(db, source, businessDate, rows, asOf)` — single upsert path for all sources; every row carries as_of + source. **The whole write is ONE transaction** (the holdings delete precedes the inserts, so an unwrapped failure destroyed the source's holdings under an unattended daily job). Writes `isin` + `canonical_id`; on instrument conflict the **curated row wins** — only NULL fields are enriched from the payload, never `name`/`issuer` |
 | `src/sources/indmoney.ts` | `FileIndmoneySource` — reads owner-refreshed JSON snapshot (fallback / test double). `RemoteIndmoneySource`, `ASSET_TYPES` — live MCP, same `Source` interface. **Rewritten against a real capture 2026-08-22**: one `networth_holdings` call per asset class (the tool requires `asset_type`), unwraps the `{result: "<json string>"}` envelope, aggregates an instrument held across brokers, ISIN-detected instrumentId, `invested_amount` `'unknown'`/0/absent → null (FR-02), and **BOND cost is always null** because for bonds `invested_amount` is FACE VALUE, not cost (owner-verified). Throws on a rate-limit body, `holding_error`, or an unmapped `asset_type`. Staleness (Task 12) nags when file ages. Both sources emit `canonicalId` via the INDmoney→canonical map |
@@ -105,6 +106,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `migrations/0010_phase1_quotes.sql` | `prices_eod`, `index_prices_eod`, `navs`, `holidays` — Phase 1 quote tables. prices_eod/index_prices_eod allow corrections; navs append-only. RLS on all. |
 | `migrations/0008_phase1_intel.sql` | `watchlist`, `screener_uploads`, `fundamentals`, `signal_scores`, `recommendations`, `suppressed_actions`, `benchmarks` — Phase 1 intel tables. All append-only + RLS. |
 | `migrations/0011_fundamentals_as_of.sql` | `fundamentals.as_of` + drops its append-only UPDATE trigger (re-import must be able to correct a row) |
+| `migrations/0013_holiday_special_sessions.sql` | `holidays.is_special_session` — the exchange is OPEN on a day the weekend rule would skip |
 | `migrations/0012_benchmark_evals.sql` | `sentinel_benchmarks_immutable()` — UPDATE allowed on `benchmarks` **only** for the eval columns; the creation snapshot (`benchmark_as_of`, `benchmark_jsonb`) can never be rewritten, DELETE/TRUNCATE still refused. Same shape as `sentinel_lots_immutable` |
 
 ## Phase 1 (planned — see `2026-09-05-sentinel-phase-1.md`)
@@ -160,7 +162,7 @@ caps against stored rows, and a cross-task round-trip proving Task 9 reads what 
 recommendation with every timestamp shown, and a diff proving a deliberately stale price keeps
 a name out of every live recommendation. `tests/domain/scoring.test.ts` (15 tests) covers the
 §13 harness, including the database-level refusal to rewrite a creation snapshot.
-Suite: **576 passed** across 68 files.
+Suite: **581 passed** across 69 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic

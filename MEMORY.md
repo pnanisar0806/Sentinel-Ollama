@@ -1440,3 +1440,35 @@ Tasks 1–13 shipped (11A superseded by `web/`). Suite **576 passed**, `tsc` cle
 - README carries the Phase 1 handoff: the data-flow diagram, how a recommendation is built, the
   two ways it is stopped (FR-31 staleness, IPS §3.7 policy), what the engine will not invent,
   and the §15.1 provisioning table with real statuses.
+
+---
+
+## NSE trading calendar — seeded, second-hand (2026-09-13)
+
+`src/seed/seed-holidays.ts` + migration `0013`. `isTradingDay(db, date)` replaces the
+weekend-only rule in `runSync`'s EOD steps.
+
+- **The weekend rule was wrong in BOTH directions.** It asked NSE for a bhavcopy on ~15 holidays
+  a year (a loud failed step), and it would have **skipped Sunday 2026-11-08 Muhurat trading**,
+  when the exchange IS open — silently missing a day that does have data. Hence
+  `holidays.is_special_session`: a weekend the calendar marks OPEN is a trading day.
+- **PROVENANCE IS SECOND-HAND.** NSE's `/api/holiday-master` blocks non-browser clients
+  (timeout), so the 2026 list was cross-checked against Groww and Upstox, which agreed **exactly**
+  on all 15 forward dates. Groww carries one extra (2026-01-15 Maharashtra municipal election),
+  which is the 15-vs-16 count discrepancy and is already past. **Owner true-up: confirm against
+  NSE's own circular.**
+- **The asymmetry that sets the bar for adding a date:** a MISSING holiday costs one loud failed
+  sync step; a WRONG holiday silently skips a real trading day and starves every price-dependent
+  engine. When in doubt, leave it out.
+- 2026-09-14 (Ganesh Chaturthi) is a holiday, which is why the first live bhavcopy verification
+  lands on Tuesday 2026-09-15.
+
+## The starter watchlist has an LLM-origination problem (noted 2026-09-13)
+
+All 40 rows in `src/seed/seed-watchlist.ts` are `source: 'advisor'`, but **nothing curates them
+at runtime**. They are a static file whose names and one-line theses were written by an LLM in
+the Task 6 coding session from training recall, with no market data. The engine scores only what
+sits in that table, so the LLM originated the *universe* even though it never originates a score
+— which is in tension with "the LLM never originates a number or rank" (PRD 6.7). Preferred fix:
+regenerate the universe from a real screener.in cohort once the owner imports one, with his
+pruning on top. Until then, treat the list as a placeholder, not as advice.

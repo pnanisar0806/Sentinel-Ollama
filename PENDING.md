@@ -225,8 +225,13 @@ MEMORY.md; the code map lives in index.md.
 ## Waiting on OWNER
 
 - [x] **Weekly cadence Sat 08:00 → Sunday 10:00 IST — SIGNED OFF 2026-09-13, shipped in Task 11.**
-- [ ] **Starter watchlist review** — the ~40 advisor-seeded names in `src/seed/seed-watchlist.ts`
-      (Task 6) are unreviewed; they drive what the weekly report scores.
+- [ ] **Starter watchlist review — and a provenance problem.** The 40 names in
+      `src/seed/seed-watchlist.ts` are all tagged `source: 'advisor'`, but **no model curates
+      them at runtime**: it is a static file whose names and theses were written by an LLM in a
+      coding session (Task 6, 2026-09-11) from recall, with no market data in front of it. The
+      engine scores only what is in that table, so the LLM effectively originated the universe —
+      uncomfortably close to the rule that it never originates a rank. Options: prune by hand, or
+      regenerate the universe from a real screener.in cohort once imported (preferred).
 - [ ] **Phase 1 plan review** — `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`
       scope calls 1–7 on the first page.
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
@@ -237,9 +242,16 @@ MEMORY.md; the code map lives in index.md.
       (`archives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm<DD><MON><YYYY>bhav.csv.zip`)
       and the CSV column names are fixture-verified only. First live `pnpm sync` on a trading day
       settles it; a moved path raises `SYNC_FAILURE/nse-bhavcopy` rather than degrading quietly.
-- [ ] **NSE 2026 holiday calendar** — the `holidays` table is EMPTY. Only weekends are skipped,
-      so every exchange holiday costs one loud failed step. Not invented here: it needs the real
-      NSE list.
+- [ ] **NSE 2026 holiday calendar — SEEDED 2026-09-13, needs your confirmation.** 16 dates +
+      the Muhurat Sunday in `src/seed/seed-holidays.ts`. **Second-hand provenance:** NSE's own
+      `/api/holiday-master` blocks non-browser clients, so this was cross-checked against two
+      independent broker mirrors (Groww, Upstox) that agreed exactly on all 15 forward dates.
+      Confirm against NSE's "Trading Holidays — Capital Market Segment" circular. The asymmetry
+      matters: a MISSING holiday costs one loud failed step, a WRONG one silently skips a real
+      trading day and starves every price-dependent engine.
+      It also fixed a real bug: the weekend-only rule was wrong in BOTH directions — it asked
+      NSE for a file on ~15 holidays, and it would have skipped **Sunday 2026-11-08 Muhurat
+      trading**, when the exchange IS open. `isTradingDay(db, date)` now decides both.
 - [ ] **Calibration minimum N = 20** (`MIN_EVALS_FOR_CALIBRATION`). A stake in the ground, not a
       derived figure: at 4 recommendations/month it is ~half a year of output per conviction
       bucket, and below it one outcome moves the hit-rate by >5 points. Confirm or set your own.

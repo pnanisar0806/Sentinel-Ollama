@@ -7,6 +7,7 @@ import {
 import { isMainModule } from '../util/main-module.js';
 import { DEFAULT_OWNER_RAILS } from '../domain/rails.js';
 import { seedWatchlist } from './seed-watchlist.js';
+import { seedHolidays } from './seed-holidays.js';
 
 const SOURCE = 'manual-seed';
 
@@ -98,6 +99,7 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
   }
 
   await seedWatchlist(db);
+  await seedHolidays(db);
 
   // Append audit log entry on every run by design (audit trail records each seeding; this is not an idempotency issue)
   // Owner rails (settings_rails), distinct from the IPS. Idempotent: an existing rail

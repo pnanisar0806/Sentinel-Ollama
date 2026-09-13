@@ -14,6 +14,7 @@ import { assessStaleness, raiseIncidents } from '../sources/staleness.js';
 import { writeSnapshot, type Source } from '../sources/types.js';
 import { downloadBhavcopy, downloadIndexSeries, ingestPrices, type BhavcopyRow, type IndexBhavcopyRow } from '../sources/bhavcopy.js';
 import { downloadDailyNav, ingestNavs, type NavRow } from '../sources/amfi.js';
+import { isTradingDay } from '../seed/seed-holidays.js';
 import { isMainModule } from '../util/main-module.js';
 import type { Purpose } from '../config/env.js';
 
@@ -34,12 +35,6 @@ export type FxFetcher = () => Promise<{ rate: number; asOf: string; source: stri
 /** EOD quote fetchers. Injected for the same reason as FX: no network in the suite. */
 export type PriceFetcher = (tradeDate: string) => Promise<{ equity: BhavcopyRow[]; index: IndexBhavcopyRow[] }>;
 export type NavFetcher = () => Promise<{ rows: NavRow[] }>;
-
-/** Saturday or Sunday in UTC — neither NSE nor AMFI publishes. */
-function isWeekend(businessDate: string): boolean {
-  const day = new Date(`${businessDate}T00:00:00Z`).getUTCDay();
-  return day === 0 || day === 6;
-}
 
 export async function runSync(
   db: Db,
@@ -111,8 +106,8 @@ if (opts.fetchFx) {
   // skip on stderr, and the staleness engine still ages the table either way.
   if (opts.fetchPrices) {
     await step('nse-bhavcopy', async () => {
-      if (isWeekend(businessDate)) {
-        console.error(`nse-bhavcopy skipped: ${businessDate} is a weekend`);
+      if (!(await isTradingDay(db, businessDate))) {
+        console.error(`nse-bhavcopy skipped: ${businessDate} is not an NSE trading day`);
         return;
       }
       const { equity, index } = await opts.fetchPrices!(businessDate);
@@ -127,8 +122,8 @@ if (opts.fetchFx) {
 
   if (opts.fetchNavs) {
     await step('amfi', async () => {
-      if (isWeekend(businessDate)) {
-        console.error(`amfi skipped: ${businessDate} is a weekend`);
+      if (!(await isTradingDay(db, businessDate))) {
+        console.error(`amfi skipped: ${businessDate} is not an NSE trading day`);
         return;
       }
       const { rows } = await opts.fetchNavs!();
