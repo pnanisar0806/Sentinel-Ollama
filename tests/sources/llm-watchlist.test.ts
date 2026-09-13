@@ -34,11 +34,12 @@ describe('project model configuration (owner decision 2026-09-13)', () => {
     expect(DEFAULT_NARRATION_MODEL).toBe(TEXT_MODEL);
   });
 
-  it('keeps the text-only model out of the vision chain, led by its own VL sibling', () => {
+  it('keeps the text-only model out of the vision chain, led by the proven gemma pool', () => {
     // ling-3.0-flash-fin is text-only per OpenRouter's catalogue; putting it in front of a
-    // screenshot would 400 on every statement upload.
+    // screenshot would 400 on every statement upload. Owner decision 2026-09-13: extraction
+    // uses the previously-tuned gemma-led chain again (the Ling VL trial was retired).
     expect(VISION_MODEL_CHAIN).not.toContain(TEXT_MODEL);
-    expect(VISION_MODEL_CHAIN[0]).toBe('inclusionai/ling-3.0-flash-vl:free');
+    expect(VISION_MODEL_CHAIN[0]).toBe('google/gemma-4-31b-it:free');
     expect(DEFAULT_LLM_MODEL).toBe(VISION_MODEL_CHAIN[0]);
   });
 });
