@@ -32,22 +32,20 @@ describe('assessStaleness reports each source once', () => {
 });
 
 /**
- * A source with no ingestion path in Phase 0/1 is NOT stale data — it is an unbuilt
- * feature. Reporting amfi/screener as STALE made the digest print red
- * warnings after a *successful* sync and kept a BLOCK incident permanently open,
- * which trains the owner to ignore the loudest safety signal in the product.
- * bhavcopy NOW has ingestion (prices_eod) so it's stale when no data.
- * amfi NOW has ingestion (navs) so it's stale when no data.
- * screener NOW has ingestion (fundamentals) so it's stale when no data.
+ * A source with no ingestion path is NOT stale data — it is an unbuilt feature, and
+ * reporting it as STALE printed red after a *successful* sync and kept a BLOCK incident
+ * permanently open, which trains the owner to ignore the loudest safety signal.
+ * All three market sources now HAVE ingestion paths — bhavcopy (prices_eod, Task 3),
+ * amfi (navs, Task 4), screener (fundamentals, Task 6) — so an empty table is a real
+ * drought and reads as stale. The `unimplemented` state stays for the next unbuilt one.
  */
 describe('unimplemented sources are distinguished from stale ones', () => {
-  it('marks screener unimplemented, not stale; bhavcopy and amfi are stale (no data)', async () => {
+  it('reports bhavcopy, amfi and screener as stale once they have a path but no data', async () => {
     const rows = await assessStaleness(db, FRESH);
-    // screener has no ingestion path yet
     const screenerRow = rows.find((r) => r.source === 'screener');
     expect(screenerRow, `screener must still be reported`).toBeDefined();
-    expect(screenerRow!.state).toBe('unimplemented');
-    expect(screenerRow!.stale).toBe(false);
+    expect(screenerRow!.state).toBe('stale');
+    expect(screenerRow!.stale).toBe(true);
 
     // bhavcopy has ingestion path (prices_eod) but no data -> stale
     const bhavcopyRow = rows.find((r) => r.source === 'bhavcopy');
@@ -62,17 +60,19 @@ describe('unimplemented sources are distinguished from stale ones', () => {
     expect(amfiRow!.stale).toBe(true);
   });
 
-  it('raises no incident for an unimplemented source', async () => {
-    await raiseIncidents(db, await assessStaleness(db, FRESH));
+  it('raises an incident only for a source that is stale, never for an unimplemented one', async () => {
+    const rows = await assessStaleness(db, FRESH);
+    await raiseIncidents(db, rows);
     const open = await db.query<{ subject: string }>(
       "select subject from incidents where kind = 'STALE_DATA' and resolved_at is null",
     );
     const subjects = open.map((r) => r.subject);
-    // screener is unimplemented -> no incident
-    expect(subjects).not.toContain('screener');
-    // bhavcopy and amfi are stale (have ingestion paths but no data) -> incidents raised
-    expect(subjects).toContain('bhavcopy');
-    expect(subjects).toContain('amfi');
+    // Derived from the assessment, not restated: exactly the stale sources get incidents.
+    for (const r of rows) {
+      if (r.stale) expect(subjects, `${r.source} is stale`).toContain(r.source);
+      else expect(subjects, `${r.source} is ${r.state}`).not.toContain(r.source);
+    }
+    expect(subjects).toContain('screener');
   });
 
   it('still reports a real portfolio source as stale once it ages past its limit', async () => {
@@ -121,7 +121,7 @@ describe('blockedInstruments blocks on valuation inputs, not just portfolio sour
     const rows = await assessStaleness(db, FRESH);
     // Pretend FX, amfi, bhavcopy all arrived: fix all stale inputs
     const withAllFresh = rows.map((r) => {
-      if (r.source === 'frankfurter' || r.source === 'amfi' || r.source === 'bhavcopy') {
+      if (['frankfurter', 'amfi', 'bhavcopy', 'screener'].includes(r.source)) {
         return { ...r, stale: false, state: 'fresh' as const };
       }
       return r;

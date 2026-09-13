@@ -1202,3 +1202,53 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 | 7 | T6 | `persistSchedules` does `delete` + N sequential inserts, unwrapped (`src/domain/loans.ts:144–171`) — matches existing `seed.ts` convention, so genuinely cross-cutting | final fix wave |
 | 8 | T11A | `indmoney-login.ts` calls `db.close()` only on the success path, so a failed login never closes PGlite. Survived a real crash intact, so robustness not correctness | Task 15 |
 | 9 | T11B | `RemoteIndmoneySource` paces calls with a fixed 9s `spacingMs` rather than reading `retry_after_seconds` from a throttled reply | Task 15, when sync.ts wires it |
+
+---
+
+## Phase 1 Task 7 — signal engine (2026-09-13)
+
+`src/domain/engine.ts` is the §6 engine: `scoreSatellite`, `sectorMedianPe`, `rankMfs`,
+`persistSignalScores`, `loadEngineInputs`. Weights are PRD-fixed constants
+(`SATELLITE_WEIGHTS`, `MF_WEIGHTS`, `BANDS`, `QUALITY`); the components they weight are what
+the tests falsify.
+
+- **Two different "no score" shapes, on purpose.** Blocked by a stale input (FR-31) →
+  `scoreSatellite` returns **`null`**: no score exists and nothing is recorded. Quality gate
+  failed → a row with `composite: null`, `components: null`, `qualityPassed: false` and the
+  failure list, so the weekly report can say *why* a name was rejected. `signal_scores.composite`
+  is NOT NULL, so a failed row persists `0` and `quality_passed` is what carries the meaning —
+  never read a 0 composite as a score.
+- **The quality gate fails closed.** A null ROCE / FCF flag / D-E / red-flag count is a
+  *failure*, not a pass. Same posture as FR-02: an unreadable input is never inferred. Finance
+  sectors (`FINANCE_SECTORS`) waive the D/E gate only, and the waiver is recorded in `evidence`.
+- **What the engine cannot see, and says so** rather than faking: EV/EBITDA and a name's own
+  5-year P/E range (the pinned screener.in export carries neither, and one upload is one point
+  in time), so valuation rests on earnings yield vs the G-sec plus P/E vs the cohort median.
+  Missing legs score 0 *and* push a line into `evidence`.
+- **`gsecYieldPct` is a required caller input.** No ingestion source exists for the 10Y G-sec
+  yield in Phase 1, and it is not a PRD §15.2 planning constant, so it does NOT go in
+  `ASSUMPTIONS` — it is an owner true-up item (PENDING § Waiting on OWNER).
+- **Money never becomes a float.** Returns, relative strength and the 200DMA come from `bigint`
+  paise / nav micros through integer bps (`(to-from)*10_000n/from`). One MF test drives a NAV
+  above 2^53 micros precisely so a float path would show up as a flat series.
+- `persistSignalScores` uses `on conflict (instrument_id, score_date) do nothing` — `signal_scores`
+  is append-only, so a re-run must not UPDATE. It returns how many rows actually landed.
+
+### `screener` staleness was a stub, and the docs said otherwise (fixed 2026-09-13)
+
+Tasks 5 and 6 recorded "staleness now checks fundamentals". It did not: `assessStaleness`
+hard-coded `screener` to `unimplemented`, `getLatestFundamentalsAsOf` was computed and thrown
+away, and so `blockedInstruments`'s `fundamentalsStale` branch was **unreachable** — a
+fundamentals drought could never block a recommendation. The tests asserted the stub, and their
+own comments contradicted their assertions ("screener NOW has ingestion so it's stale" directly
+above `expect(state).toBe('unimplemented')`).
+
+Task 6 built the ingestion path, so screener is now assessed like bhavcopy and amfi: an empty
+table is a real drought, reads stale, and opens a BLOCK incident. Five test expectations moved
+with it — a deliberate behaviour change, stated, not a band widened to make red go green.
+**No source is in the `unimplemented` state any more.** Keep the state in the type: the next
+source with no ingestion path needs it, and calling an unbuilt feature "stale" is what trains
+the owner to ignore the loudest safety signal in the product.
+
+Lesson worth keeping: a ledger entry is not evidence. Both Task 5's and Task 6's entries claimed
+this check shipped; the dead local was the tell.

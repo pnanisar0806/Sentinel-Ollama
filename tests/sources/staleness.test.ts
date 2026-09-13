@@ -61,9 +61,9 @@ describe('staleness engine', () => {
 
   it('opens exactly one incident per stale source and does not duplicate on re-run', async () => {
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
-    // Derived, not restated: screener is `unimplemented`; amfi/bhavcopy/frankfurter/portfolio sources stale (no data).
+    // Derived, not restated: every market + portfolio + FX source is stale with no data.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(6); // manual-seed, indmoney, composite, frankfurter, bhavcopy, amfi
+    expect(expected).toBe(7); // manual-seed, indmoney, composite, frankfurter, bhavcopy, amfi, screener
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     expect(await raiseIncidents(db, rows)).toBe(0);
@@ -78,10 +78,9 @@ describe('staleness engine', () => {
       `insert into fx_rates (pair, as_of, rate_micros, source) values ('USD/INR', '2026-08-10', 95300000, 'frankfurter')`,
     );
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
-    // Portfolio sources (3) + frankfurter (stale at 5 days) + bhavcopy (no prices) + amfi (no navs) = 6. 
-    // screener is unimplemented and raises nothing.
+    // Portfolio (3) + frankfurter (stale at 5 days) + bhavcopy + amfi + screener (all empty) = 7.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(6);
+    expect(expected).toBe(7);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     const open = await db.query<{ n: string }>(
@@ -98,7 +97,7 @@ describe('staleness engine', () => {
 
     // manual-seed recovers; indmoney/composite/frankfurter/bhavcopy/amfi still have no data at all.
     const expected = fresher.filter((r) => r.stale).length;
-    expect(expected).toBe(5);
+    expect(expected).toBe(6);
     expect(fresher.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
 
     const open = await db.query<{ n: string }>(
@@ -120,10 +119,10 @@ describe('staleness engine', () => {
     await raiseIncidents(db, after);
 
     // frankfurter recovers (12.5h < 48h); manual-seed is 90h old and stays stale, as do
-    // the two portfolio sources that have never produced a row. bhavcopy and amfi also stale.
+    // the two portfolio sources that never produced a row and the three empty market tables.
     expect(after.find((r) => r.source === 'frankfurter')!.stale).toBe(false);
     const expected = after.filter((r) => r.stale).length;
-    expect(expected).toBe(5);
+    expect(expected).toBe(6);
 
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
@@ -143,7 +142,7 @@ describe('staleness engine', () => {
   // could only ever see portfolio sources, so a missing exchange rate blocked nothing
   // and USD holdings were reported as if they had a rupee value.
   it('blocks USD holdings while FX is missing, even with a fresh portfolio', async () => {
-    // Make bhavcopy and amfi fresh so only FX is stale
+    // Make bhavcopy, amfi and screener fresh so only FX is stale
     await db.query(
       `insert into prices_eod (instrument_id, trade_date, close_paise, prev_close_paise, source, as_of)
        values ('NSE:NIFTYBEES', '2026-08-12', 22730, 22610, 'nse-bhavcopy', '2026-08-12T17:30:00+05:30')
@@ -154,12 +153,22 @@ describe('staleness engine', () => {
        values ('MF:PPFC', '2026-08-12', 52850000, 'amfi', '2026-08-12T17:30:00+05:30')
        on conflict (instrument_id, nav_date) do update set nav_micros = excluded.nav_micros`,
     );
+    const [upload] = await db.query<{ id: number }>(
+      `insert into screener_uploads (as_of, filename, source)
+       values ('2026-08-12', 'fresh.csv', 'screener-in') returning id`,
+    );
+    await db.query(
+      `insert into fundamentals (upload_id, instrument_id, data, roce_pct, de_ratio, fcf_pos_5y, red_flags, as_of)
+       values ($1, 'NSE:NIFTYBEES', '{}', 18, 0.3, true, 0, '2026-08-12T17:30:00+05:30')`,
+      [upload!.id],
+    );
 
     const rows = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
     expect(rows.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
     expect(rows.find((r) => r.source === 'frankfurter')!.stale).toBe(true);
     expect(rows.find((r) => r.source === 'bhavcopy')!.stale).toBe(false);
     expect(rows.find((r) => r.source === 'amfi')!.stale).toBe(false);
+    expect(rows.find((r) => r.source === 'screener')!.stale).toBe(false);
 
     const positions = await loadPositions(db);
     const blocked = blockedInstruments(rows, positions);
@@ -170,19 +179,18 @@ describe('staleness engine', () => {
     expect(blocked).toEqual(usd);
   });
 
-  // amfi/screener have no ingestion path in Phase 0/1. Reporting them as STALE
-  // printed red warnings after a SUCCESSFUL sync and held a BLOCK incident open forever.
-  // An unbuilt feature and rotten data are different problems.
-  // bhavcopy now has ingestion (prices_eod) so it's stale when no data.
-  // amfi now has ingestion (navs) so it's stale when no data.
-  // screener has NO ingestion path yet → unimplemented.
-  it('reports sources with no ingestion path as unimplemented, not stale', async () => {
+  // A source with no ingestion path reported as STALE printed red after a SUCCESSFUL
+  // sync and held a BLOCK incident open forever — an unbuilt feature and rotten data are
+  // different problems. All three market sources now have paths (bhavcopy → prices_eod,
+  // amfi → navs, screener → fundamentals), so an empty table is a genuine drought.
+  it('reports a source with a path but no data as stale, never as unimplemented', async () => {
     const rows = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
-    // screener has no ingestion path yet
+    expect(rows.some((r) => r.state === 'unimplemented')).toBe(false);
+
     const screenerRow = rows.find((r) => r.source === 'screener');
     expect(screenerRow).toBeDefined();
-    expect(screenerRow!.state).toBe('unimplemented');
-    expect(screenerRow!.stale).toBe(false);
+    expect(screenerRow!.state).toBe('stale');
+    expect(screenerRow!.stale).toBe(true);
 
     // amfi now has ingestion path (navs) but no data → stale
     const amfiRow = rows.find((r) => r.source === 'amfi');

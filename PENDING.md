@@ -117,6 +117,26 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 7 — signal engine — DONE 2026-09-13.** `src/domain/engine.ts`:
+      §6 quality gate (ROCE / 5y FCF / D-E with a finance-sector waiver / red flags, **fail-closed
+      on unknowns**) → composite valuation 30 / trend 30 / earnings 20 / fit 20 → HIGH/MEDIUM/
+      WATCH/NONE bands; `rankMfs` (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10);
+      `persistSignalScores` (append-only, `do nothing` on re-run); `loadEngineInputs` reads
+      watchlist + latest fundamentals + prices. 19 tests, **487 passed**, tsc clean.
+      FR-31 mutation-checked: deleting the block-list guard turns both blocked-name tests red.
+      **Two things the engine deliberately does not compute** (flagged, not faked): EV/EBITDA
+      and a name's own 5y P/E range (the pinned screener export carries neither), and the 10Y
+      G-sec yield — see Waiting on OWNER.
+
+- [x] **`screener` staleness was a no-op — FIXED 2026-09-13.** Tasks 5/6 recorded "staleness
+      checks fundamentals", but `assessStaleness` still hard-coded `screener` to `unimplemented`
+      and `getLatestFundamentalsAsOf` was dead code, so a fundamentals drought could never block
+      anything and `blockedInstruments`'s `fundamentalsStale` branch was unreachable. Task 6 built
+      the ingestion path, so screener is now assessed like bhavcopy/amfi: an empty table reads
+      stale and opens a BLOCK incident. 5 test expectations moved with it (deliberate behaviour
+      change, not a widened band). **No source is in the `unimplemented` state any more** — the
+      state stays in the type for the next unbuilt one.
+
 - [ ] **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
       `FRESHNESS_HOURS.fx = 48h`, but frankfurter publishes ECB rates on weekdays only, so a
       normal Fri→Mon gap is ~72h. Observed Sunday 2026-09-06: open `STALE_DATA/BLOCK` on
@@ -137,6 +157,10 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
+- [ ] **10Y G-sec yield** — the valuation leg of the signal engine scores earnings yield against
+      it (`EngineContext.gsecYieldPct`). There is no ingestion source for it in Phase 1, so it is
+      a caller input; the number is the owner's, not one the engine may invent. Decide: a standing
+      figure reviewed quarterly, or an ingestion source in Phase 2.
 - [ ] The date each protection milestone was actually set (`milestones.raised_on` —
       "% elapsed" is NULL until then)
 - [ ] Monthly electricity figure (closes the ₹82,124 vs PRD ₹76,000 surplus outflow gap)
@@ -184,6 +208,7 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
+| *(this session)* | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
 
 (End of file)

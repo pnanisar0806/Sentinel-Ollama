@@ -166,15 +166,9 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
   // amfi from navs table (Phase 1 Task 4)
   results.push(assess('amfi', navsAsOf, FRESHNESS_HOURS.navs!));
 
-  // screener: no ingestion path yet (Task 6) → unimplemented, not stale
-  results.push({
-    source: 'screener',
-    asOf: NEVER,
-    ageHours: Infinity,
-    limitHours: LIMIT_BY_SOURCE.screener!,
-    state: 'unimplemented',
-    stale: false,
-  });
+  // screener from fundamentals (Phase 1 Task 6 built the ingestion path, so it is
+  // assessed like any other source — `unimplemented` would now hide a real drought)
+  results.push(assess('screener', fundamentalsAsOf, FRESHNESS_HOURS.fundamentals!));
 
   return results;
 }

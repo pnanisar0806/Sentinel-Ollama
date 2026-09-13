@@ -259,3 +259,29 @@ avs table allows corrections (no append-only trigger).
   8 tests in 	ests/sources/screener.test.ts (parsing + ingestion with mutation checks, idempotent re-import).
   Extended 	ests/sources/staleness-blocking.test.ts with tests for screener staleness blocking equity instruments.
   Full suite: **470 tests pass**, 	sc --noEmit clean.
+
+## 2026-09-13 (Phase 1 Task 7 — signal engine)
+
+- **Phase 1 Task 7 complete.** `src/domain/engine.ts`: `scoreSatellite` (§6 binary quality gate
+  → composite valuation 30 / trend 30 / earnings 20 / fit 20 → HIGH/MEDIUM/WATCH/NONE),
+  `sectorMedianPe` (cohort median, not mean), `rankMfs` (consistency 40 / expense 20 /
+  tenure 15 / AUM 15 / style 10), `persistSignalScores`, `loadEngineInputs`.
+- Two return shapes, deliberately different: **blocked by a stale input → `null`** (FR-31, no
+  score exists), **quality gate failed → a row with `composite: null, qualityPassed: false`** so
+  the weekly report can say why the name was rejected. `signal_scores.composite` is NOT NULL, so
+  a failed row stores 0 and `quality_passed` carries the meaning.
+- Quality gate **fails closed on unknowns** (null ROCE / FCF / D-E / red flags is a failure, not a
+  pass) — the FR-02 posture, and it is what the "fails closed" test pins.
+- Money stays integer: returns and RS come from `bigint` paise / nav micros through integer bps.
+  One MF test uses a NAV above 2^53 micros so a float path would round the series flat.
+- **Defect found and fixed in `staleness.ts`:** Tasks 5/6 recorded a fundamentals staleness check
+  that was never wired — `screener` was hard-coded `unimplemented` and `getLatestFundamentalsAsOf`
+  was dead, so `blockedInstruments`'s `fundamentalsStale` branch was unreachable and Task 7's
+  "stale fundamentals ⇒ no score" criterion could not be proved through the real engine. Screener
+  is now assessed like bhavcopy/amfi (Task 6 built its path); 5 test expectations moved with it.
+  No source sits in `unimplemented` any more.
+- 19 tests in `tests/domain/engine.test.ts`; the FR-31 case composes the real
+  `assessStaleness → blockedInstruments` chain. Mutation-checked: removing the block-list guard
+  turns both blocked-name tests red. Full suite **487 passed**, `tsc --noEmit` clean.
+- **Owner input needed:** the 10Y G-sec yield has no ingestion source and is a required
+  `EngineContext` input — logged under Waiting on OWNER, not invented in `ASSUMPTIONS`.
