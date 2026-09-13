@@ -117,6 +117,19 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 9 — sell / exit triggers — DONE 2026-09-13.** `src/domain/sell-triggers.ts`:
+      `evaluateExits(db, state, month)` runs §6.5 triggers 1–5 and 7 monthly (falsification,
+      red flag, hard cap, sustained underperformance, better alternative ≤1/quarter, credit /
+      maturity); trigger 6 is `LEGACY_QUEUE_STUB`, deferred to Phase 2 with its reason.
+      Falsification conditions round-trip through `recommendations.primary_rec` JSON —
+      **`{instrumentId, falsification:{metric, op, value}}` is now the contract Task 10 must
+      write.** An untestable condition is never an exit. Only triggers 1–3 override IPS §3.7's
+      12-month hold; 4 and 5 surface with `blockedByMinimumHold` instead of being dropped.
+      17 tests, **515 passed**, tsc clean; the FR-31 block is mutation-checked.
+      **The no-catch-up architecture test earned its keep:** it caught `sell-triggers` reaching
+      `funded-status` through `maturities → buckets`. Fixed structurally — the redemption reader
+      moved to `src/domain/redemptions.ts` — **not** by widening the allowlist.
+
 - [x] **Phase 1 Task 8 — allocation engine — DONE 2026-09-13.** `src/domain/alloc-engine.ts`:
       `rebalanceRec(state, monthYear)` turns the FR-13 drift check into a recommendation —
       in-band months still report the actual percentages; April is flagged as the annual
@@ -170,6 +183,10 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
+- [ ] **Credit-rating actions have no source (IPS §3.8).** Sell trigger 7 covers maturities only;
+      the standing §3.8 review items (Sammaan Jul-2029, Edelweiss Oct-2033 — "must beat 7.95%
+      after tax and a credit-risk haircut") cannot be watched automatically. Decide: a manual
+      quarterly review item, or a rating source in Phase 2.
 - [ ] **10Y G-sec yield** — the valuation leg of the signal engine scores earnings yield against
       it (`EngineContext.gsecYieldPct`). There is no ingestion source for it in Phase 1, so it is
       a caller input; the number is the owner's, not one the engine may invent. Decide: a standing
@@ -221,7 +238,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
+| *(this session)* | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |
+| `08c296f` | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
 | `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
 

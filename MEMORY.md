@@ -1281,3 +1281,50 @@ this check shipped; the dead local was the tell.
 - `allocationDrift`'s `driftPaise` is the sizing for every action. Against the real seed that is
   the GOLD shortfall of ₹2,04,098.68 (1.18% against the 5% floor) — the tests derive it from the
   drift row so a seed correction or a band change moves both together.
+
+---
+
+## Phase 1 Task 9 — sell / exit triggers (2026-09-13)
+
+`src/domain/sell-triggers.ts` — `evaluateExits(db, state, month)` over §6.5 triggers 1–5 and 7.
+Everything it returns is a PAPER object: §6.5's "first-class" means sell candidates exist as
+recommendations of kind `sell`, not that anything executes.
+
+- **CONTRACT FOR TASK 10 — `recommendations.primary_rec` is JSON**
+  `{ instrumentId, falsification: { metric, op, value } | null }`. The grammar is closed:
+  `metric` ∈ `price_paise` | `roce_pct` | `de_ratio` | `red_flags`, `op` ∈ `lt` | `gt`, and
+  `price_paise` carries its value as a decimal STRING (money never round-trips a float). Task 10
+  must write this shape or trigger 1 goes silently inert. A condition naming a datum we do not
+  hold is **untestable → `null` → no exit**; false and unknown are different answers and the
+  test pins that.
+- **IPS §3.7 is encoded.** The 12-month minimum hold is overridable "only by: thesis
+  falsification, red-flag event, or hard-cap breach" — triggers 1, 2, 3. Triggers 4 (sustained
+  underperformance) and 5 (better alternative) are NOT overrides: a candidate they raise inside
+  the hold comes back with `blockedByMinimumHold: true` and `heldMonths`, not dropped. Holding
+  period is the oldest OPEN lot's `acquired_on`; no lot → `null`, never an assumed date.
+- **Month END is the data cutoff.** A monthly run reviews its whole month; cutting at the 1st
+  judged August against July's data (this is how the first version of trigger 1 failed its own
+  test). The maturity window is the month plus a fortnight from the 1st, so a monthly run cannot
+  step over a mid-month redemption.
+- Trigger 3 reuses Phase 0 `concentration`'s maps. The **sector cap is deliberately excluded**:
+  it names a sector, not a holding, and an exit candidate must name something sellable. A sector
+  breach is an allocation direction (Task 8), not a per-name exit.
+- Trigger 5 is rationed to one per quarter, counted against existing `recommendations` rows of
+  kind `sell` whose `engine_evidence` mentions `better-alternative` — so Task 10 must put the
+  trigger name in `engine_evidence` when it persists one.
+- Trigger 7 covers **maturities only**. Rating actions have no ingestion source, so IPS §3.8's
+  standing reviews (Sammaan Jul-2029, Edelweiss Oct-2033) stay owner items — PENDING.
+
+### The funded-status firewall caught a real violation (2026-09-13)
+
+`tests/architecture/no-catch-up.test.ts` went red the moment `sell-triggers.ts` landed:
+sell-triggers → `maturities.ts` → `buckets.ts` → `funded-status.ts`. A sizing/risk module was
+one import away from learning how funded the owner is, which is exactly the catch-up behaviour
+the PRD forbids — and nothing else in the suite would have noticed.
+
+Fixed **structurally, not by widening the allowlist**: the redemption READER moved to
+`src/domain/redemptions.ts` (instruments query, no bucket concept), `maturities.ts` keeps
+`maturityRoutingRec` and re-exports `listRedemptionsUntil`/`Redemption` for the reporting
+surfaces that legitimately reach buckets (digest). Rule for the next task: if the arch test goes
+red, the import path is the bug. Adding a line to the allowlist is only correct for a genuine
+*reporting* surface.

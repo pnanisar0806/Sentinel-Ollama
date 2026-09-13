@@ -309,3 +309,34 @@ avs table allows corrections (no append-only trigger).
 - 11 tests in `tests/domain/alloc-engine.test.ts`. Mutation-checked: removing the band-edge cap
   and removing the dilution-before-sale preference each turn a test red. Suite **498 passed**,
   `tsc --noEmit` clean.
+
+## 2026-09-13 (Phase 1 Task 9 — sell / exit triggers)
+
+- **Phase 1 Task 9 complete.** `src/domain/sell-triggers.ts`: `evaluateExits(db, state, month)`
+  runs §6.5 triggers 1–5 and 7 monthly. Trigger 6 (legacy cleanup queue, FR-14) is
+  `LEGACY_QUEUE_STUB` — deferred to Phase 2 *with its reason*: consolidating micro-orphans
+  without the LTCG harvest calendar would realise gains in the wrong fiscal year.
+- **Falsification conditions are live, not decorative.** They round-trip through
+  `recommendations.primary_rec` as `{instrumentId, falsification:{metric, op, value}}` over a
+  closed grammar (`price_paise` / `roce_pct` / `de_ratio` / `red_flags`, `lt`|`gt`). **This is
+  the contract Task 10 must write.** A condition naming a datum we do not hold is UNTESTABLE and
+  returns null — never an exit; false and unknown are different answers.
+- **IPS §3.7 discipline is encoded, not assumed.** §3.7 allows the 12-month minimum hold to be
+  overridden "only by: thesis falsification, red-flag event, or hard-cap breach" — exactly
+  triggers 1, 2, 3. Triggers 4 and 5 are surfaced with `blockedByMinimumHold` and the months
+  held, rather than dropped, so the owner sees the engine wanted out and the IPS said wait.
+- Data is cut at **month END** (a run reviews its whole month; cutting at the 1st would judge a
+  month against the previous month's data). The maturity window is the month plus a fortnight,
+  so a monthly run cannot step over a mid-month redemption.
+- Trigger 3 reuses the Phase 0 `concentration` maps. The sector cap is deliberately excluded: it
+  names a sector, not a holding, and an exit candidate has to name something sellable.
+- **The no-catch-up architecture test earned its keep.** It went red because `sell-triggers`
+  reached `funded-status` transitively through `maturities → buckets`. Fixed structurally: the
+  redemption READER moved to `src/domain/redemptions.ts` (no bucket concept), `maturities.ts`
+  keeps the router and re-exports it. The allowlist was NOT widened — a sizing/risk module
+  learning how funded the owner is, is precisely what the firewall exists to stop.
+- 17 tests in `tests/domain/sell-triggers.test.ts`; the FR-31 block is mutation-checked and the
+  falsification / underperformance tests mutate their own data to prove the candidate
+  disappears. Suite **515 passed**, `tsc --noEmit` clean.
+- **Owner input needed:** credit-rating actions have no ingestion source, so trigger 7 covers
+  maturities only; the §3.8 standing reviews (Sammaan Jul-2029, Edelweiss Oct-2033) stay manual.
