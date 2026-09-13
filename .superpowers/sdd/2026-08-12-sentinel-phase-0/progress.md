@@ -340,3 +340,32 @@ avs table allows corrections (no append-only trigger).
   disappears. Suite **515 passed**, `tsc --noEmit` clean.
 - **Owner input needed:** credit-rating actions have no ingestion source, so trigger 7 covers
   maturities only; the §3.8 standing reviews (Sammaan Jul-2029, Edelweiss Oct-2033) stay manual.
+
+## 2026-09-13 (Phase 1 Task 10 — FR-11/FR-12 recommendation objects + paper mode)
+
+- **Phase 1 Task 10 complete.** `src/domain/recommendations.ts`: `buildRecommendation` /
+  `validateRecommendation` / `announceMaturity` / `gateRecommendation` /
+  `persistRecommendation` / `isPaperMode` / `scanForExecutionPaths`.
+- **FR-11 shape is enforced, both ways.** Exactly 2 alternates: A1 shares the primary's intent
+  and must name a different instrument (absent a real challenger it becomes the **index route** —
+  buying the market rather than manufacturing a second single-name idea to fill the slot), A2
+  must carry a *different* intent and defaults to **do-nothing**, priced as the real option it is.
+  Theses are word-counted against the 150 limit and both the acceptance path (exactly 150) and
+  the rejection path (151) are asserted.
+- **Every IPS citation is checked against the rendered index** (`getIpsClauseIndex`) — the PRD
+  preamble binds each recommendation to cite a clause, and a citation nobody can look up is worse
+  than none. A bogus `9.9` is rejected by the builder.
+- **FR-12 caps log rather than drop.** ≤4 per calendar month and a 12-month repeat-BUY hold with
+  exactly three override events; a capped action lands in `suppressed_actions` with its reason.
+  An action the engine wanted and policy refused is exactly what the owner needs to see.
+- **Paper mode (FR-55) defaults TRUE when the rail is absent** — Phase 1 has no execution path,
+  so the safe reading of a missing switch is "do not act". `scanForExecutionPaths` walks
+  `src/domain` and `src/jobs` for order-like calls and finds none.
+- **Cross-task proof, not documentation:** a recommendation persisted here has its falsification
+  condition read back and fired by Task 9's trigger 1 in the same test. The Task 9 contract is
+  live.
+- 17 tests. Mutation-checked: an off-by-one on the month cap and a disabled clause check each
+  turn a test red. Suite **532 passed**, `tsc --noEmit` clean.
+- Note: `announceMaturity` takes the routing decision as DATA rather than calling
+  `maturityRoutingRec`, so this sizing module never reaches `buckets.ts` → `funded-status.ts`.
+  Same firewall lesson as Task 9, applied before the test had to catch it.

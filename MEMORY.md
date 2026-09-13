@@ -1328,3 +1328,37 @@ Fixed **structurally, not by widening the allowlist**: the redemption READER mov
 surfaces that legitimately reach buckets (digest). Rule for the next task: if the arch test goes
 red, the import path is the bug. Adding a line to the allowlist is only correct for a genuine
 *reporting* surface.
+
+---
+
+## Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode (2026-09-13)
+
+`src/domain/recommendations.ts`. A recommendation is a PAPER object: logged and scored, surfaced
+in the weekly report, never executed.
+
+- **FR-11 shape, enforced in both directions.** Exactly 2 alternates. A1 shares the primary's
+  intent and must name a *different* instrument; with no real challenger it becomes the **index
+  route** (`INDEX_ROUTE_INSTRUMENT`) — buying the market is the honest expression of "we want
+  this exposure but have no edge on which name carries it", and it beats manufacturing a second
+  single-name idea to fill a slot. A2 must carry a *different* intent and defaults to
+  **do-nothing**, which is a real option and is written as one.
+- **Every `ips_clause_refs` entry is validated against `getIpsClauseIndex(IPS_V1_TEXT)`.** The
+  PRD preamble binds every recommendation to cite the clause it serves; a citation the owner
+  cannot look up is worse than no citation. `buildRecommendation` throws on an unknown clause.
+- **FR-12 caps LOG, they do not drop.** ≤4 recommendations per calendar month, and no repeat BUY
+  on a name inside 12 months of the prior one, overridable only by `ips-spec-change`,
+  `material-adverse-falsification` or `owner-directive`. A capped action goes to
+  `suppressed_actions` with its reason — what the engine wanted and policy refused is exactly
+  what the owner needs to see. `suppressed_actions` is keyed `(logged_on, action)`, so the action
+  string carries kind + action + instrument to keep same-day suppressions apart.
+- **Paper mode defaults TRUE when `settings_rails.paper_mode` is absent.** Phase 1 has no
+  execution path at all, so the safe reading of a missing switch is "do not act".
+  `scanForExecutionPaths(dir)` walks the source for order-like calls; it skips the file carrying
+  `ORDER_LIKE_PATTERNS = [` because the file defining the ban necessarily spells out the names.
+- **`primary_rec` is written as the `RecLeg` object**, which already carries `instrumentId` and
+  `falsification` — the exact shape `sell-triggers.evaluateExits` reads. A test persists a
+  recommendation here and fires Task 9's trigger 1 on it, so the contract is proven live rather
+  than merely written down.
+- `announceMaturity` takes the routing decision as DATA instead of calling `maturityRoutingRec`,
+  keeping this sizing module clear of `buckets.ts` → `funded-status.ts`. Same firewall lesson as
+  Task 9, applied before the architecture test had to catch it.

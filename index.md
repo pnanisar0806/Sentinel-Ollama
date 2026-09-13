@@ -118,7 +118,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/domain/sell-triggers.ts` | `evaluateExits(db, state, month)`, `ExitCandidate`, `FalsificationCondition`, `MINIMUM_HOLD_MONTHS`, `BETTER_ALTERNATIVE_MARGIN`, `LEGACY_QUEUE_STUB` — §6.5 triggers 1–5 and 7 evaluated monthly (FR-15); trigger 6 is the documented Phase 2 stub. Data is cut at **month END**, so a run reviews the whole month. Falsification conditions are read out of `recommendations.primary_rec` JSON (`{instrumentId, falsification:{metric,op,value}}`) and an **untestable condition is never an exit**. Only triggers 1–3 override IPS §3.7's 12-month hold; 4 and 5 surface with `blockedByMinimumHold` rather than being dropped. Blocked instruments (FR-31) produce nothing — **implemented 2026-09-13** |
 | `src/domain/redemptions.ts` | `Redemption`, `listRedemptionsUntil(db, horizonDays, referenceDate?)` — the bond redemption reader, split out of `maturities.ts` so `sell-triggers.ts` can use it without transitively importing `buckets.ts` (which re-exports `funded-status`). `maturities.ts` re-exports both |
 | `src/domain/maturities.ts` | `maturityRoutingRec` + a re-export of `listRedemptionsUntil`/`Redemption` from `redemptions.ts`; 14-day digest alert (Sammaan Task 1) — **implemented 2026-09-11, reader split out 2026-09-13** |
-| `src/domain/recommendations.ts` | FR-11 builders (primary + exactly 2 alternates, ≤150w theses, IPS citations), FR-12 caps + 3 overrides, suppressions |
+| `src/domain/recommendations.ts` | `buildRecommendation`, `validateRecommendation`, `announceMaturity`, `gateRecommendation`, `persistRecommendation`, `isPaperMode`, `scanForExecutionPaths`, `MAX_THESIS_WORDS`/`MAX_RECS_PER_MONTH`/`MIN_HOLD_MONTHS`/`OVERRIDE_EVENTS`/`INDEX_ROUTE_INSTRUMENT` — FR-11 objects (primary + **exactly 2** alternates: A1 same intent/different instrument or the index route, A2 a different intent defaulting to do-nothing; ≤150-word theses; every `ips_clause_refs` entry checked against `getIpsClauseIndex`). FR-12 caps (≤4/month, 12-month repeat-BUY hold, 3 override events) **log to `suppressed_actions` rather than dropping**. Paper mode defaults TRUE when the rail is absent. `primary_rec` is written in the shape `sell-triggers` reads back — **implemented 2026-09-13** |
 | `src/domain/scoring.ts` | §13 benchmark-at-creation + 3/6/12-mo eval snapshots (harness; accrues over time) |
 | `src/notify/report.ts` | weekly deep report composition (FR-51): signal review / watchlist changes / rec pipeline / suppressed log / staleness |
 | `src/jobs/report.ts`, `src/jobs/screener-import.ts` | `pnpm report` (weekly, Sunday 10:00 IST pending sign-off), `pnpm screener:import <csv>` |
@@ -150,7 +150,10 @@ round-trip; its FR-31 case composes the real `assessStaleness` → `blockedInstr
 `tests/domain/alloc-engine.test.ts` (11 tests) covers in-band reporting, the seed's real gold
 shortfall, the tax preference and the April proposal. `tests/domain/sell-triggers.test.ts`
 (17 tests) drives all six live §6.5 triggers against real PGlite, including the falsification
-round-trip through an appended `recommendations` row. Suite: **515 passed** across 65 files.
+round-trip through an appended `recommendations` row. `tests/domain/recommendations.test.ts`
+(17 tests) asserts both the acceptance and the rejection path of the FR-11 validator, the FR-12
+caps against stored rows, and a cross-task round-trip proving Task 9 reads what Task 10 writes.
+Suite: **532 passed** across 66 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic

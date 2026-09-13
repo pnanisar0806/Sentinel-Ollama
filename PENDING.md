@@ -117,6 +117,17 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 10 — FR-11/FR-12 recommendation objects + paper mode — DONE 2026-09-13.**
+      `src/domain/recommendations.ts`: `buildRecommendation` (primary + exactly 2 alternates —
+      A1 same intent/different instrument or the **index route** fallback, A2 a different intent
+      defaulting to **do-nothing**, which is priced as a real option; ≤150-word theses; every
+      clause ref checked against the rendered IPS index). FR-12 caps — ≤4/month, 12-month
+      repeat-BUY hold, exactly 3 override events — **log to `suppressed_actions` with a visible
+      reason rather than dropping the action**. Paper mode defaults TRUE when the rail is absent.
+      17 tests, **532 passed**, tsc clean; the month cap and clause validation are mutation-checked.
+      **Cross-task proof:** a persisted recommendation's falsification condition fires Task 9's
+      trigger 1 — the Task 9 contract is honoured, not just documented.
+
 - [x] **Phase 1 Task 9 — sell / exit triggers — DONE 2026-09-13.** `src/domain/sell-triggers.ts`:
       `evaluateExits(db, state, month)` runs §6.5 triggers 1–5 and 7 monthly (falsification,
       red flag, hard cap, sustained underperformance, better alternative ≤1/quarter, credit /
@@ -238,7 +249,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |
+| *(this session)* | **Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode**: `domain/recommendations.ts` (builder + validator, caps → `suppressed_actions`, paper mode, execution-path scan), 17 tests; 532 passed, tsc clean |
+| `b081ee9` | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |
 | `08c296f` | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
 | `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
