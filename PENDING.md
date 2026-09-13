@@ -6,6 +6,14 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [x] **ALL LOCAL WORK NOW COMMITTED + PUSHED TO `main` (2026-09-13).** Ten Phase 1 tasks
+      (7–13 incl. holiday seed + LLM model family) plus the screener-screen HTML scraper and
+      the extraction-model revert are live on origin/main; GitHub Actions holds the real
+      provisioning. No local uncommitted work remains.
+- [ ] **THIS WEEK, OWNER:** the two items that unblock Phase 2's usefulness in real data —
+      (1) GSEC_YIELD_PCT (~7.0) into `.env` so the weekly signal review actually runs;
+      (2) the screener gate decision (FCF into the query, drop red flags) + one live
+      `pnpm screener:import --screen <url>` run. See "Waiting on OWNER" below.
 - [x] **KITE RETIRED — INDmoney is the only portfolio source. DONE 2026-09-07.** The connect
       flow worked, which is how it surfaced that INDmoney already aggregates the same Zerodha
       account: net worth had jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money moving.
@@ -212,6 +220,22 @@ MEMORY.md; the code map lives in index.md.
       change, not a widened band). **No source is in the `unimplemented` state any more** — the
       state stays in the type for the next unbuilt one.
 
+- [x] **Screener.in screen HTML scraper — BUILT + TESTED 2026-09-13 (tsc clean, 606 passed).**
+      `src/sources/screener-screen.ts` parses a PUBLIC screen URL directly (`parseScreenHtml`,
+      paginated `fetchScreen`, `slugToInstrumentId`, idempotent `importScreenRows`), sidestepping
+      the paywalled CSV export entirely. Real 42KB HTML fixture from screen 41972 drives 16
+      tests. Header `.tooltip` canonicalization + `<span>` unit stripping + slug→instrument
+      validation are all handled. Migration `0014` widens `fundamentals.source` back to
+      `'screener-screen'`. CLI: `pnpm screener:import --screen <url>`. **Not yet run live + not
+      pushed** (all local commits are ~10 behind origin/main).
+      **The column-spec problem still stands for the CSV path**: the default screen's columns
+      overlap `SCREENER_COLUMNS` only on `P/E`; the HTML path reads whatever columns the screen
+      actually renders, so a screen built to carry the §6 gate inputs works.
+- [x] **Extraction model reverted to the proven gemma chain — DONE 2026-09-13.** Owner refined
+      the one-family decision the same day: `-fin` (text-only) stays for advisor/watchlist prose;
+      `VISION_MODEL_CHAIN` leads with `google/gemma-4-31b:free` again (the `ling-3.0-flash-vl`
+      leader was retired). Text never sits in front of an image — the test asserts the split.
+
 - [ ] **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
       `FRESHNESS_HOURS.fx = 48h`, but frankfurter publishes ECB rates on weekdays only, so a
       normal Fri→Mon gap is ~72h. Observed Sunday 2026-09-06: open `STALE_DATA/BLOCK` on
@@ -233,17 +257,13 @@ MEMORY.md; the code map lives in index.md.
       tiny, and the run gets genuinely useful only after a real screener import widens it.
       The 40 static `'advisor'` names in `src/seed/seed-watchlist.ts` remain LLM-recall from the
       Task 6 session; replace them with a proposed shortlist once the pool is real.
-- [ ] **Phase 1 plan review** — `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`
-      scope calls 1–7 on the first page.
-- [ ] **SCREENER COLUMN SPEC IS WRONG — confirmed against your live account 2026-09-13.**
-      A real screen shows `S.No. | Company | CMP Rs. | P/E | Mar Cap Rs.Cr. | Div Yld % |
-      NP Qtr Rs.Cr. | Qtr Profit Var % | Sales Qtr Rs.Cr. | Qtr Sales Var % | ROCE % | Debt / Eq`.
-      Our pinned `SCREENER_COLUMNS` overlaps on `P/E` ALONE, so a real export currently parses to
-      zero rows. Screener's EDIT COLUMNS can add ROE / P/B / EPS / 5y CAGRs / promoter holding,
-      but **`Symbol`, `Industry`, `FCF 5Y` and `Red Flags` have no native column** — and the
-      quality gate reads the last two, while instrument mapping assumes a ticker screener does
-      not export (it identifies a row by company NAME). Not guessed at a second time: needs one
-      real exported file + a decision on the two missing gate inputs.
+- [ ] **SCREENER PIPELINE — needs one live run + one owner gate decision.** The HTML scraper is
+      built and tested, but has never touched a live page. Owner decision needed on the §6 gate
+      inputs `Symbol`, `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the
+      last two, so either bake FCF-positivity into the screen query (recommended) or drop red
+      flags in Phase 1 (recommended). After that: build a real screen URL carrying ROCE / ROE /
+      D-E / 5y CAGRs / CMP, `pnpm screener:import --screen <url>` once, watch it land in
+      `fundamentals`, then regenerate the watchlist from the cohort (§6.1, owner pruning on top).
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
@@ -326,5 +346,7 @@ MEMORY.md; the code map lives in index.md.
 | `08c296f` | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
 | `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
+| *(this session)* | **Screener.in screen HTML scraper**: `screener-screen.ts` (parse/fetch/slug-map/import), migration 0014 widens `source` back to `'screener-screen'`, `screener-import --screen <url>`, real 42KB page-1/page-2 fixtures, 16 tests; **606 passed**, tsc clean. Works around the paywalled CSV export |
+| *(this session)* | **Extraction model reverted to the proven gemma chain**: `VISION_MODEL_CHAIN` leads `google/gemma-4-31b:free` again; `-fin` stays for text jobs only; the `ling-3.0-flash-vl` leader trial retired. Test asserts the split, **606 passed**, tsc clean |
 
 (End of file)

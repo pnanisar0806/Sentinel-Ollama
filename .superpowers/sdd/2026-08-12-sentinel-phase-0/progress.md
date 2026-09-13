@@ -178,9 +178,9 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
   notices correctly. tsc clean; suite 449/1-stale.
 - 3 fake web_uploads rows (2 rejected + 1 unusable, 5-Sept probes) â€” owner chose to **keep** for now
   (append-only table; no UI delete). New uploads: `proposed`â†’Pending until confirm/reject, then History.
-## 2026-09-11 (Phase 1 Task 1 — Sammaan bond maturity)
+## 2026-09-11 (Phase 1 Task 1 ï¿½ Sammaan bond maturity)
 
-- **Phase 1 Task 1 complete** (time-boxed — Sammaan INE148I07GL3 matures 26-Sep-2026).
+- **Phase 1 Task 1 complete** (time-boxed ï¿½ Sammaan INE148I07GL3 matures 26-Sep-2026).
   Created src/domain/maturities.ts with listRedemptionsUntil(db, horizonDays, refDate?)
   and maturityRoutingRec(redemption, db) returning paper routing object (intent, action,
   bucket B3, IPS clauses 3.3+3.9, thesis with computed amounts).
@@ -194,7 +194,7 @@ One line per task / defect / decision; details live in MEMORY.md, not here.
 - Architecture test allowlist extended with src/domain/maturities.ts (legitimate reporter
   using bucket status, not sizing/risk).
 - Full suite: **443 tests pass**, 	sc --noEmit clean.
-## 2026-09-11 (Phase 1 Task 3 — NSE bhavcopy + index series)
+## 2026-09-11 (Phase 1 Task 3 ï¿½ NSE bhavcopy + index series)
 
 - **Phase 1 Task 3 complete** (NSE EOD price pipeline).
   Created src/sources/bhavcopy.ts with downloadBhavcopy, downloadIndexSeries, ingestPrices;
@@ -207,7 +207,7 @@ se-bhavcopy step (skips weekends, logs skip).
   8 tests in 	ests/sources/bhavcopy.test.ts (parsing + ingestion with mutation checks).
 - Seed data updated with ISINs for NSE:NIFTYBEES, GOLDBEES, LIQUIDBEES, SMALLCASE-RESIDUE, RPOWER.
 - Full suite: **451 tests pass**, 	sc --noEmit clean.
-## 2026-09-11 (Phase 1 Task 2 — Phase 1 schema: migrations 0007/0008)
+## 2026-09-11 (Phase 1 Task 2 ï¿½ Phase 1 schema: migrations 0007/0008)
 
 - **Phase 1 Task 2 complete** (schema migrations for Phase 1).
   Created migrations/0008_phase1_intel.sql with tables: watchlist (PK instrument_id+added_on, CHECK removed_on>=added_on), screener_uploads, undamentals (data text, typed quality columns), signal_scores (composite numeric(5,2), quality_passed, 4 regression components, rank), ecommendations (FR-11 payloads: primary_rec, alternates, ips_clause_refs text, engine_evidence, kind check, suppressed flag), suppressed_actions, enchmarks (benchmark_at_creation + 3/6/12m evals). All append-only triggers + RLS.
@@ -216,7 +216,7 @@ avs, holidays.
 - PGlite compatibility: used 	ext for JSON columns (SQLite stores JSON as TEXT), 	ext for array columns (serialized), renamed primary ? primary_rec (reserved keyword in SQLite).
 - All append-only triggers on new tables; RLS enabled.
 - Full suite: **451 tests pass**, 	sc --noEmit clean.
-## 2026-09-11 (Phase 1 Task 4 — AMFI NAV pipeline)
+## 2026-09-11 (Phase 1 Task 4 ï¿½ AMFI NAV pipeline)
 
 - **Phase 1 Task 4 complete** (AMFI NAV pipeline).
   Created src/sources/amfi.ts with downloadDailyNav, downloadHistory, ingestNavs;
@@ -230,7 +230,7 @@ avs: 48h check against
 avs table.
   6 tests in 	ests/sources/amfi.test.ts (parsing + ingestion with mutation checks).
 - Full suite: **457 tests pass**, 	sc --noEmit clean.
-## 2026-09-11 (Phase 1 Task 5 — Staleness extension + blocked-by-stale proof)
+## 2026-09-11 (Phase 1 Task 5 ï¿½ Staleness extension + blocked-by-stale proof)
 
 - **Phase 1 Task 5 complete** (Staleness extension + blocked-by-stale DoD proof).
   Extended src/sources/staleness.ts with 
@@ -246,7 +246,7 @@ avs table allows corrections (no append-only trigger).
 - 13 tests in 	ests/sources/staleness.test.ts, 10 in 	ests/sources/staleness-blocking.test.ts.
 - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
 - Full suite: **468 tests pass**, 	sc --noEmit clean.
-## 2026-09-11 (Phase 1 Task 6 — Watchlist + screener.in importer)
+## 2026-09-11 (Phase 1 Task 6 ï¿½ Watchlist + screener.in importer)
 
 - **Phase 1 Task 6 complete** (Watchlist + screener.in importer).
   Created src/seed/seed-watchlist.ts with ~40-name advisor starter watchlist.
@@ -455,3 +455,25 @@ avs table allows corrections (no append-only trigger).
   rather than guessed at.
 - 8 new tests (4 zip, 4 sync steps). Suite **576 passed**, `tsc --noEmit` clean.
 - **Phase 1 is complete: tasks 1â€“13, with 11A superseded by the `web/` app.**
+
+## 2026-09-13 (post-Phase-1: screener screen HTML scraper + extraction-model revert)
+
+- **The paywalled CSV export is no longer the ingestion path.** screener.in's CSV export is
+  behind a paywall; a public screen URL is not. `src/sources/screener-screen.ts` parses the
+  rendered table HTML directly: `parseScreenHtml` (data-row-company-id rows, header `tooltip`
+  â†’ canonical column key, `<span>` unit suffixes stripped, per-column `normalizeHeader`),
+  paginated `fetchScreen` (`?page=N`, 25/page, stops on a short page), `slugToInstrumentId`
+  (validates against `instruments`, no invented instruments), and idempotent
+  `importScreenRows` â€” re-importing the same `(as_of, filename)` deletes the prior batch
+  because `screener_uploads` is append-only and ON CONFLICT cannot update. Migration `0014`
+  widens `fundamentals.source` back to `'screener-screen'` (0013 had narrowed it to
+  `'screener-in'` only). CLI: `screener:import --screen <url>`.
+- **Driven by real HTML.** The 16 tests run against two real 42KB page captures from screen
+  41972. 606 passed, `tsc --noEmit` clean.
+- **The owner gate decision on the Â§6 inputs is still owed** (screener has no native `Symbol` /
+  `Industry` / `FCF 5Y` / `Red Flags` columns) â€” logged under PENDING.
+- **Extraction model reverted the same day.** The owner refined the one-family decision:
+  `VISION_MODEL_CHAIN` again leads `google/gemma-4-31b:free`, the `ling-3.0-flash-vl` leader
+  trial retired; `TEXT_MODEL` (`-fin`, text-only) stays for advisor/watchlist prose and is kept
+  out of the vision chain by test. The stale model-wiring tests were updated together rather
+  than left to go red on the swap. 606 passed, `tsc --noEmit` clean.

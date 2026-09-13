@@ -1483,11 +1483,19 @@ existing OpenRouter key does every LLM job. Chosen ids live in ONE place, `src/c
 - **The finance model is TEXT-ONLY** — verified against OpenRouter's own catalogue
   (`input_modalities: ["text"]`, 262k ctx). It physically cannot read a statement screenshot;
   an earlier probe of the same model on opencode Zen returned `No endpoints found that support
-  image input`. Its sibling **`inclusionai/ling-3.0-flash-vl:free`** takes `text,image,video`
-  and leads `VISION_MODEL_CHAIN`. Same family, split by capability, not by preference.
-  Do not put `-fin` in front of an image — it 400s on every upload.
+  image input`. Its sibling **`inclusionai/ling-3.0-flash-vl:free`** takes `text,image,video`;
+  it was **tried as the `VISION_MODEL_CHAIN` leader and retired the same day** (see the
+  refinement below). Same family, split by capability. Do not put `-fin` in front of an image —
+  it 400s on every upload.
 - Tests assert the wiring by DERIVING from the constants (`LLM_MODEL_CHAIN[0]`), never by
   restating a model id — the two that hard-coded `gemma-4-31b` went red on this swap.
+
+**REFINED THE SAME DAY (owner, explicit):** `-fin` stays for every TEXT job, but statement
+extraction **reverted** to the previously-tuned vision chain. `VISION_MODEL_CHAIN` is again led
+by `google/gemma-4-31b:free`; the `ling-3.0-flash-vl:free` trial as its leader was retired
+(the free pool saturates and gemma was the proven extraction model). The text-only rule is
+unchanged — `TEXT_MODEL` (-fin) is still kept out of `VISION_MODEL_CHAIN` and the test asserts
+it.
 
 **THE LLM SHORTLISTS THE WATCHLIST (owner, explicit — supersedes my §6.7 concern).**
 `src/sources/llm-watchlist.ts` + `pnpm watchlist:propose`. The division that keeps §6.7 intact:
