@@ -1252,3 +1252,32 @@ the owner to ignore the loudest safety signal in the product.
 
 Lesson worth keeping: a ledger entry is not evidence. Both Task 5's and Task 6's entries claimed
 this check shipped; the dead local was the tell.
+
+---
+
+## Phase 1 Task 8 — allocation engine (2026-09-13)
+
+`src/domain/alloc-engine.ts` — `rebalanceRec(state, monthYear)`, `sellCandidates`,
+`isRebalanceTarget`, `TAX_POLICY_NOTE`.
+
+- **`state.netWorth` is THE basis and `rebalanceRec` throws when the positions disagree with
+  it.** The engine never re-derives the portfolio total: two independent numbers describing one
+  portfolio is how a caller gets silently wrong percentages back (the same argument
+  `allocationDrift` makes about a supplied `total`).
+- **Tax awareness is one preference, deliberately not an engine.** New money before a sale
+  (a load-free SIP redirection into another class dilutes an overweight one with no
+  realisation); a trim only when no route can absorb the drift, ordered losses-first →
+  smallest gain → **unknown cost basis last** (FR-02: its tax is unknowable from our data).
+  `TAX_POLICY_NOTE` is carried in every rec's `taxNotes` and names what is NOT computed:
+  holding periods, LTCG/STCG, §112A, indexation, set-off, surcharge. We hold **aggregated**
+  positions, not per-lot acquisition dates — a tax figure here would be invented.
+- **A trim is capped at the nearest band edge**, including the last slice, so no recommendation
+  can force a sale beyond what §3.3 asks. Mutation-checked.
+- Owner constraints are structural, not filters bolted on: `isRebalanceTarget` excludes **EPF**
+  in both directions (mandatory payroll ballast, 68.7% of the debt bucket — a debt move that
+  touched it would really be an EPF move), and the **Kolkata property is a liability line, never
+  a position**, so it cannot reach the engine at all. There is nothing to exclude, which is the
+  strongest form the constraint can take.
+- `allocationDrift`'s `driftPaise` is the sizing for every action. Against the real seed that is
+  the GOLD shortfall of ₹2,04,098.68 (1.18% against the 5% floor) — the tests derive it from the
+  drift row so a seed correction or a band change moves both together.

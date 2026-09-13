@@ -117,6 +117,19 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 8 — allocation engine — DONE 2026-09-13.** `src/domain/alloc-engine.ts`:
+      `rebalanceRec(state, monthYear)` turns the FR-13 drift check into a recommendation —
+      in-band months still report the actual percentages; April is flagged as the annual
+      proposal. Takes the Phase 0 `NetWorth` as its basis and **throws if the positions
+      disagree** (one source of truth). Tax preference is one rule: dilute with new money
+      before selling, and when a trim is unavoidable order candidates losses-first with an
+      unknown cost basis last. `TAX_POLICY_NOTE` states plainly what it does NOT compute
+      (holding periods, LTCG/STCG, §112A, indexation, set-off) — we hold aggregated
+      positions, not per-lot acquisition dates, so any tax figure would be invented.
+      Against the real seed the gold shortfall sizes at exactly `driftPaise` (₹2,04,098.68).
+      11 tests, **498 passed**, tsc clean; the band-edge cap and the tax preference are both
+      mutation-checked.
+
 - [x] **Phase 1 Task 7 — signal engine — DONE 2026-09-13.** `src/domain/engine.ts`:
       §6 quality gate (ROCE / 5y FCF / D-E with a finance-sector waiver / red flags, **fail-closed
       on unknowns**) → composite valuation 30 / trend 30 / earnings 20 / fit 20 → HIGH/MEDIUM/
@@ -208,7 +221,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
+| *(this session)* | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
+| `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
 
 (End of file)

@@ -114,7 +114,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) — **implemented 2026-09-11** |
 | `src/sources/llm-narration.ts` | OpenRouter narrative step (PRD 6.7) — never originates numbers; env `WEEKLY_LLM_MODEL` |
 | `src/domain/engine.ts` | `SATELLITE_WEIGHTS`, `MF_WEIGHTS`, `BANDS`, `QUALITY`, `FINANCE_SECTORS`, `scoreSatellite`, `sectorMedianPe`, `rankMfs`, `persistSignalScores`, `loadEngineInputs` — §6 satellite composite (quality gate → valuation 30 / trend 30 / earnings 20 / fit 20) + MF ranking (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10). `scoreSatellite` returns **null when the name is blocked by a stale input** (FR-31) and a row with `composite: null, qualityPassed: false` when the gate fails. Returns derive from `bigint` paise / nav micros through integer bps, never a float. `gsecYieldPct` is a **required caller input** — no ingestion source exists for it — **implemented 2026-09-13** |
-| `src/domain/alloc-engine.ts` | §6.4 monthly drift + tax-aware rebalance rec; April annual proposal (FR-13) |
+| `src/domain/alloc-engine.ts` | `TAX_POLICY_NOTE`, `isRebalanceTarget`, `sellCandidates`, `rebalanceRec(state, monthYear)` — §6.4 monthly drift as a *recommendation* + the April annual proposal (FR-13). Takes the Phase 0 `NetWorth` as its basis and **throws if the positions disagree with it**; sizes every move at the drift to the nearest band edge, never past it. Tax preference is one rule — new money before a sale, trims ordered losses-first, unknown cost basis last — and `TAX_POLICY_NOTE` states what it does *not* compute. EPF is never a target in either direction (owner decision); the Kolkata property is a liability line, so it cannot reach the engine — **implemented 2026-09-13** |
 | `src/domain/sell-triggers.ts` | §6.5 triggers 1–5,7 monthly; 6 = documented Phase 2 stub (FR-15) |
 | `src/domain/maturities.ts` | bond redemption events + 14-day digest alert (Sammaan Task 1) — **implemented 2026-09-11** |
 | `src/domain/recommendations.ts` | FR-11 builders (primary + exactly 2 alternates, ≤150w theses, IPS citations), FR-12 caps + 3 overrides, suppressions |
@@ -146,7 +146,8 @@ parsing + ingestion with mutation checks. `tests/sources/screener.test.ts` (8 te
 parsing + ingestion with mutation checks. `tests/domain/engine.test.ts` (19 tests) covers the
 §6 quality gate, composite banding, relative strength, MF ranking and the `signal_scores`
 round-trip; its FR-31 case composes the real `assessStaleness` → `blockedInstruments` chain.
-Suite: **487 passed** across 63 files.
+`tests/domain/alloc-engine.test.ts` (11 tests) covers in-band reporting, the seed's real gold
+shortfall, the tax preference and the April proposal. Suite: **498 passed** across 64 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic

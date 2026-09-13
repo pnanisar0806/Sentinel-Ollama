@@ -285,3 +285,27 @@ avs table allows corrections (no append-only trigger).
   turns both blocked-name tests red. Full suite **487 passed**, `tsc --noEmit` clean.
 - **Owner input needed:** the 10Y G-sec yield has no ingestion source and is a required
   `EngineContext` input — logged under Waiting on OWNER, not invented in `ASSUMPTIONS`.
+
+## 2026-09-13 (Phase 1 Task 8 — allocation engine)
+
+- **Phase 1 Task 8 complete.** `src/domain/alloc-engine.ts`: `rebalanceRec(state, monthYear)`
+  (FR-13 drift check as a recommendation; April = the annual proposal), `sellCandidates`,
+  `isRebalanceTarget`, `TAX_POLICY_NOTE`.
+- **One net-worth basis, enforced.** The Phase 0 `NetWorth` is the basis and the positions are
+  only used to name candidates; a state whose two halves disagree **throws** rather than being
+  averaged over — the same stance `allocationDrift` already takes on an inconsistent total.
+- **Tax preference is one rule, not an engine.** Dilute an overweight class with new money
+  (a load-free SIP redirection creates no realisation), and only when no route can absorb the
+  drift propose a trim, ordered losses-first → smallest gain → unknown cost basis last.
+  `TAX_POLICY_NOTE` says what it does NOT compute: holding periods, LTCG/STCG, the §112A
+  exemption, indexation, set-off. We hold aggregated positions, not per-lot acquisition dates,
+  so any tax number would be invented — the owner prices a sale with his CA.
+- **Never past the band edge.** A trim is sized at `driftPaise` to the nearest edge and the last
+  slice is capped, so no recommendation forces a sale beyond what the IPS asks.
+- Owner constraints hold structurally: EPF is not a target in either direction (`isRebalanceTarget`),
+  and the Kolkata property is a liability line — never a position — so it cannot reach the engine.
+- Against the real seed the gold shortfall sizes at exactly the drift row's `driftPaise`
+  (₹2,04,098.68), derived in the test from `allocationDrift` rather than hard-coded.
+- 11 tests in `tests/domain/alloc-engine.test.ts`. Mutation-checked: removing the band-edge cap
+  and removing the dilution-before-sale preference each turn a test red. Suite **498 passed**,
+  `tsc --noEmit` clean.
