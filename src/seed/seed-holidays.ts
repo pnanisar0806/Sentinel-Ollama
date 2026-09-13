@@ -3,11 +3,13 @@ import type { Db } from '../db/client.js';
 /**
  * NSE capital-market trading holidays.
  *
- * PROVENANCE — read this before trusting a date. NSE's own `/api/holiday-master` endpoint
- * blocks non-browser clients, so this list was cross-checked against two independent
- * broker mirrors (Groww and Upstox, fetched 2026-09-13) which agreed **exactly** on all
- * fifteen forward dates. It is second-hand and is an OWNER TRUE-UP ITEM: confirm against
- * NSE's "Trading Holidays — Capital Market Segment" circular.
+ * PROVENANCE — **verified against NSE itself on 2026-09-13**, read in a real browser from
+ * nseindia.com/resources/exchange-communication-holidays ("Holidays for the calendar year
+ * 2026 – Equities", Trading Holidays tab). Its API blocks non-browser clients, which is why
+ * this needed a browser rather than a fetch. All 16 dates below match that table exactly,
+ * including 15-Jan (the Maharashtra municipal election day two broker mirrors disagreed on).
+ * NSE's own note: "November 08, 2026 shall be a trading holiday on account of Diwali Laxmi
+ * Pujan. Muhurat Trading will be conducted on that day." 
  *
  * The asymmetry that makes a wrong entry expensive: a MISSING holiday costs one loud
  * failed sync step, while a WRONG holiday silently skips a real trading day and starves

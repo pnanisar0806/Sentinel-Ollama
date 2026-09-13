@@ -225,15 +225,25 @@ MEMORY.md; the code map lives in index.md.
 ## Waiting on OWNER
 
 - [x] **Weekly cadence Sat 08:00 → Sunday 10:00 IST — SIGNED OFF 2026-09-13, shipped in Task 11.**
-- [ ] **Starter watchlist review — and a provenance problem.** The 40 names in
-      `src/seed/seed-watchlist.ts` are all tagged `source: 'advisor'`, but **no model curates
-      them at runtime**: it is a static file whose names and theses were written by an LLM in a
-      coding session (Task 6, 2026-09-11) from recall, with no market data in front of it. The
-      engine scores only what is in that table, so the LLM effectively originated the universe —
-      uncomfortably close to the rule that it never originates a rank. Options: prune by hand, or
-      regenerate the universe from a real screener.in cohort once imported (preferred).
+- [ ] **Watchlist shortlisting is now an LLM job — RUN IT.** Owner decision 2026-09-13: the
+      model shortlists. `pnpm watchlist:propose [--limit N] [--dry-run]` drafts from
+      `watchlistCandidates` (excludes held + already-watched, §6.1) and records picks as
+      `source: 'llm-advisor'` proposals the weekly report shows as awaiting sign-off. **It can
+      only choose from instruments that already exist in `instruments`** — so today the pool is
+      tiny, and the run gets genuinely useful only after a real screener import widens it.
+      The 40 static `'advisor'` names in `src/seed/seed-watchlist.ts` remain LLM-recall from the
+      Task 6 session; replace them with a proposed shortlist once the pool is real.
 - [ ] **Phase 1 plan review** — `docs/superpowers/plans/2026-09-05-sentinel-phase-1.md`
       scope calls 1–7 on the first page.
+- [ ] **SCREENER COLUMN SPEC IS WRONG — confirmed against your live account 2026-09-13.**
+      A real screen shows `S.No. | Company | CMP Rs. | P/E | Mar Cap Rs.Cr. | Div Yld % |
+      NP Qtr Rs.Cr. | Qtr Profit Var % | Sales Qtr Rs.Cr. | Qtr Sales Var % | ROCE % | Debt / Eq`.
+      Our pinned `SCREENER_COLUMNS` overlaps on `P/E` ALONE, so a real export currently parses to
+      zero rows. Screener's EDIT COLUMNS can add ROE / P/B / EPS / 5y CAGRs / promoter holding,
+      but **`Symbol`, `Industry`, `FCF 5Y` and `Red Flags` have no native column** — and the
+      quality gate reads the last two, while instrument mapping assumes a ticker screener does
+      not export (it identifies a row by company NAME). Not guessed at a second time: needs one
+      real exported file + a decision on the two missing gate inputs.
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
@@ -242,13 +252,10 @@ MEMORY.md; the code map lives in index.md.
       (`archives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm<DD><MON><YYYY>bhav.csv.zip`)
       and the CSV column names are fixture-verified only. First live `pnpm sync` on a trading day
       settles it; a moved path raises `SYNC_FAILURE/nse-bhavcopy` rather than degrading quietly.
-- [ ] **NSE 2026 holiday calendar — SEEDED 2026-09-13, needs your confirmation.** 16 dates +
-      the Muhurat Sunday in `src/seed/seed-holidays.ts`. **Second-hand provenance:** NSE's own
-      `/api/holiday-master` blocks non-browser clients, so this was cross-checked against two
-      independent broker mirrors (Groww, Upstox) that agreed exactly on all 15 forward dates.
-      Confirm against NSE's "Trading Holidays — Capital Market Segment" circular. The asymmetry
-      matters: a MISSING holiday costs one loud failed step, a WRONG one silently skips a real
-      trading day and starves every price-dependent engine.
+- [x] **NSE 2026 holiday calendar — DONE + VERIFIED AGAINST NSE 2026-09-13.** Read from
+      nseindia.com in a real browser (its API blocks non-browser clients); all 16 dates in
+      `src/seed/seed-holidays.ts` match NSE's own table exactly, including 15-Jan, which the
+      broker mirrors disagreed on. Muhurat Sunday 2026-11-08 confirmed from NSE's own note.
       It also fixed a real bug: the weekend-only rule was wrong in BOTH directions — it asked
       NSE for a file on ~15 holidays, and it would have skipped **Sunday 2026-11-08 Muhurat
       trading**, when the exchange IS open. `isTradingDay(db, date)` now decides both.

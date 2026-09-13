@@ -16,7 +16,8 @@
     "indmoney:login": "tsx --env-file=.env src/jobs/indmoney-login.ts",
     "ui": "tsx --env-file=.env src/ui/server.ts",
     "web": "pnpm --dir web dev",
-    "screener:import": "tsx src/jobs/screener-import.ts"
+    "screener:import": "tsx src/jobs/screener-import.ts",
+    "watchlist:propose": "tsx --env-file=.env src/jobs/watchlist-propose.ts"
   },
   "keywords": [],
   "author": "",

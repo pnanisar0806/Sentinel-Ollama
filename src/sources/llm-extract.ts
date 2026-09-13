@@ -10,35 +10,17 @@ import { rupees, type Paise } from '../money/paise.js';
  * dropped, never inferred.
  */
 
-export const DEFAULT_LLM_MODEL = 'google/gemma-4-31b-it:free';
+import { VISION_MODEL_CHAIN } from '../config/models.js';
+
+export { VISION_MODEL_CHAIN };
+
 /**
- * Every free vision-capable model on OpenRouter, ordered for THIS task (reading
- * financial-statement screenshots, returning strict JSON):
- *
- *  1. gemma-4-31b-it        — strongest dense generalist vision; reliable JSON discipline
- *  2. minimax-m3            — frontier-class generalist, 1M ctx; strong doc understanding
- *  3. dots-3-note-preview   — document/OCR specialist (great at tables); 'preview' = less stable
- *  4. gemma-4-26b-a4b-it    — lighter/faster Gemma MoE; solid second Gemma
- *  5. inkling               — serious lab, 1M ctx, but unproven at OCR-style extraction
- *  6. inkling-small         — its smaller sibling
- *  7. nemotron-3-nano-omni  — tiny active params (A3B); last resort
- *
- * EXCLUDED: nvidia/nemotron-3.5-content-safety:free — it is a safety CLASSIFIER,
- * not an extraction model; it would refuse or nonsense the task.
- *
- * Free models share OpenRouter's public upstream pool, which is regularly saturated
- * (429 'temporarily rate-limited upstream'): the primary retries once, then the chain
- * walks with a short pause between models. Order = preference.
+ * Vision extraction runs on the Ling 3.0 VL model first (owner decision 2026-09-13 — one
+ * model family for the whole project), then walks the free chain when the pool saturates.
+ * The finance-tuned `ling-3.0-flash-fin` cannot appear here: it is text-only.
  */
-export const LLM_MODEL_CHAIN = [
-  'google/gemma-4-31b-it:free',
-  'minimax/minimax-m3:free',
-  'dots-studio/dots-3-note-preview:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'thinkingmachines/inkling:free',
-  'thinkingmachines/inkling-small:free',
-  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
-];
+export const DEFAULT_LLM_MODEL = VISION_MODEL_CHAIN[0];
+export const LLM_MODEL_CHAIN = [...VISION_MODEL_CHAIN];
 
 export interface LlmProposal {
   /** Zero-based index into the positions list passed in; null = unmatched. */

@@ -12,9 +12,22 @@ class SourceError extends Error {
 }
 
 /**
- * Pinned column contract for screener.in export.
- * This is the referential DOCUMENT of the format.
- * Real exports may add columns; parser consolidates with warnings.
+ * Pinned column contract for a screener.in export.
+ *
+ * ⚠️ THIS SPEC DOES NOT MATCH A REAL SCREENER EXPORT. Checked against a live logged-in
+ * screen on 2026-09-13: the actual result table reads `S.No. | Company | CMP Rs. | P/E |
+ * Mar Cap Rs.Cr. | Div Yld % | NP Qtr Rs.Cr. | Qtr Profit Var % | Sales Qtr Rs.Cr. |
+ * Qtr Sales Var % | ROCE % | Debt / Eq`. Only `P/E` overlaps with the names below, so a
+ * real export parsed against this spec yields a warning per row and no data at all.
+ *
+ * Screener has an "EDIT COLUMNS" control, so several of the missing fields (ROE, P/B, EPS,
+ * 5-year CAGRs, promoter holding) can be added to a screen — but `Symbol`, `Industry`,
+ * `FCF 5Y` and `Red Flags` have no native equivalent, and the quality gate reads the last
+ * two. The instrument mapping also assumes a ticker column that the export does not have;
+ * screener identifies a row by company NAME.
+ *
+ * Left in place deliberately rather than guessed at a second time: the resolution is one
+ * real exported file from the owner's account, which is the standing live-test item.
  */
 export const SCREENER_COLUMNS = [
   'Name',                    // Company name

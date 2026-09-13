@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractHoldingsFromImage } from '../../src/sources/llm-extract.js';
+import { extractHoldingsFromImage, LLM_MODEL_CHAIN } from '../../src/sources/llm-extract.js';
 
 const POSITIONS = [
   { name: 'Tata Motors Ltd', instrumentId: 'IND:INDS01789', account: 'zerodha' },
@@ -25,7 +25,7 @@ describe('extractHoldingsFromImage', () => {
     const headers = new Headers(captured!.init.headers);
     expect(headers.get('Authorization')).toBe('Bearer K');
     const body = JSON.parse(String(captured!.init.body));
-    expect(body.model).toBe('google/gemma-4-31b-it:free');
+    expect(body.model).toBe(LLM_MODEL_CHAIN[0]);
     expect(body.messages[0].content).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,QQ==' } }),
     ]));
@@ -112,9 +112,9 @@ describe('extractHoldingsFromImage', () => {
     });
 
     // primary retried once, then the chain moved to the next free pool
-    expect(calledModels[0]).toBe('google/gemma-4-31b-it:free');
-    expect(calledModels[1]).toBe('google/gemma-4-31b-it:free');
-    expect(calledModels[2]).toBe('minimax/minimax-m3:free');
+    expect(calledModels[0]).toBe(LLM_MODEL_CHAIN[0]);
+    expect(calledModels[1]).toBe(LLM_MODEL_CHAIN[0]);
+    expect(calledModels[2]).toBe(LLM_MODEL_CHAIN[1]);
     expect(proposals[0]!.costPaise).toBe(6_300_000n);
   });
 });

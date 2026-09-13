@@ -9,6 +9,8 @@
  * report.
  */
 
+import { OPENROUTER_CHAT_URL, TEXT_MODEL } from '../config/models.js';
+
 export const NARRATION_PROMPT = [
   'You are writing the narrative section of a single investor\'s weekly portfolio report.',
   'You will be given the engine\'s finished output as bullets and JSON.',
@@ -20,7 +22,8 @@ export const NARRATION_PROMPT = [
   'Write at most 200 words of plain prose. No headings, no bullet list, no markdown.',
 ].join('\n');
 
-export const DEFAULT_NARRATION_MODEL = 'anthropic/claude-sonnet-4-5';
+/** Owner decision 2026-09-13: one model family for the project. See `config/models.ts`. */
+export const DEFAULT_NARRATION_MODEL = TEXT_MODEL;
 
 export interface NarrationDeps {
   /** OpenRouter key. Absent ⇒ no narration, and that is a supported state, not an error. */
@@ -42,7 +45,7 @@ export async function narrate(deps: NarrationDeps): Promise<string | null> {
   const doFetch = deps.fetchImpl ?? fetch;
 
   try {
-    const res = await doFetch('https://openrouter.ai/api/v1/chat/completions', {
+    const res = await doFetch(OPENROUTER_CHAT_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${deps.apiKey}`,

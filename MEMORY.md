@@ -1472,3 +1472,48 @@ sits in that table, so the LLM originated the *universe* even though it never or
 — which is in tension with "the LLM never originates a number or rank" (PRD 6.7). Preferred fix:
 regenerate the universe from a real screener.in cohort once the owner imports one, with his
 pruning on top. Until then, treat the list as a placeholder, not as advice.
+
+---
+
+## Owner decisions 2026-09-13 — one model family, LLM shortlisting, verified calendar
+
+**ONE MODEL FOR THE PROJECT (owner, explicit).** `inclusionai/ling-3.0-flash-fin:free` on the
+existing OpenRouter key does every LLM job. Chosen ids live in ONE place, `src/config/models.ts`.
+
+- **The finance model is TEXT-ONLY** — verified against OpenRouter's own catalogue
+  (`input_modalities: ["text"]`, 262k ctx). It physically cannot read a statement screenshot;
+  an earlier probe of the same model on opencode Zen returned `No endpoints found that support
+  image input`. Its sibling **`inclusionai/ling-3.0-flash-vl:free`** takes `text,image,video`
+  and leads `VISION_MODEL_CHAIN`. Same family, split by capability, not by preference.
+  Do not put `-fin` in front of an image — it 400s on every upload.
+- Tests assert the wiring by DERIVING from the constants (`LLM_MODEL_CHAIN[0]`), never by
+  restating a model id — the two that hard-coded `gemma-4-31b` went red on this swap.
+
+**THE LLM SHORTLISTS THE WATCHLIST (owner, explicit — supersedes my §6.7 concern).**
+`src/sources/llm-watchlist.ts` + `pnpm watchlist:propose`. The division that keeps §6.7 intact:
+the model proposes **names and one sentence of reasoning**; the engine still decides everything
+carrying a number. Enforced in code, not trusted to the prompt: a pick must already exist in
+`instruments` (an invented ticker is dropped, never created), held names are excluded (§6.1),
+and rows land as `source: 'llm-advisor'` PROPOSALS the weekly report shows as awaiting sign-off.
+Pool quality is the limit — it can only choose from instruments we already know, so this gets
+useful after a real screener import.
+
+**NSE 2026 holiday calendar VERIFIED at source.** Read from nseindia.com in a real browser (the
+API blocks non-browser clients). All 16 dates match, including 15-Jan, which two broker mirrors
+disagreed on — so the cross-check was right and is now first-hand.
+
+### The screener column spec is wrong (confirmed against the owner's live account 2026-09-13)
+
+A real screen renders `S.No. | Company | CMP Rs. | P/E | Mar Cap Rs.Cr. | Div Yld % | NP Qtr
+Rs.Cr. | Qtr Profit Var % | Sales Qtr Rs.Cr. | Qtr Sales Var % | ROCE % | Debt / Eq`.
+`SCREENER_COLUMNS` overlaps on **`P/E` alone**, so a real export parses to zero usable rows.
+EDIT COLUMNS can add ROE / P/B / EPS / 5y CAGRs / promoter holding, but **`Symbol`, `Industry`,
+`FCF 5Y` and `Red Flags` have no native column** — and the §6 quality gate reads FCF and red
+flags, while `importScreener` maps rows by TICKER, which screener does not export (it identifies
+a row by company name). Deliberately NOT patched by guessing a second mapping: it needs one real
+exported file plus an owner decision on the two missing gate inputs.
+
+**Pattern worth naming: four artifacts in this project were written from imagination and
+presented as spec** — the 40 watchlist names, `SCREENER_COLUMNS`, the "shipped" screener
+staleness check, and the "shipped" bhavcopy downloader. Anything describing an EXTERNAL format
+or universe is a hypothesis until it has touched the real thing.

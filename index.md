@@ -24,6 +24,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 
 | File | Exports / role |
 |---|---|
+| `src/config/models.ts` | `TEXT_MODEL` (`inclusionai/ling-3.0-flash-fin:free`), `VISION_MODEL_CHAIN` (led by `ling-3.0-flash-vl:free`), `OPENROUTER_CHAT_URL` — **the one place a model id is chosen** (owner decision 2026-09-13: one family for the project). The finance model is TEXT-ONLY per OpenRouter's catalogue, so vision jobs use its VL sibling |
 | `src/config/assumptions.ts` | `ASSUMPTIONS` — the only place PRD §15.2 planning constants live |
 | `src/config/env.ts` | `loadEnv(source?, purposes?)`, `Purpose`, `CryptoEnv` — validates **per job**: `['crypto']` demands only TOKEN_ENCRYPTION_KEY (and narrows it to `string`), `['telegram']` only the two TELEGRAM vars, **default `[]` — demand nothing** (the old `['all']` default crashed both scheduled jobs on startup over credentials neither reads); `['all']` still demands everything when asked. Each job module exports `ENV_PURPOSES` |
 | `src/db/client.ts` | `Db` interface (4 methods), `openDb(url?)` — PGlite or postgres-js. A **blank-but-present** `DATABASE_URL` throws rather than silently falling back to embedded PGlite (an unset GitHub secret interpolates to `''`) |
@@ -116,6 +117,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/sources/bhavcopy.ts` | `downloadBhavcopy`, `downloadIndexSeries`, `parseEquityBhavcopy`, `parseIndexBhavcopy`, `ingestPrices`, `unzipFirstEntry` — NSE EQ + index bhavcopy → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, never created). NSE serves `.csv.zip`, unpacked with stdlib `node:zlib` — no dependency. A 404 is a non-trading day: zero rows, no incident; anything else is a loud `SYNC_FAILURE`. **URL/columns are unverified against live NSE — see the README provisioning table** — **download implemented 2026-09-13** |
 | `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) — **implemented 2026-09-11** |
 | `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) — **implemented 2026-09-11** |
+| `src/sources/llm-watchlist.ts` | `WATCHLIST_PROMPT`, `watchlistCandidates(db, asOf)`, `proposeWatchlist(deps)`, `applyWatchlistProposals(db, proposals, addedOn)` — LLM watchlist shortlisting (owner decision 2026-09-13). The model picks **names only, from a pool it is given**; a ticker it invents is dropped, never created. Held and already-watched names are excluded (§6.1). Rows land as `source: 'llm-advisor'` proposals awaiting sign-off; the engine still gates every one on real data |
 | `src/sources/llm-narration.ts` | `NARRATION_PROMPT`, `DEFAULT_NARRATION_MODEL`, `narrate(deps)` — PRD 6.7 narration over OpenRouter. Receives the finished engine output and rewrites it; **nothing it returns feeds back**, so a hallucinated figure can never move a score or a size. Returns `null` (never throws) with no key or on any failure, and the report falls back to its deterministic bullets — **implemented 2026-09-13** |
 | `src/domain/engine.ts` | `SATELLITE_WEIGHTS`, `MF_WEIGHTS`, `BANDS`, `QUALITY`, `FINANCE_SECTORS`, `scoreSatellite`, `sectorMedianPe`, `rankMfs`, `persistSignalScores`, `loadEngineInputs` — §6 satellite composite (quality gate → valuation 30 / trend 30 / earnings 20 / fit 20) + MF ranking (consistency 40 / expense 20 / tenure 15 / AUM 15 / style 10). `scoreSatellite` returns **null when the name is blocked by a stale input** (FR-31) and a row with `composite: null, qualityPassed: false` when the gate fails. Returns derive from `bigint` paise / nav micros through integer bps, never a float. `gsecYieldPct` is a **required caller input** — no ingestion source exists for it — **implemented 2026-09-13** |
 | `src/domain/alloc-engine.ts` | `TAX_POLICY_NOTE`, `isRebalanceTarget`, `sellCandidates`, `rebalanceRec(state, monthYear)` — §6.4 monthly drift as a *recommendation* + the April annual proposal (FR-13). Takes the Phase 0 `NetWorth` as its basis and **throws if the positions disagree with it**; sizes every move at the drift to the nearest band edge, never past it. Tax preference is one rule — new money before a sale, trims ordered losses-first, unknown cost basis last — and `TAX_POLICY_NOTE` states what it does *not* compute. EPF is never a target in either direction (owner decision); the Kolkata property is a liability line, so it cannot reach the engine — **implemented 2026-09-13** |
@@ -162,7 +164,7 @@ caps against stored rows, and a cross-task round-trip proving Task 9 reads what 
 recommendation with every timestamp shown, and a diff proving a deliberately stale price keeps
 a name out of every live recommendation. `tests/domain/scoring.test.ts` (15 tests) covers the
 §13 harness, including the database-level refusal to rewrite a creation snapshot.
-Suite: **581 passed** across 69 files.
+Suite: **590 passed** across 70 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic
@@ -200,7 +202,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 
 ## Scripts
 
-`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` ·
+`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` · `watchlist:propose` ·
 `telegram:bot` · `indmoney:login` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
 
 `indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`
