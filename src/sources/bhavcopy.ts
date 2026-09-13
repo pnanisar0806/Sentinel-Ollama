@@ -1,3 +1,4 @@
+import { inflateRawSync } from 'node:zlib';
 import type { Db } from '../db/client.js';
 
 class SourceError extends Error {
@@ -73,6 +74,9 @@ async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
       }
       return response;
     } catch (e) {
+      // A 404 is the answer, not a hiccup: `retryable` existed and was ignored, so a
+      // non-trading day cost three round trips before reporting the same thing.
+      if (e instanceof SourceError && !e.retryable) throw e;
       lastError = e instanceof Error ? e : new Error(String(e));
       if (attempt < retries) {
         await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
@@ -109,30 +113,68 @@ function parseCsv(text: string): string[][] {
   });
 }
 
-export async function downloadBhavcopy(dateIso: string): Promise<{ rows: BhavcopyRow[]; report: BhavcopyReport }> {
-  const date = new Date(`${dateIso}T00:00:00`);
-  const url = buildEquityUrl(date);
-  const report: BhavcopyReport = {
-    date: dateIso,
-    totalRows: 0,
-    inserted: 0,
-    updated: 0,
-    unknownSymbols: [],
-    errors: [],
-  };
+/**
+ * Extracts the first entry of a single-file ZIP with `node:zlib` — NSE serves
+ * `.csv.zip`, and this is the whole reason a dependency is not needed for it.
+ *
+ * Handles the two methods NSE uses (stored and deflate). When the local header carries no
+ * compressed size (a streamed archive with a data descriptor), the payload runs to the
+ * central directory, so we scan for its signature rather than guessing a length.
+ */
+export function unzipFirstEntry(buf: Buffer): string {
+  if (buf.length < 30 || buf.readUInt32LE(0) !== 0x04034b50) {
+    throw new SourceError('BAD_ZIP', 'not a zip archive', false);
+  }
+  const method = buf.readUInt16LE(8);
+  const start = 30 + buf.readUInt16LE(26) + buf.readUInt16LE(28);
+  let size = buf.readUInt32LE(18);
+  if (size === 0) {
+    const cd = buf.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]), start);
+    size = (cd === -1 ? buf.length : cd) - start;
+  }
+  const data = buf.subarray(start, start + size);
+  if (method === 0) return data.toString('utf8');
+  if (method !== 8) throw new SourceError('BAD_ZIP', `unsupported zip method ${method}`, false);
+  return inflateRawSync(data).toString('utf8');
+}
 
+/**
+ * Downloads and parses one day's NSE equity bhavcopy.
+ *
+ * A non-trading day answers 404 and returns zero rows without raising — that is a calendar
+ * fact, not a failure. Anything else propagates to `runSync`'s step contract (PRD §8.2).
+ *
+ * PROVISIONING: the archive URL and CSV column names are verified against live NSE at
+ * provisioning time, not here — see the README checklist. If NSE moves the path, this
+ * raises a loud SYNC_FAILURE rather than degrading quietly.
+ */
+export async function downloadBhavcopy(dateIso: string): Promise<{ rows: BhavcopyRow[]; report: BhavcopyReport }> {
+  const report: BhavcopyReport = {
+    date: dateIso, totalRows: 0, inserted: 0, updated: 0, unknownSymbols: [], errors: [],
+  };
   try {
-    const response = await fetchWithRetry(url);
-    const arrayBuffer = await response.arrayBuffer();
-    
-    // For now, we'll handle the zip parsing - in tests we'll use uncompressed CSV
-    // Production would need a zip library; for Phase 1 we'll test with CSV fixtures
-    throw new Error('Zip parsing not implemented - use CSV fixture for testing');
+    const response = await fetchWithRetry(buildEquityUrl(new Date(`${dateIso}T00:00:00Z`)));
+    const rows = parseEquityBhavcopy(unzipFirstEntry(Buffer.from(await response.arrayBuffer())), dateIso);
+    report.totalRows = rows.length;
+    return { rows, report };
   } catch (e) {
-    if (e instanceof SourceError && e.code === 'NOT_FOUND') {
-      // Non-trading day (holiday/weekend) - return empty without error
-      return { rows: [], report };
-    }
+    if (e instanceof SourceError && e.code === 'NOT_FOUND') return { rows: [], report };
+    throw e;
+  }
+}
+
+/** The index series for the same day — the benchmark every relative-strength number needs. */
+export async function downloadIndexSeries(dateIso: string): Promise<{ rows: IndexBhavcopyRow[]; report: BhavcopyReport }> {
+  const report: BhavcopyReport = {
+    date: dateIso, totalRows: 0, inserted: 0, updated: 0, unknownSymbols: [], errors: [],
+  };
+  try {
+    const response = await fetchWithRetry(buildIndexUrl(new Date(`${dateIso}T00:00:00Z`)));
+    const rows = parseIndexBhavcopy(unzipFirstEntry(Buffer.from(await response.arrayBuffer())), dateIso);
+    report.totalRows = rows.length;
+    return { rows, report };
+  } catch (e) {
+    if (e instanceof SourceError && e.code === 'NOT_FOUND') return { rows: [], report };
     throw e;
   }
 }

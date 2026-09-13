@@ -1414,3 +1414,29 @@ in the weekly report, never executed.
 - Excess return is `instrument bps − benchmark bps`, integer throughout.
 - No separate job: the weekly report runs `runDueEvals` and renders the calibration section.
   Evals fall due on their own clock and the weekly run is where they land.
+
+---
+
+## Phase 1 COMPLETE — Task 13 + the state of the pipeline (2026-09-13)
+
+Tasks 1–13 shipped (11A superseded by `web/`). Suite **576 passed**, `tsc` clean.
+
+- **`runSync` now takes `fetchPrices`/`fetchNavs`**, wired to NSE bhavcopy + index and AMFI in
+  the entrypoint, ordered after the portfolio sources and before anything that reads a price.
+  **A missing fetcher is an explicit stderr skip, never a step that reports success.**
+- **Task 3 shipped two functions that did not work.** `downloadBhavcopy` always threw
+  ('Zip parsing not implemented') and `downloadIndexSeries` never existed, yet both were
+  recorded as delivered. The sync step that "ran" bhavcopy had its download commented out and
+  reported success. **Second instance this phase of a ledger entry describing code that was not
+  there** (the first: screener staleness, Task 5/6). Treat a ledger claim as a lead, never as
+  evidence — grep for the symbol.
+- **NSE `.csv.zip` is unpacked with stdlib `node:zlib`** (`unzipFirstEntry`, stored + deflate,
+  scans for the central directory when the header carries no size). No dependency added to a
+  two-dependency repo.
+- **Unverified by design, now written down:** the NSE archive URL + CSV columns are
+  fixture-verified only (first live trading-day `pnpm sync` settles it; a moved path raises
+  `SYNC_FAILURE/nse-bhavcopy`), and the `holidays` table is EMPTY so only weekends are skipped.
+  Both are owner/provisioning items in PENDING — not guessed.
+- README carries the Phase 1 handoff: the data-flow diagram, how a recommendation is built, the
+  two ways it is stopped (FR-31 staleness, IPS §3.7 policy), what the engine will not invent,
+  and the §15.1 provisioning table with real statuses.

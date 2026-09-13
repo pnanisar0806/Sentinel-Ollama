@@ -80,6 +80,74 @@ failure — the text is stored verbatim and rendered via `renderIps`.
 
 ---
 
+## Phase 1 — how a recommendation gets built, and how it gets blocked
+
+Phase 1 ("Think") is complete: the agent now scores, sizes, gates and scores-after-the-fact,
+all on paper. Nothing executes, and there is no code path that could.
+
+```
+  EOD sources                  engines                        output
+  ───────────                  ───────                        ──────
+  NSE bhavcopy ─┐                                          ┌─ weekly report (Sun 10:00 IST)
+  NSE index    ─┤                                          │    1 signal review
+  AMFI NAV     ─┼─► staleness ─► blockedInstruments ──┐    │    2 watchlist changes
+  screener.in  ─┤    (FR-31)                          │    │    3 recommendation pipeline
+  INDmoney     ─┘                                     ▼    │    4 staleness + blocked names
+        │                       engine.ts ──────► recommendations.ts ──► 5 scoring (§13)
+        │                       (§6 composite)    (FR-11 primary + 2    │  6 narrative (§6.7)
+        ├──► networth ─────►    alloc-engine.ts    alternates, FR-12    │
+        │                       (FR-13 drift)      caps → suppressed)   └─ daily digest
+        └──► positions ────►    sell-triggers.ts                           (unchanged)
+                                (§6.5 exits)
+```
+
+**The path a name takes.** It enters the `watchlist` (advisor-curated, owner signs off on
+changes). The weekly run scores it: the §6 quality gate first — ROCE, five-year FCF, D/E with a
+finance-sector waiver, screener red flags, all **fail-closed on an unknown** — then a composite
+of valuation 30 / trend 30 / earnings 20 / fit 20, banded HIGH / MEDIUM / WATCH / NONE. A
+MEDIUM-or-better name becomes an FR-11 recommendation: a primary leg plus **exactly two**
+alternates (A1 the same intent through a different instrument, or the broad-index route; A2 a
+different intent, defaulting to doing nothing), each with a thesis under 150 words and at least
+one IPS clause that must exist in `src/config/ips-v1.md`. FR-12 then caps it: four per calendar
+month, no repeat BUY on a name inside twelve months, overridable only by an IPS spec change, a
+material adverse falsification, or an owner directive. **A capped action is logged to
+`suppressed_actions` and shown in the report — never dropped.**
+
+**The two ways it gets stopped.**
+
+1. **Stale data (FR-31).** Every source carries a freshness limit in `src/sources/staleness.ts`.
+   When one lapses, `blockedInstruments` names every position that depended on it — its
+   portfolio source, FX for anything non-INR, NAV for funds, prices for equity/ETF/bond,
+   fundamentals for equity. A blocked name is **not scored at all**, and an open recommendation
+   raised before the lapse is **withheld** from the pipeline and listed under staleness instead.
+   You cannot act on what cannot be valued today.
+2. **Policy.** IPS §3.7 allows the twelve-month minimum hold to be overridden only by thesis
+   falsification, a red-flag event, or a hard-cap breach. An exit trigger outside that list
+   (sustained underperformance, a better alternative) is still surfaced — flagged
+   `blockedByMinimumHold` — so you can see the engine wanted out and the policy said wait.
+
+**What the engine will not invent.** The 10Y G-sec yield (no ingestion source — supply
+`GSEC_YIELD_PCT` or the signal review states that it did not run), a cost basis it cannot read,
+a tax figure (`TAX_POLICY_NOTE` names what is not computed), a rating action, and a hit-rate
+from fewer than 20 evaluations in a bucket.
+
+### Phase 1 provisioning verification (PRD §15.1)
+
+Do these before trusting the first live weekly report. Each one fails loudly rather than
+quietly, but "loudly" still means a week of no data.
+
+| Item | How to verify | Status |
+|---|---|---|
+| NSE equity bhavcopy URL + CSV columns | run `pnpm sync` on a trading day; a moved path raises `SYNC_FAILURE/nse-bhavcopy` | **unverified against live NSE** |
+| NSE index series URL + columns | same run; feeds every relative-strength number | **unverified against live NSE** |
+| AMFI `NAVAll.txt` format | `pnpm sync`; unmapped scheme codes are logged, not invented | fixture-verified only |
+| `instruments.scheme_code` / `isin` coverage | unmapped rows are counted on stderr — they are silently unpriced otherwise | seed covers 6 MFs, 5 ISINs |
+| OpenRouter weekly model id + cost (~₹1.5–3k/mo) | set `WEEKLY_LLM_MODEL`; no key = deterministic bullets, no failure | owner |
+| NSE 2026 holiday calendar | the `holidays` table is **empty**; only weekends are skipped, so a holiday costs one loud 404-shaped skip | **owner input needed** |
+| `GSEC_YIELD_PCT` | blank means "not configured" — never 0% | **owner input needed** |
+
+---
+
 ## Scripts
 
 | Command | Description |
@@ -87,8 +155,11 @@ failure — the text is stored verbatim and rendered via `renderIps`.
 | `pnpm test` | Run all tests (vitest) |
 | `pnpm migrate` | Run DB migrations |
 | `pnpm seed` | Seed the database with the owner's real balance sheet |
-| `pnpm sync` | Sync holdings from INDmoney (OAuth) and Kite (read-only) |
+| `pnpm sync` | Sync holdings from INDmoney, FX, NSE bhavcopy + index, AMFI NAVs |
 | `pnpm digest` | Compose and send the daily digest via Telegram |
+| `pnpm report` | Weekly deep report (FR-51). `--as-of YYYY-MM-DD` reproduces a past week |
+| `pnpm screener:import <csv>` | Import a screener.in export into `fundamentals` |
+| `pnpm web` | Local product UI on :3001 |
 | `pnpm ips 3.5` | Print the concentration-caps clause (IPS §3.5) |
 | `pnpm indmoney:login` | One-time interactive OAuth login for INDmoney |
 
@@ -102,10 +173,13 @@ src/
   db/            PGlite / postgres-js client, migration runner
   money/         Paise, Cents, FX — branded bigint, no floats
   seed/          Owner's verified balance sheet (loans, bonds, RSU, equity)
-  sources/       INDmoney (OAuth + file fallback), Kite (read-only), FX, staleness
-  domain/        loans, surplus, RSU, net worth, allocation, buckets, funded-status, IPS
-  notify/        Telegram (owner-locked), daily digest (pure)
-  jobs/          sync, digest, keepalive — entrypoints for GitHub Actions
+  sources/       INDmoney (OAuth + file fallback), FX, NSE bhavcopy, AMFI, screener,
+                 staleness, LLM extraction + narration
+  domain/        loans, surplus, RSU, net worth, allocation, buckets, funded-status, IPS,
+                 engine (§6 signals), alloc-engine (FR-13), sell-triggers (§6.5),
+                 recommendations (FR-11/12), scoring (§13), maturities, redemptions
+  notify/        Telegram (owner-locked), daily digest, weekly report — all pure composers
+  jobs/          sync, digest, report, keepalive — entrypoints for GitHub Actions
 ```
 
 ---

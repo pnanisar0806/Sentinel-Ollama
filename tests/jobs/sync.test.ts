@@ -92,3 +92,68 @@ describe('sync job', () => {
     expect(Number(vests!.n)).toBeGreaterThan(0);
   });
 });
+describe('EOD quote steps (Phase 1 Task 13)', () => {
+  const equityRow = {
+    isin: 'INE040A01034', symbol: 'HDFCBANK', series: 'EQ',
+    close: 1650.25, prevClose: 1640.10, tradeDate: '2026-09-11',
+  };
+
+  it('ingests prices and NAVs when the fetchers are wired', async () => {
+    await db.query(`update instruments set isin = $1 where id = 'NSE:RPOWER'`, [equityRow.isin]);
+    const result = await runSync(db, {
+      now: '2026-09-11T12:00:00Z',
+      sources: [],
+      fetchPrices: async () => ({
+        equity: [equityRow],
+        index: [{ seriesCode: 'NIFTY 500', close: 24000.5, tradeDate: '2026-09-11' }],
+      }),
+      fetchNavs: async () => ({ rows: [] }),
+    });
+
+    expect(result.synced).toContain('nse-bhavcopy');
+    expect(result.synced).toContain('amfi');
+    const [price] = await db.query<{ close_paise: string | number | bigint }>(
+      `select close_paise from prices_eod where instrument_id = 'NSE:RPOWER'`,
+    );
+    // 1650.25 rupees, carried as paise without a float round-trip.
+    expect(BigInt(price!.close_paise)).toBe(165_025n);
+  });
+
+  it('skips the step loudly instead of reporting success with no fetcher', async () => {
+    // The placeholder version ran, did nothing, and recorded a successful sync — the
+    // silent degradation PRD 8.2 forbids.
+    const result = await runSync(db, { now: '2026-09-11T12:00:00Z', sources: [] });
+    expect(result.synced).not.toContain('nse-bhavcopy');
+    expect(result.synced).not.toContain('amfi');
+    expect(result.failed).toEqual([]);
+  });
+
+  it('does not ask NSE for a weekend', async () => {
+    let asked = false;
+    const result = await runSync(db, {
+      now: '2026-09-13T12:00:00Z', // a Sunday
+      sources: [],
+      fetchPrices: async () => {
+        asked = true;
+        return { equity: [], index: [] };
+      },
+    });
+    expect(asked).toBe(false);
+    expect(result.synced).toContain('nse-bhavcopy');
+  });
+
+  it('raises a SYNC_FAILURE when the download itself fails', async () => {
+    const result = await runSync(db, {
+      now: '2026-09-11T12:00:00Z',
+      sources: [],
+      fetchPrices: async () => {
+        throw new Error('NSE moved the archive path');
+      },
+    });
+    expect(result.failed.map((f) => f.source)).toContain('nse-bhavcopy');
+    const open = await db.query<{ subject: string }>(
+      `select subject from incidents where kind = 'SYNC_FAILURE' and resolved_at is null`,
+    );
+    expect(open.map((r) => r.subject)).toContain('nse-bhavcopy');
+  });
+});

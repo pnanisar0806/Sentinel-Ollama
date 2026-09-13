@@ -117,6 +117,17 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 13 — workflows, env, provisioning, README — DONE 2026-09-13. PHASE 1 COMPLETE.**
+      The EOD steps are real: `runSync` gained `fetchPrices`/`fetchNavs`, wired to NSE bhavcopy +
+      index and AMFI in the entrypoint, running after the portfolio sources and before anything
+      that reads a price. **Two documented-but-missing pieces found and built:** `downloadBhavcopy`
+      threw `'Zip parsing not implemented'` on every call and `downloadIndexSeries` did not exist
+      at all, though both were recorded as shipped in Task 3. NSE `.csv.zip` is now unpacked with
+      stdlib `node:zlib` (`unzipFirstEntry`) — no new dependency. The old placeholder step, which
+      ran and reported success having done nothing, is gone. README gained the Phase 1 data-flow
+      + "how a recommendation gets built and blocked" handoff and the §15.1 provisioning table.
+      **576 passed**, tsc clean.
+
 - [x] **Phase 1 Task 12 — scoring harness (§13) — DONE 2026-09-13.** `src/domain/scoring.ts`:
       `snapshotBenchmark` captures the instrument close + index close + conviction the day a
       recommendation is made, and **migration `0012` refuses to rewrite it** (UPDATE allowed
@@ -222,6 +233,13 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
+- [ ] **NSE bhavcopy + index URL/format — UNVERIFIED against live NSE.** The archive path
+      (`archives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm<DD><MON><YYYY>bhav.csv.zip`)
+      and the CSV column names are fixture-verified only. First live `pnpm sync` on a trading day
+      settles it; a moved path raises `SYNC_FAILURE/nse-bhavcopy` rather than degrading quietly.
+- [ ] **NSE 2026 holiday calendar** — the `holidays` table is EMPTY. Only weekends are skipped,
+      so every exchange holiday costs one loud failed step. Not invented here: it needs the real
+      NSE list.
 - [ ] **Calibration minimum N = 20** (`MIN_EVALS_FOR_CALIBRATION`). A stake in the ground, not a
       derived figure: at 4 recommendations/month it is ~half a year of output per conviction
       bucket, and below it one outcome moves the hit-rate by >5 points. Confirm or set your own.
@@ -281,7 +299,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 12 — scoring harness**: `domain/scoring.ts` + migration `0012` (creation snapshot immutable, eval columns writable), calibration section in the weekly report, 15 tests; 568 passed |
+| *(this session)* | **Phase 1 Task 13 — workflows/env/provisioning/README**: real bhavcopy+AMFI sync steps, `unzipFirstEntry` (stdlib zip), `downloadIndexSeries` built, README Phase 1 handoff + provisioning table, 8 tests; 576 passed |
+| `3afe681` | **Phase 1 Task 12 — scoring harness**: `domain/scoring.ts` + migration `0012` (creation snapshot immutable, eval columns writable), calibration section in the weekly report, 15 tests; 568 passed |
 | `5f8a7d2` | **Phase 1 Task 11 — weekly deep report (FR-51)**: `notify/report.ts` + `jobs/report.ts` + `sources/llm-narration.ts`, weekly cron → Sunday 10:00 IST, `pnpm weekly` retired, schedule test re-derived, 14 tests; **Phase 1 DoD met**; 551 passed |
 | `e9ec6e5` | **Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode**: `domain/recommendations.ts` (builder + validator, caps → `suppressed_actions`, paper mode, execution-path scan), 17 tests; 532 passed, tsc clean |
 | `b081ee9` | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |

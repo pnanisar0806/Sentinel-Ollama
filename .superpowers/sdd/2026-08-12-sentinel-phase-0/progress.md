@@ -427,3 +427,31 @@ avs table allows corrections (no append-only trigger).
   `tsc --noEmit` clean.
 - **Owner true-up:** the minimum-N of 20 is a judgement call about how much evidence he wants
   before trusting the calibration table — logged under Waiting on OWNER.
+
+## 2026-09-13 (Phase 1 Task 13 — workflows, env, provisioning, README) — PHASE 1 COMPLETE
+
+- **The EOD steps are real now.** `runSync` takes `fetchPrices`/`fetchNavs`, wired in the
+  entrypoint to NSE bhavcopy + index series and AMFI, running AFTER the portfolio sources and
+  BEFORE anything that reads a price. A missing fetcher is an explicit skip on stderr.
+- **Two pieces recorded as shipped in Task 3 did not exist.** `downloadBhavcopy` ended in
+  `throw new Error('Zip parsing not implemented')` — it downloaded the archive and then always
+  threw — and `downloadIndexSeries` was never written at all, though both are named in Task 3's
+  ledger entry and in `index.md`. The step that "ran" them was a placeholder with the download
+  commented out, so the daily sync recorded **a successful nse-bhavcopy step having done
+  nothing**: the silent degradation PRD §8.2 exists to forbid, sitting inside the job whose
+  whole contract is loud failure.
+- **Fixed with the standard library.** NSE serves `.csv.zip`; `unzipFirstEntry` parses a
+  single-entry archive with `node:zlib` (stored + deflate, and it scans for the central
+  directory when the local header carries no size). No new dependency in a two-dependency repo.
+  Tests build real ZIPs with `deflateRawSync` and round-trip the actual bhavcopy fixture.
+- Fix-on-touch: `fetchWithRetry` retried a 404 three times because `SourceError.retryable`
+  existed and was ignored. A non-trading day now answers once.
+- README gained the Phase 1 handoff — a data-flow diagram, "how a recommendation gets built",
+  "the two ways it gets stopped" (FR-31 staleness and IPS §3.7 policy), "what the engine will
+  not invent" — and the §15.1 provisioning table with each item's real status. Scripts and the
+  architecture tree are current.
+- **Honest about what is unverified:** the NSE archive URL and CSV columns are fixture-verified
+  only, and the `holidays` table is empty. Both are in PENDING as owner/provisioning items
+  rather than guessed at.
+- 8 new tests (4 zip, 4 sync steps). Suite **576 passed**, `tsc --noEmit` clean.
+- **Phase 1 is complete: tasks 1–13, with 11A superseded by the `web/` app.**

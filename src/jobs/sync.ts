@@ -12,7 +12,8 @@ import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
 import { assessStaleness, raiseIncidents } from '../sources/staleness.js';
 import { writeSnapshot, type Source } from '../sources/types.js';
-import { parseEquityBhavcopy, parseIndexBhavcopy, ingestPrices } from '../sources/bhavcopy.js';
+import { downloadBhavcopy, downloadIndexSeries, ingestPrices, type BhavcopyRow, type IndexBhavcopyRow } from '../sources/bhavcopy.js';
+import { downloadDailyNav, ingestNavs, type NavRow } from '../sources/amfi.js';
 import { isMainModule } from '../util/main-module.js';
 import type { Purpose } from '../config/env.js';
 
@@ -30,9 +31,25 @@ const INDMONEY_SCOPES = ['portfolio:read'] as const;
 /** What the FX step returns. Injected so the sync is testable without a network. */
 export type FxFetcher = () => Promise<{ rate: number; asOf: string; source: string }>;
 
+/** EOD quote fetchers. Injected for the same reason as FX: no network in the suite. */
+export type PriceFetcher = (tradeDate: string) => Promise<{ equity: BhavcopyRow[]; index: IndexBhavcopyRow[] }>;
+export type NavFetcher = () => Promise<{ rows: NavRow[] }>;
+
+/** Saturday or Sunday in UTC — neither NSE nor AMFI publishes. */
+function isWeekend(businessDate: string): boolean {
+  const day = new Date(`${businessDate}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
 export async function runSync(
   db: Db,
-  opts: { now: string; sources: Source[]; fetchFx?: FxFetcher },
+  opts: {
+    now: string;
+    sources: Source[];
+    fetchFx?: FxFetcher;
+    fetchPrices?: PriceFetcher;
+    fetchNavs?: NavFetcher;
+  },
 ): Promise<{ synced: string[]; failed: { source: string; error: string }[] }> {
   const businessDate = opts.now.slice(0, 10);
   const synced: string[] = [];
@@ -86,24 +103,43 @@ if (opts.fetchFx) {
     });
   }
 
-  // Bhavcopy EOD price pipeline (Phase 1 Task 3)
-  await step('nse-bhavcopy', async () => {
-    const businessDate = opts.now.slice(0, 10);
-    // Skip weekends/holidays - NSE doesn't publish on non-trading days
-    const dayOfWeek = new Date(businessDate).getDay();
-    if (dayOfWeek === 0 || dayOfWeek === 6) {
-      console.log('Skipping bhavcopy: weekend');
-      return;
-    }
-    
-    // In production, download from NSE. For now, this is a placeholder that would
-    // be replaced with actual download in production.
-    // const equityResp = await fetchWithRetry(buildEquityUrl(new Date(businessDate)));
-    // const indexResp = await fetchWithRetry(buildIndexUrl(new Date(businessDate)));
-    
-    // For testing without network, we skip the actual download
-    // The test fixtures validate the parsing/ingestion logic
-  });
+  // EOD quotes, AFTER the portfolio sources and BEFORE anything that reads a price:
+  // the engine values what the portfolio holds, so prices land first.
+  //
+  // These steps used to be placeholders that did nothing and then reported success —
+  // the exact silent degradation PRD 8.2 forbids. A missing fetcher is now an explicit
+  // skip on stderr, and the staleness engine still ages the table either way.
+  if (opts.fetchPrices) {
+    await step('nse-bhavcopy', async () => {
+      if (isWeekend(businessDate)) {
+        console.error(`nse-bhavcopy skipped: ${businessDate} is a weekend`);
+        return;
+      }
+      const { equity, index } = await opts.fetchPrices!(businessDate);
+      const report = await ingestPrices(db, equity, index, opts.now);
+      if (report.unknownSymbols.length > 0) {
+        console.error(`nse-bhavcopy: ${report.unknownSymbols.length} unmapped symbols ignored`);
+      }
+    });
+  } else {
+    console.error('nse-bhavcopy skipped: no price fetcher wired');
+  }
+
+  if (opts.fetchNavs) {
+    await step('amfi', async () => {
+      if (isWeekend(businessDate)) {
+        console.error(`amfi skipped: ${businessDate} is a weekend`);
+        return;
+      }
+      const { rows } = await opts.fetchNavs!();
+      const report = await ingestNavs(db, rows, opts.now);
+      if (report.unknownSchemes.length > 0) {
+        console.error(`amfi: ${report.unknownSchemes.length} unmapped scheme codes ignored`);
+      }
+    });
+  } else {
+    console.error('amfi skipped: no NAV fetcher wired');
+  }
 
   await persistSchedules(db, `${businessDate.slice(0, 7)}-01`);
 
@@ -195,6 +231,14 @@ if (isMainModule(import.meta.url)) {
     now: new Date().toISOString(),
     sources,
     fetchFx: () => fetchUsdInr(),
+    fetchPrices: async (tradeDate) => {
+      const [{ rows: equity }, { rows: index }] = await Promise.all([
+        downloadBhavcopy(tradeDate),
+        downloadIndexSeries(tradeDate),
+      ]);
+      return { equity, index };
+    },
+    fetchNavs: () => downloadDailyNav(),
   });
   console.log(`synced: ${result.synced.join(', ') || 'none'}`);
   if (result.failed.length) {

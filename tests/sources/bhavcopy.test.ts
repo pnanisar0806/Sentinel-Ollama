@@ -6,7 +6,8 @@ import { installIps } from '../../src/domain/ips.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseEquityBhavcopy, parseIndexBhavcopy, ingestPrices } from '../../src/sources/bhavcopy.js';
+import { parseEquityBhavcopy, parseIndexBhavcopy, ingestPrices, unzipFirstEntry } from '../../src/sources/bhavcopy.js';
+import { deflateRawSync } from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -217,5 +218,44 @@ describe('ingestPrices', () => {
         expect(Number(p.prev_close_paise)).toBe(22610); // 226.10 * 100
       }
     }
+  });
+});
+describe('unzipFirstEntry (NSE serves .csv.zip)', () => {
+  /** Builds a real single-entry ZIP so the test exercises the format, not a stub. */
+  function zipOf(name: string, content: string, method: 'store' | 'deflate'): Buffer {
+    const nameBuf = Buffer.from(name, 'utf8');
+    const raw = Buffer.from(content, 'utf8');
+    const data = method === 'deflate' ? deflateRawSync(raw) : raw;
+    const header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50, 0);
+    header.writeUInt16LE(method === 'deflate' ? 8 : 0, 8);
+    header.writeUInt32LE(data.length, 18);
+    header.writeUInt32LE(raw.length, 22);
+    header.writeUInt16LE(nameBuf.length, 26);
+    return Buffer.concat([header, nameBuf, data]);
+  }
+
+  it('round-trips a deflated entry', () => {
+    const csv = 'SYMBOL,SERIES,CLOSE\nRELIANCE,EQ,1234.50\n';
+    expect(unzipFirstEntry(zipOf('cm12AUG2026bhav.csv', csv, 'deflate'))).toBe(csv);
+  });
+
+  it('reads a stored (uncompressed) entry', () => {
+    const csv = 'a,b\n1,2\n';
+    expect(unzipFirstEntry(zipOf('x.csv', csv, 'store'))).toBe(csv);
+  });
+
+  it('parses a real bhavcopy out of a zip, not just bytes out of a zip', () => {
+    const csv = readFileSync(
+      fileURLToPath(new URL('../fixtures/bhavcopy/cm11SEP2026bhav.csv', import.meta.url)),
+      'utf8',
+    );
+    const rows = parseEquityBhavcopy(unzipFirstEntry(zipOf('cm.csv', csv, 'deflate')), '2026-09-11');
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows).toEqual(parseEquityBhavcopy(csv, '2026-09-11'));
+  });
+
+  it('refuses something that is not a zip rather than returning garbage', () => {
+    expect(() => unzipFirstEntry(Buffer.from('SYMBOL,SERIES\n'))).toThrow(/not a zip/);
   });
 });
