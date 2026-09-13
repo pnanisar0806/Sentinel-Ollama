@@ -20,6 +20,7 @@ import {
   type Recommendation,
 } from '../domain/recommendations.js';
 import { narrate, type NarrationDeps } from '../sources/llm-narration.js';
+import { calibration, runDueEvals, snapshotBenchmark, type Calibration, type EvalResult } from '../domain/scoring.js';
 
 /**
  * FR-51 weekly deep report (PRD §12.2). Five sections: signal review, watchlist changes,
@@ -107,6 +108,8 @@ export interface ReportInput {
     blocked: BlockedName[];
     incidents: { subject: string; detail: string; openedAt: string }[];
   };
+  /** §13 scoring: evaluations that came due this run, and the calibration table. */
+  scoring: { evaluated: EvalResult[]; calibration: Calibration };
   bullets: string[];
   narrative: string | null;
 }
@@ -296,7 +299,22 @@ export async function buildReportInput(
       }),
     );
   }
-  for (const rec of built) await persistRecommendation(db, rec);
+  for (const rec of built) {
+    const { id } = await persistRecommendation(db, rec);
+    // §13.2: capture the point of comparison the moment the call is made. A suppressed
+    // recommendation has no id and nothing to score.
+    if (id !== null) {
+      await snapshotBenchmark(db, {
+        recommendationId: id,
+        instrumentId: rec.primary.instrumentId,
+        asOf,
+        conviction: String((rec.engineEvidence as { band?: string }).band ?? rec.kind),
+      });
+    }
+  }
+
+  // Evaluations fall due on their own clock, so the weekly run is where they land.
+  const evaluated = await runDueEvals(db, asOf);
 
   const stored = await db.query<{
     id: number;
@@ -383,6 +401,7 @@ export async function buildReportInput(
       blocked: blockReasons(rows, positions, blocked),
       incidents: incidentRows.map((i) => ({ subject: i.subject, detail: i.detail, openedAt: iso(i.opened_at) })),
     },
+    scoring: { evaluated, calibration: await calibration(db) },
     bullets: [],
     narrative: null,
   };
@@ -417,6 +436,11 @@ export function reportBullets(input: ReportInput): string[] {
   );
   b.push(
     `${input.staleness.blocked.length} instruments blocked by stale data; ${input.staleness.incidents.length} open staleness incidents.`,
+  );
+  b.push(
+    input.scoring.calibration.insufficient
+      ? `Scoring: ${input.scoring.calibration.totalEvaluated} completed evaluations — not enough to state a hit-rate (needs ${input.scoring.calibration.minimum} per bucket).`
+      : `Scoring: ${input.scoring.calibration.totalEvaluated} completed evaluations across ${input.scoring.calibration.rows.length} conviction buckets.`,
   );
   if (input.pipeline.redemptions.length > 0) {
     b.push(
@@ -534,7 +558,40 @@ export function composeReport(input: ReportInput): string {
     out.push(...collapse(input.staleness.incidents, (i) => `  ${escapeMarkdown(i.subject)} since ${i.openedAt} — ${escapeMarkdown(i.detail)}`));
   }
 
-  out.push('', '*5. Narrative*');
+  out.push('', '*5. Scoring (§13)*');
+  out.push(
+    input.scoring.evaluated.length === 0
+      ? 'No evaluations came due this week.'
+      : `${input.scoring.evaluated.length} evaluation(s) came due:`,
+  );
+  out.push(
+    ...collapse(
+      input.scoring.evaluated,
+      (e) =>
+        `  #${e.benchmarkId} ${e.horizon}m at ${e.asOf}: ` +
+        (e.excessBps === null
+          ? escapeMarkdown(e.note ?? 'not scoreable')
+          : `${(e.excessBps / 100).toFixed(1)}pp vs benchmark ${e.convictionHealthy ? '✅' : '❌'}`),
+    ),
+  );
+  if (input.scoring.calibration.insufficient) {
+    out.push(
+      `Calibration: insufficient data — ${input.scoring.calibration.totalEvaluated} completed ` +
+        `evaluation(s), and a bucket needs ${input.scoring.calibration.minimum} before a hit-rate means anything.`,
+    );
+  } else {
+    out.push(
+      ...input.scoring.calibration.rows.map(
+        (r) =>
+          `  ${escapeMarkdown(r.conviction)} @${r.horizon}m: ` +
+          (r.hitRate === null
+            ? `${r.evaluated} eval(s) — insufficient data`
+            : `${(r.hitRate * 100).toFixed(0)}% hit-rate over ${r.evaluated}, median ${(r.medianExcessBps! / 100).toFixed(1)}pp`),
+      ),
+    );
+  }
+
+  out.push('', '*6. Narrative*');
   out.push(
     input.narrative === null
       ? input.bullets.map((b) => `• ${escapeMarkdown(b)}`).join('\n')

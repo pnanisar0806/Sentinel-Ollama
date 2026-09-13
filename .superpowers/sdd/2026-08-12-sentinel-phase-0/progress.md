@@ -404,3 +404,26 @@ avs table allows corrections (no append-only trigger).
   not run rather than scoring against `Number('') === 0`, a 0% risk-free rate that would make
   every name look cheap. Documented in `.env.example`; `weekly.yml` passes it as a repo var.
 - 14 tests. Suite **551 passed**, `tsc --noEmit` clean.
+
+## 2026-09-13 (Phase 1 Task 12 — scoring harness §13)
+
+- **Phase 1 Task 12 complete.** `src/domain/scoring.ts`: `snapshotBenchmark`, `dueEvals`,
+  `evaluateRec`/`runDueEvals`, `calibration`, `addMonths`.
+- **The creation snapshot is immutable at the database level.** Migration `0012` replaces
+  `benchmarks`' blanket append-only trigger with `sentinel_benchmarks_immutable()`: UPDATE is
+  allowed only when `recommendation_id`, `benchmark_as_of` and `benchmark_jsonb` are unchanged,
+  so the 3/6/12-month evals can accrue onto the row while the point of comparison cannot be
+  rewritten. Blanket append-only would have made the eval columns unwritable; dropping the
+  trigger would have made the whole §13 exercise unfalsifiable. Same shape as `lots`.
+- **Nothing is scored early** — a horizon that has not elapsed by `asOf` is not returned, and a
+  `dueEvals` run on a fresh seed yields zero rows.
+- **Honest emptiness.** A conviction bucket under `MIN_EVALS_FOR_CALIBRATION` (20) reports
+  "insufficient data" rather than a percentage; an unscoreable call (a missing close at creation
+  or at the eval date) is recorded with its reason and **never counted as a miss**. One winning
+  call is not a 100% hit-rate, and the test pins exactly that.
+- Folded into the weekly report as a new §13 section instead of a separate job and workflow —
+  the evals fall due on their own clock and the weekly run is already the place they land.
+- 15 tests, including the database refusing an overwrite of a snapshot. Suite **568 passed**,
+  `tsc --noEmit` clean.
+- **Owner true-up:** the minimum-N of 20 is a judgement call about how much evidence he wants
+  before trusting the calibration table — logged under Waiting on OWNER.

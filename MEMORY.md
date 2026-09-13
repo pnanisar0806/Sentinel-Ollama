@@ -1393,3 +1393,24 @@ in the weekly report, never executed.
   allowlist (a reporting entrypoint; it reaches funded status only via maturity routing), and a
   new assertion keeps **`notify/report.ts` permanently OFF** that list — that module drives the
   signal, allocation and exit engines, and is where the firewall actually has to hold.
+
+---
+
+## Phase 1 Task 12 — scoring harness §13 (2026-09-13)
+
+`src/domain/scoring.ts` + migration `0012_benchmark_evals.sql`.
+
+- **The creation snapshot cannot be rewritten — enforced in SQL.** `sentinel_benchmarks_immutable()`
+  allows UPDATE on `benchmarks` only when `recommendation_id`, `benchmark_as_of` and
+  `benchmark_jsonb` are unchanged, so evals accrue while the point of comparison stays fixed.
+  Blanket append-only (the 0008 default) made the eval columns unwritable; simply dropping the
+  trigger would let a bad week be re-based after the fact, which is the one thing §13 exists to
+  prevent. Same pattern as `sentinel_lots_immutable`.
+- **Nothing is scored early**, and an **unscoreable call is never a miss**: a missing close at
+  creation or at the eval date is recorded with its reason and excluded from the hit-rate.
+- **`MIN_EVALS_FOR_CALIBRATION = 20` is a stake in the ground, not a derived number** — at the
+  FR-12 cap of 4 recommendations/month it is roughly half a year of output per conviction
+  bucket. Below it the table prints "insufficient data" rather than a percentage. OWNER TRUE-UP.
+- Excess return is `instrument bps − benchmark bps`, integer throughout.
+- No separate job: the weekly report runs `runDueEvals` and renders the calibration section.
+  Evals fall due on their own clock and the weekly run is where they land.

@@ -104,6 +104,8 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `migrations/0009_web_uploads.sql` | `web_uploads` queue (uuid pk, kind check, status check, proposals jsonb, summary, error, resolved_at). `sentinel_web_uploads_immutable()` trigger allows only status/summary/resolved_at updates. DELETE/TRUNCATE blocked via `sentinel_append_only()`. RLS enabled. Idempotent — triggers guarded in DO blocks (pg_trigger name checks), safe to re-apply |
 | `migrations/0010_phase1_quotes.sql` | `prices_eod`, `index_prices_eod`, `navs`, `holidays` — Phase 1 quote tables. prices_eod/index_prices_eod allow corrections; navs append-only. RLS on all. |
 | `migrations/0008_phase1_intel.sql` | `watchlist`, `screener_uploads`, `fundamentals`, `signal_scores`, `recommendations`, `suppressed_actions`, `benchmarks` — Phase 1 intel tables. All append-only + RLS. |
+| `migrations/0011_fundamentals_as_of.sql` | `fundamentals.as_of` + drops its append-only UPDATE trigger (re-import must be able to correct a row) |
+| `migrations/0012_benchmark_evals.sql` | `sentinel_benchmarks_immutable()` — UPDATE allowed on `benchmarks` **only** for the eval columns; the creation snapshot (`benchmark_as_of`, `benchmark_jsonb`) can never be rewritten, DELETE/TRUNCATE still refused. Same shape as `sentinel_lots_immutable` |
 
 ## Phase 1 (planned — see `2026-09-05-sentinel-phase-1.md`)
 
@@ -119,7 +121,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/domain/redemptions.ts` | `Redemption`, `listRedemptionsUntil(db, horizonDays, referenceDate?)` — the bond redemption reader, split out of `maturities.ts` so `sell-triggers.ts` can use it without transitively importing `buckets.ts` (which re-exports `funded-status`). `maturities.ts` re-exports both |
 | `src/domain/maturities.ts` | `maturityRoutingRec` + a re-export of `listRedemptionsUntil`/`Redemption` from `redemptions.ts`; 14-day digest alert (Sammaan Task 1) — **implemented 2026-09-11, reader split out 2026-09-13** |
 | `src/domain/recommendations.ts` | `buildRecommendation`, `validateRecommendation`, `announceMaturity`, `gateRecommendation`, `persistRecommendation`, `isPaperMode`, `scanForExecutionPaths`, `MAX_THESIS_WORDS`/`MAX_RECS_PER_MONTH`/`MIN_HOLD_MONTHS`/`OVERRIDE_EVENTS`/`INDEX_ROUTE_INSTRUMENT` — FR-11 objects (primary + **exactly 2** alternates: A1 same intent/different instrument or the index route, A2 a different intent defaulting to do-nothing; ≤150-word theses; every `ips_clause_refs` entry checked against `getIpsClauseIndex`). FR-12 caps (≤4/month, 12-month repeat-BUY hold, 3 override events) **log to `suppressed_actions` rather than dropping**. Paper mode defaults TRUE when the rail is absent. `primary_rec` is written in the shape `sell-triggers` reads back — **implemented 2026-09-13** |
-| `src/domain/scoring.ts` | §13 benchmark-at-creation + 3/6/12-mo eval snapshots (harness; accrues over time) |
+| `src/domain/scoring.ts` | `snapshotBenchmark`, `dueEvals`, `evaluateRec`, `runDueEvals`, `calibration`, `addMonths`, `EVAL_HORIZONS`, `MIN_EVALS_FOR_CALIBRATION` — §13 harness. The creation snapshot (instrument close + index close + conviction) is captured once and **migration 0012 refuses to rewrite it**; 3/6/12-month evals accrue onto the same row. Excess return is integer bps. A bucket under the minimum reads **"insufficient data"**, never a percentage; an unscoreable call is never counted as a miss — **implemented 2026-09-13** |
 | `src/notify/report.ts` | `buildReportInput(db, asOf, opts)` + pure `composeReport`/`reportBullets`, `MAX_LIST_ITEMS`, `REDEMPTION_HORIZON_DAYS` — FR-51's five sections (signal review / watchlist changes / recommendation pipeline / staleness / narrative). Runs the week's pipeline: scores, sizes, gates and persists. **Withholds an open recommendation whose instrument is blocked today** into `pipeline.withheld`. Same impure-gather / pure-compose split as `digest.ts`, and deliberately NOT on the funded-status allowlist — **implemented 2026-09-13** |
 | `src/jobs/report.ts` | CLI entrypoint — `pnpm report [--as-of YYYY-MM-DD]`. Replaces the retired `pnpm weekly`. Assembles maturity ROUTING recommendations (the one thing that reads bucket status) and hands them to `buildReportInput` as data, writes `docs/dashboard.html`, sends via Telegram. `parseGsecYield` treats a blank env var as unconfigured, never 0% — **implemented 2026-09-13** |
 | `src/jobs/screener-import.ts` | `pnpm screener:import <csv>` |
@@ -156,7 +158,9 @@ round-trip through an appended `recommendations` row. `tests/domain/recommendati
 caps against stored rows, and a cross-task round-trip proving Task 9 reads what Task 10 writes.
 `tests/notify/report.test.ts` (13 tests) carries the **Phase 1 DoD**: a fully-formed paper
 recommendation with every timestamp shown, and a diff proving a deliberately stale price keeps
-a name out of every live recommendation. Suite: **551 passed** across 67 files.
+a name out of every live recommendation. `tests/domain/scoring.test.ts` (15 tests) covers the
+§13 harness, including the database-level refusal to rewrite a creation snapshot.
+Suite: **568 passed** across 68 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic

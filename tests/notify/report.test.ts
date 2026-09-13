@@ -181,6 +181,28 @@ describe('report sections', () => {
     expect(text).not.toContain(`NSE:B${MAX_LIST_ITEMS + 1}`);
   });
 
+  it('renders the §13 calibration as "insufficient data", never as a zero percentage', async () => {
+    await makeEverythingFresh();
+    const input = await build();
+    const text = composeReport(input);
+
+    // The week's recommendations are benchmarked at creation, but nothing is due yet.
+    expect(input.scoring.evaluated).toEqual([]);
+    expect(input.scoring.calibration.insufficient).toBe(true);
+    expect(text).toContain('No evaluations came due this week');
+    expect(text).toContain('insufficient data');
+    expect(text).not.toMatch(/0% hit-rate/);
+  });
+
+  it('captures a benchmark for each recommendation it raises', async () => {
+    await makeEverythingFresh();
+    const input = await build();
+    const [count] = await db.query<{ n: string }>(`select count(*) as n from benchmarks`);
+    expect(Number(count!.n)).toBe(
+      input.pipeline.recommendations.filter((r) => r.createdOn === SEED_DATE).length,
+    );
+  });
+
   it('keeps each Telegram chunk inside the 4096-character limit', async () => {
     await makeEverythingFresh();
     const text = composeReport(await build());

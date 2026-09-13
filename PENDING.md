@@ -117,6 +117,16 @@ MEMORY.md; the code map lives in index.md.
       - DoD proof: Two tests prove a deliberately stale price provably blocks a watchlist instrument from recommendations, and the engine output changes when price goes stale.
       - **All 460 tests pass, `tsc --noEmit` clean.**
 
+- [x] **Phase 1 Task 12 — scoring harness (§13) — DONE 2026-09-13.** `src/domain/scoring.ts`:
+      `snapshotBenchmark` captures the instrument close + index close + conviction the day a
+      recommendation is made, and **migration `0012` refuses to rewrite it** (UPDATE allowed
+      only on the eval columns — same shape as the `lots` trigger). `dueEvals`/`evaluateRec`
+      accrue 3/6/12-month evaluations in integer bps; nothing is ever scored early. The
+      calibration table says **"insufficient data"** below `MIN_EVALS_FOR_CALIBRATION` (20 —
+      see Waiting on OWNER) and an unscoreable call is never counted as a miss. Folded into
+      the weekly report (new §13 section) rather than a separate job/workflow.
+      15 tests, **568 passed**, tsc clean.
+
 - [x] **Phase 1 Task 11 — weekly deep report + narration + SUNDAY 10:00 IST — DONE 2026-09-13.**
       `src/notify/report.ts` (`buildReportInput` + pure `composeReport`) renders FR-51's five
       sections; `src/jobs/report.ts` is the CLI (`pnpm report [--as-of YYYY-MM-DD]`);
@@ -212,6 +222,9 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
+- [ ] **Calibration minimum N = 20** (`MIN_EVALS_FOR_CALIBRATION`). A stake in the ground, not a
+      derived figure: at 4 recommendations/month it is ~half a year of output per conviction
+      bucket, and below it one outcome moves the hit-rate by >5 points. Confirm or set your own.
 - [ ] **Credit-rating actions have no source (IPS §3.8).** Sell trigger 7 covers maturities only;
       the standing §3.8 review items (Sammaan Jul-2029, Edelweiss Oct-2033 — "must beat 7.95%
       after tax and a credit-risk haircut") cannot be watched automatically. Decide: a manual
@@ -268,7 +281,8 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Phase 1 Task 3 — NSE bhavcopy + index series**: `bhavcopy.ts` + fixtures + tests, migration 0010 for prices_eod/index_prices_eod/navs/holidays, staleness extended, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 2 — Phase 1 schema (0007/0008)**: `0008_phase1_intel.sql` (watchlist, screener, fundamentals, signals, recommendations, suppressed_actions, benchmarks), `0010_phase1_quotes.sql` (prices_eod, index_prices_eod, navs, holidays), append-only + RLS, 451 tests pass, tsc clean |
 | *(this session)* | **Phase 1 Task 4 — AMFI NAV pipeline**: `amfi.ts` + fixture + tests, migration 0009 for scheme_code, navs allows corrections, staleness 48h, 457 tests pass, tsc clean |
-| *(this session)* | **Phase 1 Task 11 — weekly deep report (FR-51)**: `notify/report.ts` + `jobs/report.ts` + `sources/llm-narration.ts`, weekly cron → Sunday 10:00 IST, `pnpm weekly` retired, schedule test re-derived, 14 tests; **Phase 1 DoD met**; 551 passed |
+| *(this session)* | **Phase 1 Task 12 — scoring harness**: `domain/scoring.ts` + migration `0012` (creation snapshot immutable, eval columns writable), calibration section in the weekly report, 15 tests; 568 passed |
+| `5f8a7d2` | **Phase 1 Task 11 — weekly deep report (FR-51)**: `notify/report.ts` + `jobs/report.ts` + `sources/llm-narration.ts`, weekly cron → Sunday 10:00 IST, `pnpm weekly` retired, schedule test re-derived, 14 tests; **Phase 1 DoD met**; 551 passed |
 | `e9ec6e5` | **Phase 1 Task 10 — FR-11/FR-12 recommendations + paper mode**: `domain/recommendations.ts` (builder + validator, caps → `suppressed_actions`, paper mode, execution-path scan), 17 tests; 532 passed, tsc clean |
 | `b081ee9` | **Phase 1 Task 9 — sell/exit triggers**: `domain/sell-triggers.ts` (§6.5 triggers 1–5,7; falsification round-trip; §3.7 override discipline), `domain/redemptions.ts` split out to keep the funded-status firewall intact, 17 tests; 515 passed, tsc clean |
 | `08c296f` | **Phase 1 Task 8 — allocation engine**: `domain/alloc-engine.ts` (FR-13 drift → recommendation, tax preference, April annual proposal), 11 tests; 498 passed, tsc clean |
