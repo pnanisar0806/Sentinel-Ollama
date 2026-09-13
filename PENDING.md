@@ -10,10 +10,10 @@ MEMORY.md; the code map lives in index.md.
       (7–13 incl. holiday seed + LLM model family) plus the screener-screen HTML scraper and
       the extraction-model revert are live on origin/main; GitHub Actions holds the real
       provisioning. No local uncommitted work remains.
-- [ ] **THIS WEEK, OWNER:** the two items that unblock Phase 2's usefulness in real data —
-      (1) GSEC_YIELD_PCT (~7.0) into `.env` so the weekly signal review actually runs;
-      (2) the screener gate decision (FCF into the query, drop red flags) + one live
-      `pnpm screener:import --screen <url>` run. See "Waiting on OWNER" below.
+- [x] **THIS WEEK, OWNER:** the two items that unblock Phase 2's usefulness in real data —
+      GSEC_YIELD_PCT set (`.env` + GitHub var = 7.0, 2026-09-13) and the screener live-run
+      attempted: **blocked — `/screen/raw/?query=...` is login-gated; owner must save the
+      screen and share a public `/screens/<id>/<slug>/` link** (see Waiting on OWNER).
 - [x] **KITE RETIRED — INDmoney is the only portfolio source. DONE 2026-09-07.** The connect
       flow worked, which is how it surfaced that INDmoney already aggregates the same Zerodha
       account: net worth had jumped ₹57,12,936 → ₹71,85,786 (+26%) with no money moving.
@@ -258,7 +258,12 @@ MEMORY.md; the code map lives in index.md.
       The 40 static `'advisor'` names in `src/seed/seed-watchlist.ts` remain LLM-recall from the
       Task 6 session; replace them with a proposed shortlist once the pool is real.
 - [ ] **SCREENER PIPELINE — needs one live run + one owner gate decision.** The HTML scraper is
-      built and tested, but has never touched a live page. Owner decision needed on the §6 gate
+      built and tested, but has never touched a live page. **Verified 2026-09-13: public screens
+      at `/screens/<id>/<slug>/` render the full `data-table` anonymously, but the owner's
+      `/screen/raw/?query=...` URL is login-gated (302 → `/register/`) and the old fixture
+      screen 41972 now 404s.** So: owner saves the §6-gate screen on screener.in and shares the
+      public `/screens/<id>/<slug>/` link; the built-in pagination was fixed to set `page=` INTO
+      the URL so query-bearing screens page correctly. Owner decision still needed on the §6 gate
       inputs `Symbol`, `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the
       last two, so either bake FCF-positivity into the screen query (recommended) or drop red
       flags in Phase 1 (recommended). After that: build a real screen URL carrying ROCE / ROE /
@@ -292,7 +297,10 @@ MEMORY.md; the code map lives in index.md.
       figure reviewed quarterly, or an ingestion source in Phase 2.
 - [ ] The date each protection milestone was actually set (`milestones.raised_on` —
       "% elapsed" is NULL until then)
-- [ ] Monthly electricity figure (closes the ₹82,124 vs PRD ₹76,000 surplus outflow gap)
+- [ ] ₹82,124 vs PRD ₹76,000 surplus gap — owner confirmed misc ₹10,000 already includes
+      electricity (2026-09-13), so the plan's "+ electricity" theory is dead; the cause is
+      open (PRD reads "inclusive of existing SIPs", the model holds no SIP block). Owner
+      true-up: is the ₹76,000 the surplus AFTER existing SIP payments?
 
 ## Watch items
 

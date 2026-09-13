@@ -223,13 +223,15 @@ export async function fetchScreen(
   let headers: string[] = [];
   let pagesFetched = 0;
 
-  const base = screenUrl.replace(/[?#].*$/, '');
-  const separator = screenUrl.includes('?') ? '&' : '?';
-
   for (let page = 1; page <= maxPages; page++) {
-    const url = page === 1 ? screenUrl : `${base}${separator}page=${page}`;
+    // Screens can carry their own query string (`raw/?query=...`), so the page param must
+    // be set INTO the URL, never appended to a stripped base — the old `base + '?page=N'`
+    // lost `query=` on page 2 for every such screen.
+    const url = new URL(screenUrl);
+    url.searchParams.set('page', String(page));
+    const pageUrl = url.toString();
 
-    const resp = await fetch(url, {
+    const resp = await fetch(pageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml',

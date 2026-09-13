@@ -842,9 +842,12 @@ brief the acceptance criteria and let the implementer derive the code.
 
 Derived, never hardcoded: **₹82,124/month** investable at Sep 2026
 (₹2,15,000 − ₹55,526 loans − ₹77,350 fixed). The PRD's ₹76,000 is *inclusive of existing
-SIPs*; the ~₹6,100 gap is its unquantified "+ electricity" line. **Do not tune the model to
-hit ₹76,000** — when the owner supplies an electricity figure it goes into
-`FIXED_OUTFLOWS.misc` and the test's expected value moves in the same commit.
+SIPs*. **The ~₹6,124 gap is NOT electricity** — the owner confirmed 2026-09-13 that the
+₹10,000 `misc` bucket already includes electricity, so no separate electricity figure is
+expected and none may be invented. The gap's real cause is open: the PRD may mean the
+surplus *after* existing SIP contributions, but the model has no SIP block, so do not
+subtract an invented SIP number under the "incl. SIPs" reading. Record as an owner true-up
+and surface it — never tune the model to hit ₹76,000.
 
 - Take-home steps up each **April** at `ASSUMPTIONS.salaryStepUp`, not `sipStepUp`, counted
   from **`BASE_TAKE_HOME_AS_OF` = '2026-09-01'** — the epoch the PRD figure is quoted at,
