@@ -1528,3 +1528,27 @@ exported file plus an owner decision on the two missing gate inputs.
 presented as spec** — the 40 watchlist names, `SCREENER_COLUMNS`, the "shipped" screener
 staleness check, and the "shipped" bhavcopy downloader. Anything describing an EXTERNAL format
 or universe is a hypothesis until it has touched the real thing.
+
+### Live screener run (2026-09-14) — three real defects, now fixed
+
+The first "live" run of `pnpm screener:import --screen` was **silently fake**: the package
+script ran bare `tsx src/jobs/screener-import.ts` with no `--env-file=.env`, so `DATABASE_URL`
+was unset and `openDb()` fell back to an empty in-memory PGlite — every "0 records" result
+was meaningless. Fixed: `"screener:import": "tsx --env-file=.env ..."`. **Any job that must
+touch the real DB needs `--env-file=.env`; verify against prod before trusting an import.**
+
+Two real defects surfaced once against the real Supabase:
+- **`/company/id/<n>/` rows (companies without a slug) parsed to slug `"ID"`**, and
+  `slugToInstrumentId`'s last-resort `id LIKE '%slug%'` then substring-matched
+  `NSE:LIQUIDBEES` (contains "ID"). Multiple such rows resolved to one instrument →
+  mid-upload PK violation with no transaction → partial upload left in `screener_uploads`.
+  Fixed: LIKE fallback guarded to `slug.length >= 3`, and `importScreenRows` dedupes
+  same-instrument rows with a warning instead of crashing.
+- The owner's sentinel screen renders **tooltip-less headers** (`Debt / Eq` visible text), so
+  `COLUMN_MAP` (keyed on `data-tooltip`) never fired and `de_ratio` was silently null. Fixed:
+  `TEXT_ALIAS` in `normalizeHeader` maps `Debt / Eq` → `D/E`.
+
+Prod facts: the live `instruments` table uses **`BSE:`-prefixed ids** for most equities (74
+equity/ETF total) plus `NSE:` for a few (LICI, TECHM, TMCV, LIQUIDBEES). Seed ids are `NSE:` —
+both map fine, but never assume which prefix. The sentinel cohort (~230 names) overlaps the
+local universe by only 12 → only those 12 landed. Universe widening is the pending owner step.

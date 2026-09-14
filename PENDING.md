@@ -257,18 +257,24 @@ MEMORY.md; the code map lives in index.md.
       tiny, and the run gets genuinely useful only after a real screener import widens it.
       The 40 static `'advisor'` names in `src/seed/seed-watchlist.ts` remain LLM-recall from the
       Task 6 session; replace them with a proposed shortlist once the pool is real.
-- [ ] **SCREENER PIPELINE — needs one live run + one owner gate decision.** The HTML scraper is
-      built and tested, but has never touched a live page. **Verified 2026-09-13: public screens
-      at `/screens/<id>/<slug>/` render the full `data-table` anonymously, but the owner's
-      `/screen/raw/?query=...` URL is login-gated (302 → `/register/`) and the old fixture
-      screen 41972 now 404s.** So: owner saves the §6-gate screen on screener.in and shares the
-      public `/screens/<id>/<slug>/` link; the built-in pagination was fixed to set `page=` INTO
-      the URL so query-bearing screens page correctly. Owner decision still needed on the §6 gate
-      inputs `Symbol`, `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the
-      last two, so either bake FCF-positivity into the screen query (recommended) or drop red
-      flags in Phase 1 (recommended). After that: build a real screen URL carrying ROCE / ROE /
-      D-E / 5y CAGRs / CMP, `pnpm screener:import --screen <url>` once, watch it land in
-      `fundamentals`, then regenerate the watchlist from the cohort (§6.1, owner pruning on top).
+- [ ] **SCREENER PIPELINE — LIVE RUN DONE 2026-09-14; one owner gate decision remains.** HTML
+      scraper built+tested (Task 6 line above). **Live run (owner's sentinel screen 3963033):
+      passed end-to-end** — `pnpm screener:import --screen <url>` fetched the ~230-row public
+      page, resolved held/watchlist names to real instrument ids, and wrote **12 fundamentals
+      rows into the live Supabase** (`screener_uploads` id 1 + 3, as_of 2026-09-14) with the
+      `D/E` column populated (header text `Debt / Eq` → `D/E`, no tooltips on that screen). The
+      earlier partial upload (2 bogus rows incl `NSE:LIQUIDBEES` from a `LIKE '%ID%'` slug
+      misfire) was cleaned by the idempotent replace. Three defects found & fixed in that
+      round: (1) `screener:import` package script never loaded `.env` → it silently ran against
+      an empty in-memory PGlite (all pre-fix "0 records" results were fake); (2) `/company/id/<n>/`
+      rows parsed to slug `ID`, which substring-matched `NSE:LIQUIDBEES`; (3) mid-loop duplicate
+      insert crashed with no transaction → now deduped with a warning. 608 tests pass, tsc clean
+      (commit pending push). **Still open:** owner decision on the §6 gate inputs `Symbol`,
+      `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the last two, so
+      either bake FCF-positivity into the screen query (recommended) or drop red flags in Phase 1
+      (recommended). After that: regenerate the watchlist from the ~230-name cohort (§6.1, owner
+      pruning on top) — note only held/watchlist names land in `fundamentals` today because the
+      `instruments` universe is tiny (74 equity/ETF).
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
@@ -355,6 +361,7 @@ MEMORY.md; the code map lives in index.md.
 | `3df2b5a` | **Phase 1 Task 7 — signal engine**: `domain/engine.ts` (§6 composite + MF ranking + `signal_scores` persistence + `loadEngineInputs`), 19 tests; `screener` staleness un-stubbed (dead `getLatestFundamentalsAsOf` now live, 5 test expectations moved); 487 passed, tsc clean |
 | *(this session)* | **Phase 1 Task 5 — Staleness extension + blocked-by-stale proof**: `staleness.ts` extended (navs 48h, fundamentals 1q), `blockedInstruments` expanded (MF/amfi, equity/bhavcopy, equity/screener), migration 0011 for fundamentals as_of, DoD proof tests, 460 tests pass, tsc clean |
 | *(this session)* | **Screener.in screen HTML scraper**: `screener-screen.ts` (parse/fetch/slug-map/import), migration 0014 widens `source` back to `'screener-screen'`, `screener-import --screen <url>`, real 42KB page-1/page-2 fixtures, 16 tests; **606 passed**, tsc clean. Works around the paywalled CSV export |
+| *(pending push)* | **Live screener run — 3 defects fixed, 12 rows landed**: `screener:import` now loads `.env` (was silently running against empty in-memory PGlite); `/company/id/` slug no longer substring-matches `NSE:LIQUIDBEES` (LIKE guard, len≥3); mid-loop duplicate inserts deduped with a warning instead of crashing; tooltip-less `Debt / Eq` header aliased to `D/E`. Live sentinel screen run: **12 fundamentals rows in prod** (uploads 1/3, as_of 2026-09-14), partial 2-row upload cleaned. 3 new tests, **609 passed**, tsc clean |
 | *(this session)* | **Extraction model reverted to the proven gemma chain**: `VISION_MODEL_CHAIN` leads `google/gemma-4-31b:free` again; `-fin` stays for text jobs only; the `ling-3.0-flash-vl` leader trial retired. Test asserts the split, **606 passed**, tsc clean |
 
 (End of file)

@@ -53,6 +53,35 @@ describe('parseScreenHtml', () => {
     expect(result.headers).toContain('Qtr Sales Var');
   });
 
+  it('aliases tooltip-less visible header "Debt / Eq" to the D/E column', () => {
+    // Some live screens render headers without data-tooltip (e.g. owner's sentinel
+    // screen, /screens/3963033/sentinel/, uses the short visible form "Debt / Eq").
+    const html = `
+      <table class="data-table">
+        <tr>
+          <th scope="colgroup"><a>S.No.</a></th>
+          <th scope="colgroup"><a>Company</a></th>
+          <th scope="colgroup"><a>CMP</a></th>
+          <th scope="colgroup"><a>ROCE</a></th>
+          <th scope="colgroup"><a>Debt / Eq</a></th>
+        </tr>
+        <tr data-row-company-id="12345">
+          <td class="text">1.</td>
+          <td class="text"><a href="/company/ITC/">ITC</a></td>
+          <td>441.20</td>
+          <td>40.10</td>
+          <td>0.03</td>
+        </tr>
+      </table>
+    `;
+    const parsed = parseScreenHtml(html);
+    expect(parsed.headers).toContain('D/E');
+    const row = parsed.rows[0];
+    expect(row).toBeDefined();
+    expect(row!.deRatio).toBe(0.03);
+    expect(row!.columns['D/E']).toBe('0.03');
+  });
+
   it('extracts company name and slug from link', () => {
     const pg = result.rows.find(r => r.slug === 'PGHH');
     expect(pg).toBeDefined();
@@ -130,6 +159,13 @@ describe('slugToInstrumentId', () => {
     const id = await slugToInstrumentId(db, 'ZZZZZ', 'Nonexistent Corp');
     expect(id).toBeNull();
   });
+
+  it('does not LIKE-match a 2-char id-lookup slug', async () => {
+    // screener /company/id/<n>/ links parse to slug "ID"; it must never
+    // substring-match NSE:LIQUIDBEES (contains "ID")
+    const id = await slugToInstrumentId(db, 'ID', '');
+    expect(id).toBeNull();
+  });
 });
 
 describe('importScreenRows', () => {
@@ -182,5 +218,33 @@ describe('importScreenRows', () => {
 
     expect(r1.uploadedId).not.toBe(r2.uploadedId);
     expect(r1.inserted).toBe(r2.inserted);
+  });
+
+  it('skips instrument-duplicate rows instead of crashing mid-upload', async () => {
+    const html = readFileSync(join(FIXTURE_DIR, 'roe-roce-page1.html'), 'utf8');
+    const { rows } = parseScreenHtml(html);
+
+    // Baseline: which unique named instruments resolve from the fixture
+    const baseline = await importScreenRows(db, rows, {
+      asOf: '2026-09-13',
+      screenUrl: 'dup-base',
+    });
+    const expectedUnique = baseline.inserted;
+
+    // Plant a second row that resolves to the same instrument as the first
+    const tcs = rows.find(r => r.slug === 'TCS');
+    const dup = rows.concat([{ ...tcs!, name: 'TCS' }]);
+
+    const result = await importScreenRows(db, dup, {
+      asOf: '2026-09-13',
+      screenUrl: 'dup-mut',
+    });
+
+    expect(result.inserted).toBe(expectedUnique); // dup row skipped, not crash
+    const count = await db.query<{ n: string }>(
+      'SELECT count(*) as n FROM fundamentals WHERE upload_id = $1',
+      [result.uploadedId],
+    );
+    expect(Number(count[0]!.n)).toBe(result.inserted);
   });
 });

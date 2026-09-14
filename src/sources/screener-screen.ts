@@ -88,12 +88,19 @@ function stripTags(s: string): string {
 
 /** Strip unit suffixes from header text (e.g. "CMP Rs." → "CMP", "ROCE %" → "ROCE"). */
 function normalizeHeader(s: string): string {
-  return stripTags(s)
+  const text = stripTags(s)
     .replace(/\s+Rs\.Cr\.$/, '')
     .replace(/\s+Rs\.$/, '')
     .replace(/\s+%$/, '')
     .trim();
+  // Visible header text can be either the short form or a spaced alias
+  return TEXT_ALIAS[text] ?? text;
 }
+
+/** Aliases for visible (tooltip-less) header text that differs from the canonical key. */
+const TEXT_ALIAS: Record<string, string> = {
+  'Debt / Eq': 'D/E',
+};
 
 /**
  * Parse a single page of screener.in HTML table into structured rows.
@@ -307,12 +314,17 @@ export async function slugToInstrumentId(
   );
   if (fuzzy) return fuzzy.id;
 
-  // Last resort: slug in any instrument ID
-  const [any] = await db.query<{ id: string }>(
-    `SELECT id FROM instruments WHERE id LIKE '%' || $1 || '%' LIMIT 1`,
-    [slug],
-  );
-  return any?.id ?? null;
+  // Last resort: slug in any instrument ID.
+  // Guard: a 2-char slug like "ID" from /company/id/<n>/ links must not
+  // substring-match real ids (e.g. NSE:LIQUIDBEES contains "ID").
+  if (slug.length >= 3) {
+    const [any] = await db.query<{ id: string }>(
+      `SELECT id FROM instruments WHERE id LIKE '%' || $1 || '%' LIMIT 1`,
+      [slug],
+    );
+    return any?.id ?? null;
+  }
+  return null;
 }
 
 /**
@@ -350,12 +362,18 @@ export async function importScreenRows(
   }
 
   let inserted = 0;
+  const seen = new Set<string>();
   for (const row of rows) {
     const instrumentId = await slugToInstrumentId(db, row.slug, row.name);
     if (!instrumentId) {
       warnings.push(`Unknown instrument: ${row.name} (${row.slug})`);
       continue;
     }
+    if (seen.has(instrumentId)) {
+      warnings.push(`Duplicate instrument row skipped: ${row.name} (${row.slug})`);
+      continue;
+    }
+    seen.add(instrumentId);
 
     const rawJson = JSON.stringify(row.columns);
 
