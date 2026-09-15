@@ -133,8 +133,8 @@ Repo → Settings → Secrets and variables → Actions → **New repository sec
 2. Test each manually before trusting the cron: open `sync` / `digest` / `keepalive` →
    **Run workflow**. A real Telegram digest should arrive within ~a minute.
 3. Schedules then take over (times in IST):
-   - `sync` — **daily 17:30** (12:00 UTC)
-   - `digest` — **weekdays 08:45** (03:15 UTC Mon–Fri)
+   - `sync` — **daily 19:00** (13:30 UTC) — after NSE publishes the whole-market file (~18:00 IST)
+   - `digest` — **after a successful sync** (`workflow_run` in `digest.yml`, no fixed cron)
    - `keepalive` — **Sundays 09:30** (04:00 UTC), belt-and-braces Supabase ping
 4. Final acceptance check: compare digest figures against Kite / INDmoney / Fidelity —
    they must agree within **±1%**.

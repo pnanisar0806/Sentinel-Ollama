@@ -507,3 +507,17 @@ avs table allows corrections (no append-only trigger).
   17:30 IST cron can re-dispatch for the same day); the index zoo `ind<DDMMMYYYY>.zip` still has
   no working 2026 source and stays silent-empty. Both environmental/known, neither silent-break.
 - Push of all approved work (AMFI fix + `e745218` + NSE pipeline) per owner instruction.
+
+## 2026-09-15 (sync cron moved to 19:00 IST — after NSE publishes)
+
+- The ~18:00 IST file gap was a scheduling problem, not a code one: `sync` ran daily 17:30 IST,
+  minutes before NSE publishes `sec_bhavdata_full_<DDMMYYYY>.csv`, so on every trading day the
+  scheduled run 404'd today's file and `prices_eod` stayed empty/stale. Owner chose **19:00 IST**.
+- `sync.yml` cron `0 12 * * *` → `30 13 * * *` (19:00 IST), with a comment explaining the
+  after-publication dependency. The digest is `workflow_run` on sync, so it follows automatically.
+- No test change needed — `workflow-schedule.test.ts` pins sync to "daily (7 days)" only, not the
+  hour (12/12 green). Docs kept honest: `index.md` workflow table, `PENDING.md` (Next-up + schedule
+  list), `MEMORY.md` (digest-gating note + timing-gap note), `docs/SETUP.md` schedule block
+  (corrected the stale "weekdays 08:45 digest" line to `workflow_run` while in there).
+- First 19:00 IST run also backfills today's missing `prices_eod` data once the file is out.
+- Committed + pushed.

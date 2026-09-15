@@ -70,8 +70,9 @@ assertion; the owner decides whether digest freshness is still gated by a workfl
 test is updated to assert the `workflow_run` shape) or the assertion is dropped.
 
 **Digest gating (commit `30b47d3`).** `digest.yml` no longer has a fixed cron; it fires on
-`workflow_run` of `sync`, gated `conclusion == 'success'`. Sync cron untouched
-(`0 12 * * *`). Trade-off accepted: failed/missing sync ⇒ no digest that day.
+`workflow_run` of `sync`, gated `conclusion == 'success'`. Sync cron `30 13 * * *` (19:00 IST
+since 2026-09-15 — must run AFTER NSE publishes the whole-market file ~18:00 IST, or `prices_eod`
+stays empty every day). Trade-off accepted: failed/missing sync ⇒ no digest that day.
 
 **Cleanups (commit `472d801`).** `.claude/`, `.serena/`, `zoox_finalTEMP_MPY_wvf_snd.mp4`
 were swept into `bc728b4`; untracked + gitignored. Temp `check-*.ts` / `test-insert.ts`
@@ -1461,7 +1462,8 @@ Tasks 1–13 shipped (11A superseded by `web/`). Suite **576 passed**, `tsc` cle
   cohort placeholders have no symbol derivable from their id and stay ISIN-less until screener
   cohort promotion.
 - **Known timing gap:** today's `sec_bhavdata_full_<DDMMYYYY>.csv` appears only after ~18:00 IST,
-  so a 17:30 IST sync reports empty until the file lands — environmental, not a bug.
+  so a before-close run reports empty until the file lands — environmental, not a bug. Closed for
+  the daily job by moving `sync.yml` to 19:00 IST (`30 13 * * *`), 2026-09-15.
 - README carries the Phase 1 handoff: the data-flow diagram, how a recommendation is built, the
   two ways it is stopped (FR-31 staleness, IPS §3.7 policy), what the engine will not invent,
   and the §15.1 provisioning table with real statuses.

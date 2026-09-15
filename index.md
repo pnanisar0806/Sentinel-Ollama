@@ -196,7 +196,7 @@ the allowlist there, or the suite goes red.
 | File | Schedule (UTC) | Notes |
 |---|---|---|
 | `.github/workflows/ci.yml` | on push + PR | `tsc --noEmit` then `pnpm test`. Nothing enforced the suite before |
-| `.github/workflows/sync.yml` | `0 12 * * *` — **daily** | Weekday-only left the Monday digest reading Friday's data, 63.25h against a 36h limit |
+| `.github/workflows/sync.yml` | `30 13 * * *` — **daily** | Weekday-only left the Monday digest reading Friday's data, 63.25h against a 36h limit. Runs 19:00 IST — **after** NSE publishes the whole-market file (~18:00 IST); an earlier run 404s today's file and prices stay empty |
 | `.github/workflows/digest.yml` | `workflow_run` on **sync success** — no fixed cron | Daily digest (FR-50), now runs after the day's sync completes so it never reads stale snapshots; a failed sync = no digest that day. Manual `workflow_dispatch` remains |
 | `.github/workflows/weekly.yml` | `30 4 * * 0` — **Sun 10:00 IST** | Weekly deep report (FR-51) via `pnpm report`. Moved from Sat 08:00 per PRD 12.2 with owner sign-off 2026-09-13 |
 | `.github/workflows/keepalive.yml` | `0 4 * * 0` | Largely subsumed by the daily sync; kept as a belt-and-braces Supabase ping |

@@ -4,7 +4,10 @@ on:
     # Daily, not Mon-Fri. With a weekday-only sync the Monday 03:15 digest read
     # Friday's data - 63.25h against a 36h freshness limit - so one digest in five
     # was a guaranteed false staleness alarm. The band is right; the schedule was wrong.
-    - cron: '0 12 * * *'
+    # 19:00 IST = 13:30 UTC. NSE's whole-market file lands only after ~18:00 IST,
+    # so this runs AFTER publication - an earlier run would 404 it and prices_eod
+    # would stay empty/stale every day.
+    - cron: '30 13 * * *'
   workflow_dispatch:
 
 jobs:

@@ -17,10 +17,10 @@ MEMORY.md; the code map lives in index.md.
       values. Live-verified: 2637 full-market rows for 11-Sep-2026 (GOLDBEES 125.12, LIQUIDBEES,
       M&M, CRISIL all present), archive still serves 2024 data, `pnpm sync` + `pnpm backfill:isin`
       both green. Commit `316720a`; **611→618 tests pass**, tsc clean.
-      **Two residual gaps, both in the "known" bucket:** (1) today's full-market file only exists
-      after ~18:00 IST, so a 17:30 IST sync gets 0 rows until re-dispatch — environmental, not
-      code; (2) the index zoo (`ind<DDMMMYYYY>.zip`) still has no working 2026 source, kept
-      silent-empty as before. See the resolved NSE line under Waiting on OWNER for the detail.
+      **Residual gap, kept "known":** the index zoo (`ind<DDMMMYYYY>.zip`) still has no working
+      2026 source, kept silent-empty as before. The ~18:00 IST file-publication gap was closed the
+      same day: `sync.yml` cron moved to `30 13 * * *` (**19:00 IST**) so the
+      daily run lands after NSE publishes. See the resolved NSE line under Waiting on OWNER for the detail.
 
 - [x] **ALL LOCAL WORK NOW COMMITTED + PUSHED TO `main` (2026-09-13).** Ten Phase 1 tasks
       (7–13 incl. holiday seed + LLM model family) plus the screener-screen HTML scraper and
@@ -307,8 +307,9 @@ MEMORY.md; the code map lives in index.md.
       (only `NULL`/empty, never clobbering a seeded value). Live-verified: 2637 rows for
       11-Sep-2026 incl. GOLDBEES/LIQUIDBEES/M&M/CRISIL, archive still serves 2024-03-05 (1790
       rows, ISINs intact). `pnpm sync` green (nse-bhavcopy synced). **Known shape:** today's
-      `sec_bhavdata_full_15092026.csv` 404s until ~18:00 IST (file lands post-close) — a 17:30
-      IST cron run can re-dispatch; the index zoo `ind<DDMMMYYYY>.zip` still has no working 2026
+      `sec_bhavdata_full_15092026.csv` 404s until ~18:00 IST (file lands post-close) — sync now
+      runs at 19:00 IST (`30 13 * * *`) so the scheduled run lands after publication; an index
+      zoo `ind<DDMMMYYYY>.zip` still has no working 2026
       source (kept silent-empty).
 - [x] **NSE 2026 holiday calendar — DONE + VERIFIED AGAINST NSE 2026-09-13.** Read from
       nseindia.com in a real browser (its API blocks non-browser clients); all 16 dates in
@@ -340,7 +341,8 @@ MEMORY.md; the code map lives in index.md.
 - **Digest now depends on sync (changed 2026-09-05, commit `30b47d3`).** `digest.yml` lost
   its fixed 21:00 IST cron; it triggers on `workflow_run` of `sync` and runs only when the
   sync **concludes successfully**. Trade-off accepted: a failed sync = no digest that day.
-  Sync cron unchanged `0 12 * * *` (17:30 IST) and slips by hours → digest fires whenever
+  Sync cron `30 13 * * *` (19:00 IST, moved 2026-09-15 so it runs after NSE publishes the
+  whole-market file) and slips by hours → digest fires whenever
   sync actually lands. Weekly report Sat 08:00 IST (`30 2 * * 6`) and keepalive Sundays
    09:30 IST unchanged. **Weekly is now Sunday 10:00 IST (`30 4 * * 0`) running `pnpm report`** —
   owner signed off 2026-09-13; `pnpm weekly` no longer exists.
@@ -349,7 +351,7 @@ MEMORY.md; the code map lives in index.md.
   was deleted unrun). **`pnpm indmoney:login` re-run and verified** — tokens decrypt against
   the new key, scope `portfolio:read`, refresh token present; the rotation loop is closed.
   Telegram bot token and Supabase DB password remain as-is (owner decision: not rotating).
-- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sun 10:00 IST** (`30 4 * * 0`) · sync daily **17:30 IST** · keepalive Sundays 09:30 IST.
+- Schedules (GitHub Actions, UTC cron, slips a few minutes): **daily digest = after sync success** (`workflow_run` on sync) · **weekly deep report Sun 10:00 IST** (`30 4 * * 0`) · sync daily **19:00 IST** (`30 13 * * *`, after NSE's ~18:00 IST file) · keepalive Sundays 09:30 IST.
 - The interactive bot (`pnpm telegram:bot`) runs locally only — commands, photo uploads,
   confirms need it awake. Digests/syncs do not.
 - When extraction misbehaves: check `lots` audit trail (`action='ingest'` /
