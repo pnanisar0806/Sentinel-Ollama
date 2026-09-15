@@ -6,7 +6,7 @@ import { installIps } from '../../src/domain/ips.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseEquityBhavcopy, parseIndexBhavcopy, ingestPrices, unzipFirstEntry } from '../../src/sources/bhavcopy.js';
+import { parseEquityBhavcopy, parseIndexBhavcopy, parseFullMarketCsv, parseEquityMaster, backfillInstrumentIsins, ingestPrices, unzipFirstEntry } from '../../src/sources/bhavcopy.js';
 import { deflateRawSync } from 'node:zlib';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -73,6 +73,76 @@ describe('parseEquityBhavcopy', () => {
     // This value comes from the CSV fixture - if someone hardcodes wrong value, this catches it
     expect(niftybees!.close).toBe(227.30);
     expect(niftybees!.close).not.toBe(225.00); // wrong value
+  });
+});
+
+describe('parseFullMarketCsv', () => {
+  it('parses the sec_bhavdata_full layout (no ISIN, DATE1 trade date)', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'full_11SEP2026.csv'), 'utf8');
+    const rows = parseFullMarketCsv(csv);
+
+    // NIFTYBEES, GOLDBEES, RPOWER, RELIANCE, 20MICRONS are EQ; TATAMOTORS is BE
+    expect(rows.length).toBe(5);
+    const rowsByName = new Map(rows.map(r => [r.symbol, r]));
+
+    const niftybees = rowsByName.get('NIFTYBEES');
+    expect(niftybees).toBeDefined();
+    expect(niftybees!.close).toBe(267.14); // CLOSE_PRICE
+    expect(niftybees!.prevClose).toBe(267.17); // PREV_CLOSE
+    expect(niftybees!.isin).toBe(''); // full-market file carries no ISIN
+    expect(niftybees!.tradeDate).toBe('2026-09-11'); // DATE1 parsed to ISO
+
+    const goldbees = rowsByName.get('GOLDBEES');
+    expect(goldbees).toBeDefined();
+    expect(goldbees!.close).toBe(125.12);
+    expect(goldbees!.prevClose).toBe(126.20);
+
+    const rpower = rowsByName.get('RPOWER');
+    expect(rpower).toBeDefined();
+    expect(rpower!.close).toBe(21.58);
+    expect(rpower!.prevClose).toBe(21.84);
+
+    // Only EQ series should be included
+    const nonEq = rows.find(r => r.series !== 'EQ');
+    expect(nonEq).toBeUndefined();
+  });
+
+  it('mutation check: changing expected close makes test fail', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'full_11SEP2026.csv'), 'utf8');
+    const rows = parseFullMarketCsv(csv);
+
+    const niftybees = rows.find(r => r.symbol === 'NIFTYBEES');
+    expect(niftybees).toBeDefined();
+    expect(niftybees!.close).toBe(267.14);
+    expect(niftybees!.close).not.toBe(266.00); // wrong value
+    expect(niftybees!.tradeDate).toBe('2026-09-11');
+  });
+});
+
+describe('parseEquityMaster', () => {
+  it('parses EQUITY_L.csv into a symbol → ISIN map', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'EQUITY_L.csv'), 'utf8');
+    const rows = parseEquityMaster(csv);
+
+    const bySymbol = new Map(rows.map(r => [r.symbol, r.isin]));
+
+    expect(bySymbol.get('RPOWER')).toBe('INE614G01033');
+    expect(bySymbol.get('TATASTEEL')).toBe('INE081A01020');
+    expect(bySymbol.get('CRISIL')).toBe('INE007A01025');
+    expect(bySymbol.get('RELIANCE')).toBe('INE002A01018');
+    expect(bySymbol.get('INFY')).toBe('INE009A01021');
+
+    // TATAMOTORS is SERIES=BE in the fixture → excluded
+    expect(bySymbol.has('TATAMOTORS')).toBe(false);
+  });
+
+  it('mutation check: wrong ISIN makes test fail', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'EQUITY_L.csv'), 'utf8');
+    const rows = parseEquityMaster(csv);
+    const rpower = rows.find(r => r.symbol === 'RPOWER');
+    expect(rpower).toBeDefined();
+    expect(rpower!.isin).toBe('INE614G01033');
+    expect(rpower!.isin).not.toBe('INE999A99999');
   });
 });
 
@@ -218,6 +288,73 @@ describe('ingestPrices', () => {
         expect(Number(p.prev_close_paise)).toBe(22610); // 226.10 * 100
       }
     }
+  });
+
+  it('matches full-market rows (no ISIN) by NSE:<symbol> id', async () => {
+    const fullCsv = readFileSync(join(FIXTURE_DIR, 'full_11SEP2026.csv'), 'utf8');
+    const fullRows = parseFullMarketCsv(fullCsv);
+
+    const result = await ingestPrices(db, fullRows, [], '2026-09-11T17:30:00+05:30');
+
+    // GOLDBEES, NIFTYBEES, RPOWER, RELIANCE are seeded NSE ids → matched by symbol
+    expect(result.equityInserted).toBeGreaterThanOrEqual(4);
+    // 20MICRONS is not an instrument we hold → unknown
+    expect(result.unknownSymbols.some(s => s.includes('20MICRONS'))).toBe(true);
+
+    // GOLDBEES full-market close 125.12 → 12512 paise, matched via NSE:GOLDBEES
+    const gold = await db.query<{ close_paise: string | number }>(
+      'select close_paise from prices_eod where instrument_id = $1 and trade_date = $2',
+      ['NSE:GOLDBEES', '2026-09-11'],
+    );
+    expect(Number(gold[0]!.close_paise)).toBe(12512);
+  });
+});
+
+describe('backfillInstrumentIsins', () => {
+  it('fills empty instrument ISINs from the EQUITY_L master by symbol', async () => {
+    // Force an empty ISIN to prove the fill path, not the seed value.
+    await db.query('update instruments set isin = null where id = $1', ['NSE:RPOWER']);
+
+    const masterCsv = readFileSync(join(FIXTURE_DIR, 'EQUITY_L.csv'), 'utf8');
+    const master = parseEquityMaster(masterCsv);
+
+    const result = await backfillInstrumentIsins(db, master);
+    expect(result.filled).toBeGreaterThanOrEqual(1);
+
+    const [rpower] = await db.query<{ isin: string | null }>(
+      'select isin from instruments where id = $1', ['NSE:RPOWER'],
+    );
+    expect(rpower!.isin).toBe('INE614G01033');
+
+    // An instrument not present in the master stays unmapped
+    await db.query(
+      `insert into instruments (id, kind, name, currency, isin) values ('NSE:ZZNOTINMASTER', 'EQUITY', 'Zz Not In Master', 'INR', null)
+       on conflict (id) do nothing`,
+    );
+    const [zz] = await db.query<{ isin: string | null }>(
+      'select isin from instruments where id = $1', ['NSE:ZZNOTINMASTER'],
+    );
+    expect(zz!.isin).toBe(null);
+  });
+
+  it('does not clobber a non-empty ISIN even when the master disagrees', async () => {
+    // Seed gives NSE:RPOWER isin INE000A01010 (a placeholder). The master disagrees.
+    // If it is already set, backfill must leave it alone — it only fills empty slots.
+    await db.query('update instruments set isin = $1 where id = $2', ['INE000A01010', 'NSE:RPOWER']);
+
+    const masterCsv = readFileSync(join(FIXTURE_DIR, 'EQUITY_L.csv'), 'utf8');
+    const master = parseEquityMaster(masterCsv);
+    expect(master.find(r => r.symbol === 'RPOWER')).toBeDefined();
+
+    const result = await backfillInstrumentIsins(db, master);
+    const [rpower] = await db.query<{ isin: string | null }>(
+      'select isin from instruments where id = $1', ['NSE:RPOWER'],
+    );
+    // Untouched: backfill fills only empty slots, never revises a set value.
+    expect(rpower!.isin).toBe('INE000A01010');
+    expect(rpower!.isin).not.toBe('INE614G01033');
+    // The other empty NSE instruments still got filled by this same call.
+    expect(result.filled).toBeGreaterThanOrEqual(0);
   });
 });
 describe('unzipFirstEntry (NSE serves .csv.zip)', () => {

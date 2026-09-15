@@ -14,6 +14,8 @@ class SourceError extends Error {
 
 const NSE_EQUITY_BASE = 'https://archives.nseindia.com/content/historical/EQUITIES';
 const NSE_INDEX_BASE = 'https://archives.nseindia.com/content/historical/EQUITIES'; // indices also under EQUITIES
+const NSE_FULL_MARKET_BASE = 'https://nsearchives.nseindia.com/products/content';
+const NSE_MASTER_BASE = 'https://nsearchives.nseindia.com/content/equities';
 
 export interface BhavcopyRow {
   isin: string;
@@ -46,6 +48,14 @@ function formatNseDate(date: Date): { year: string; month: string; day: string }
   return { year, month, day };
 }
 
+/** DDMMYYYY — sec_bhavdata_full_<DDMMYYYY>.csv uses numeric month, unlike the archive files. */
+function formatNseDateNumeric(date: Date): { year: string; month: string; day: string } {
+  const year = date.getFullYear().toString();
+  const month = date.toLocaleString('en-US', { month: '2-digit' });
+  const day = date.getDate().toString().padStart(2, '0');
+  return { year, month, day };
+}
+
 function buildEquityUrl(date: Date): string {
   const { year, month, day } = formatNseDate(date);
   return `${NSE_EQUITY_BASE}/${year}/${month}/cm${day}${month}${year}bhav.csv.zip`;
@@ -56,6 +66,17 @@ function buildIndexUrl(date: Date): string {
   return `${NSE_INDEX_BASE}/${year}/${month}/ind${day}${month}${year}.zip`;
 }
 
+/** sec_bhavdata_full_<DDMMYYYY>.csv — the whole-market file (SYMBOL/SERIES, no ISIN). */
+function buildFullMarketUrl(date: Date): string {
+  const { year, month, day } = formatNseDateNumeric(date);
+  return `${NSE_FULL_MARKET_BASE}/sec_bhavdata_full_${day}${month}${year}.csv`;
+}
+
+/** EQUITY_L.csv — the whole-market SYMBOL → ISIN master (EQ series only). */
+function buildMasterUrl(): string {
+  return `${NSE_MASTER_BASE}/EQUITY_L.csv`;
+}
+
 async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -63,7 +84,8 @@ async function fetchWithRetry(url: string, retries = 2): Promise<Response> {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/zip, application/octet-stream, */*',
+          'Referer': 'https://www.nseindia.com/',
+          'Accept': 'application/zip, application/octet-stream, text/csv, */*',
         },
       });
       if (response.status === 404) {
@@ -141,12 +163,10 @@ export function unzipFirstEntry(buf: Buffer): string {
 /**
  * Downloads and parses one day's NSE equity bhavcopy.
  *
- * A non-trading day answers 404 and returns zero rows without raising — that is a calendar
- * fact, not a failure. Anything else propagates to `runSync`'s step contract (PRD §8.2).
- *
- * PROVISIONING: the archive URL and CSV column names are verified against live NSE at
- * provisioning time, not here — see the README checklist. If NSE moves the path, this
- * raises a loud SYNC_FAILURE rather than degrading quietly.
+ * The archive is the primary source (it carries ISINs). A 404 on the archive is not a
+ * failed day: NSE serves the same day on the whole-market file that has no ISIN, so
+ * fall back to it before conceding an empty day. Only when both 404 does a non-trading
+ * day report zero rows without raising — that is a calendar fact, not a failure.
  */
 export async function downloadBhavcopy(dateIso: string): Promise<{ rows: BhavcopyRow[]; report: BhavcopyReport }> {
   const report: BhavcopyReport = {
@@ -155,6 +175,30 @@ export async function downloadBhavcopy(dateIso: string): Promise<{ rows: Bhavcop
   try {
     const response = await fetchWithRetry(buildEquityUrl(new Date(`${dateIso}T00:00:00Z`)));
     const rows = parseEquityBhavcopy(unzipFirstEntry(Buffer.from(await response.arrayBuffer())), dateIso);
+    report.totalRows = rows.length;
+    return { rows, report };
+  } catch (e) {
+    if (!(e instanceof SourceError && e.code === 'NOT_FOUND')) throw e;
+  }
+  try {
+    const response = await fetchWithRetry(buildFullMarketUrl(new Date(`${dateIso}T00:00:00Z`)));
+    const rows = parseFullMarketCsv(await response.text());
+    report.totalRows = rows.length;
+    return { rows, report };
+  } catch (e) {
+    if (e instanceof SourceError && e.code === 'NOT_FOUND') return { rows: [], report };
+    throw e;
+  }
+}
+
+/** Downloads the whole-market SYMBOL → ISIN master (EQUITY_L.csv, EQ series). */
+export async function downloadEquityMaster(): Promise<{ rows: EquityMasterRow[]; report: BhavcopyReport }> {
+  const report: BhavcopyReport = {
+    date: new Date().toISOString().slice(0, 10), totalRows: 0, inserted: 0, updated: 0, unknownSymbols: [], errors: [],
+  };
+  try {
+    const response = await fetchWithRetry(buildMasterUrl());
+    const rows = parseEquityMaster(await response.text());
     report.totalRows = rows.length;
     return { rows, report };
   } catch (e) {
@@ -230,6 +274,125 @@ export function parseEquityBhavcopy(csvText: string, tradeDate: string): Bhavcop
   return rows;
 }
 
+/**
+ * Full-market file (`sec_bhavdata_full_<DDMMYYYY>.csv`): every listed security of the
+ * day, no ISIN. tradeDate comes from the file's own DATE1 column (which NSE may lag the
+ * requested date by a day on the sandbox mirror — the column, not the URL, is truth).
+ * Like a bhavcopy, the columns are renamed: DATE1/PREV_CLOSE/CLOSE_PRICE, not
+ * TIMESTAMP/PREVCLOSE/CLOSE.
+ */
+export function parseFullMarketCsv(csvText: string): BhavcopyRow[] {
+  const parsed = parseCsv(csvText);
+  if (parsed.length < 2) return [];
+
+  const headerRow = parsed[0];
+  if (!headerRow) return [];
+  const headers = headerRow.map(h => h.trim().toLowerCase());
+  const rows: BhavcopyRow[] = [];
+
+  const symbolIdx = headers.indexOf('symbol');
+  const seriesIdx = headers.indexOf('series');
+  const dateIdx = headers.indexOf('date1');
+  const prevCloseIdx = headers.indexOf('prev_close');
+  const closeIdx = headers.indexOf('close_price');
+
+  if (symbolIdx === -1 || seriesIdx === -1 || closeIdx === -1 || dateIdx === -1) {
+    throw new Error(`Missing required columns in full-market CSV. Headers: ${headers.join(', ')}`);
+  }
+
+  for (let i = 1; i < parsed.length; i++) {
+    const row = parsed[i];
+    if (!row) continue;
+    const maxIdx = Math.max(symbolIdx, seriesIdx, dateIdx, prevCloseIdx, closeIdx);
+    if (row.length <= maxIdx) continue;
+
+    const series = row[seriesIdx] ?? '';
+    if (series !== 'EQ') continue;
+
+    const tradeDate = parseNseDate(row[dateIdx] ?? '');
+    if (!tradeDate) continue;
+
+    const close = parseFloat(row[closeIdx] ?? '0');
+    const prevClose = prevCloseIdx >= 0 ? parseFloat(row[prevCloseIdx] ?? '0') : 0;
+
+    if (isNaN(close) || close <= 0) continue;
+
+    rows.push({
+      isin: '', // full-market file carries no ISIN; symbols resolve via NSE:<symbol>
+      symbol: (row[symbolIdx] ?? '').trim(),
+      series,
+      close,
+      prevClose,
+      tradeDate,
+    });
+  }
+
+  return rows;
+}
+
+const NSE_MONTHS: Record<string, string> = {
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
+/** '18-OCT-2026' → '2026-10-18'; undefined when it is not a recognizable NSE date. */
+function parseNseDate(s: string): string | undefined {
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s.trim());
+  if (!m) return undefined;
+  const day = m[1]!.padStart(2, '0');
+  const mon = m[2]!.toLowerCase();
+  const year = m[3]!;
+  const month = NSE_MONTHS[mon];
+  if (!month) return undefined;
+  return `${year}-${month}-${day}`;
+}
+
+/** A SYMBOL → ISIN entry from the whole-market master (EQUITY_L.csv, EQ series only). */
+export interface EquityMasterRow {
+  symbol: string;
+  isin: string;
+}
+
+/**
+ * Parses EQUITY_L.csv — NSE's whole-market SYMBOL → ISIN map (2306 EQ rows for
+ * 2026). Column layout: SYMBOL, NAME OF COMPANY, SERIES, DATE OF LISTING, PAID UP
+ * VALUE, MARKET LOT, ISIN NUMBER, FACE VALUE. Only EQ-series rows count.
+ */
+export function parseEquityMaster(csvText: string): EquityMasterRow[] {
+  const parsed = parseCsv(csvText);
+  if (parsed.length < 2) return [];
+
+  const headerRow = parsed[0];
+  if (!headerRow) return [];
+  const headers = headerRow.map(h => h.trim().toLowerCase());
+  const rows: EquityMasterRow[] = [];
+
+  const symbolIdx = headers.indexOf('symbol');
+  const isinIdx = headers.indexOf('isin number');
+  const seriesIdx = headers.indexOf('series');
+
+  if (symbolIdx === -1 || isinIdx === -1) {
+    throw new Error(`Missing required columns in EQUITY master CSV. Headers: ${headers.join(', ')}`);
+  }
+
+  for (let i = 1; i < parsed.length; i++) {
+    const row = parsed[i];
+    if (!row) continue;
+    const maxIdx = Math.max(symbolIdx, isinIdx, seriesIdx);
+    if (row.length <= maxIdx) continue;
+
+    const series = (row[seriesIdx] ?? '').trim();
+    if (series !== '' && series !== 'EQ') continue;
+
+    const isin = (row[isinIdx] ?? '').trim();
+    if (!isin || isin === '-') continue;
+
+    rows.push({ symbol: (row[symbolIdx] ?? '').trim(), isin });
+  }
+
+  return rows;
+}
+
 export function parseIndexBhavcopy(csvText: string, tradeDate: string): IndexBhavcopyRow[] {
   const parsed = parseCsv(csvText);
   if (parsed.length < 2) return [];
@@ -278,30 +441,52 @@ export async function ingestPrices(
   const unknownSymbols: string[] = [];
   let equityInserted = 0;
   let indexInserted = 0;
-  
-  // Map ISINs to instrument_ids for our watchlist + holdings
-  const isins = [...new Set(equityRows.map(r => r.isin))];
-  if (isins.length === 0) {
+
+  if (equityRows.length === 0 && indexRows.length === 0) {
     return { equityInserted: 0, indexInserted: 0, unknownSymbols: [] };
   }
-  
-  const placeholders = isins.map((_, i) => `$${i + 1}`).join(',');
+
+  // Archive rows carry an ISIN; full-market rows (no ISIN) resolve via NSE:<symbol>.
+  // Both resolve to the same instrument id, so score each row with whichever applies.
+  const isinRows = equityRows.filter(r => r.isin);
+  const symbolOnlyRows = equityRows.filter(r => !r.isin);
+
+  // Map ISINs to instrument_ids for our watchlist + holdings
+  const isins = [...new Set(isinRows.map(r => r.isin))];
   const instrumentMap = new Map<string, string>();
-  
-  const instruments = await db.query<{ id: string; isin: string }>(
-    `select id, isin from instruments where isin in (${placeholders})`,
-    isins,
-  );
-  
-  for (const inst of instruments) {
-    instrumentMap.set(inst.isin, inst.id);
+
+  if (isins.length > 0) {
+    const placeholders = isins.map((_, i) => `$${i + 1}`).join(',');
+    const instruments = await db.query<{ id: string; isin: string }>(
+      `select id, isin from instruments where isin in (${placeholders})`,
+      isins,
+    );
+    for (const inst of instruments) {
+      instrumentMap.set(inst.isin, inst.id);
+    }
   }
-  
+
+  // Resolve full-market rows: instrument id is exactly the NSE symbol.
+  const symbols = [...new Set(symbolOnlyRows.map(r => r.symbol))];
+  const symbolMap = new Map<string, string>();
+
+  if (symbols.length > 0) {
+    const nseIds = symbols.map(s => `NSE:${s}`);
+    const placeholders = nseIds.map((_, i) => `$${i + 1}`).join(',');
+    const instruments = await db.query<{ id: string }>(
+      `select id from instruments where id in (${placeholders})`,
+      nseIds,
+    );
+    for (const inst of instruments) {
+      symbolMap.set(inst.id.replace(/^NSE:/, ''), inst.id);
+    }
+  }
+
   // Insert equity prices for known instruments
   for (const row of equityRows) {
-    const instrumentId = instrumentMap.get(row.isin);
+    const instrumentId = row.isin ? instrumentMap.get(row.isin) : symbolMap.get(row.symbol);
     if (!instrumentId) {
-      unknownSymbols.push(`${row.symbol} (${row.isin})`);
+      unknownSymbols.push(row.isin ? `${row.symbol} (${row.isin})` : row.symbol);
       continue;
     }
     
@@ -334,4 +519,33 @@ export async function ingestPrices(
   }
   
   return { equityInserted, indexInserted, unknownSymbols };
+}
+
+/**
+ * Backfills empty instrument ISINs from the whole-market SYMBOL → ISIN master.
+ *
+ * Instruments identify themselves by id: `NSE:<SYMBOL>`. A filled ISIN is left alone —
+ * the master fills empty slots, it does not adjudicate seeded values. Returns how many
+ * instruments were actually updated.
+ */
+export async function backfillInstrumentIsins(
+  db: Db,
+  master: EquityMasterRow[],
+): Promise<{ filled: number }> {
+  const symbolToIsin = new Map(master.map(r => [r.symbol, r.isin]));
+
+  const empty = await db.query<{ id: string }>(
+    `select id from instruments where (isin is null or isin = '') and id like 'NSE:%'`,
+  );
+
+  let filled = 0;
+  for (const { id } of empty) {
+    const symbol = id.replace(/^NSE:/, '');
+    const isin = symbolToIsin.get(symbol);
+    if (!isin) continue;
+    await db.query(`update instruments set isin = $1 where id = $2`, [isin, id]);
+    filled++;
+  }
+
+  return { filled };
 }

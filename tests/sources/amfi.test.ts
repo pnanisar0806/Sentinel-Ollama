@@ -48,6 +48,41 @@ describe('parseNavText', () => {
     expect(ppfc!.isinDivReinvestment).toBe('INF318A01010');
   });
 
+  it('parses the new AMFI layout (Plan/Option before NAV) as served live', () => {
+    const text = [
+      'Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date',
+      "135762;INF846K01WO1;-;Axis Children's Fund;Direct Plan;Growth Option;29.9628;11-Sep-2026",
+      '100001;INF109K012K1;INF109K012K1;ICICI Prudential Nifty 50 Index Fund Direct Plan;Direct Plan;Growth Option;186.80;11-Sep-2026',
+    ].join('\n');
+
+    const rows = parseNavText(text);
+
+    expect(rows.length).toBe(2);
+
+    const axis = rows.find(r => r.schemeCode === '135762');
+    expect(axis).toBeDefined();
+    expect(axis!.nav).toBe(29.9628);
+    expect(axis!.isinDivPayout).toBe('INF846K01WO1');
+    expect(axis!.isinDivReinvestment).toBeNull();
+    expect(axis!.repurchasePrice).toBeNull();
+    expect(axis!.salePrice).toBeNull();
+    expect(axis!.date).toBe('11-Sep-2026');
+
+    const iciciNifty = rows.find(r => r.schemeCode === '100001');
+    expect(iciciNifty!.nav).toBe(186.80);
+  });
+
+  it('mutation guard: never parses the Plan column as the NAV', () => {
+    const text = [
+      '135762;INF846K01WO1;-;Axis Children\'s Fund;Direct Plan;Growth Option;29.9628;11-Sep-2026',
+    ].join('\n');
+
+    const rows = parseNavText(text);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.nav).toBe(29.9628);
+    expect(rows[0]!.nav).not.toBeNaN();
+  });
+
   it('mutation check: changing expected NAV makes test fail', () => {
     const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
     const rows = parseNavText(text);

@@ -3,6 +3,11 @@ import type { Db } from '../db/client.js';
 const AMFI_DAILY_URL = 'https://www.amfiindia.com/spages/NAVAll.txt';
 const AMFI_HISTORY_BASE = 'https://portal.amfiindia.com/DownloadNAVHistoryReport_Po.aspx';
 
+function normalizeIsin(raw: string | undefined): string | null {
+  const v = raw?.trim() ?? '';
+  return v === '' || v === '-' ? null : v;
+}
+
 export interface NavRow {
   schemeCode: string;
   isinDivPayout: string | null;
@@ -77,15 +82,28 @@ export function parseNavText(text: string): NavRow[] {
     
     const schemeCode = parts[0]?.trim() ?? '';
     if (!schemeCode || isNaN(Number(schemeCode))) continue;
-    
-    const isinDivPayout = parts[1]?.trim() ?? null;
-    const isinDivReinvestment = parts[2]?.trim() ?? null;
+
+    const isinDivPayout = normalizeIsin(parts[1]);
+    const isinDivReinvestment = normalizeIsin(parts[2]);
     const schemeName = parts[3]?.trim() ?? '';
-    const nav = parseFloat(parts[4] ?? '0');
-    const repurchasePrice = parts[5] ? parseFloat(parts[5]) : null;
-    const salePrice = parts[6] ? parseFloat(parts[6]) : null;
+
+    // AMFI changed the daily file layout: it now inserts "Plan;Option"
+    // between Scheme Name and Net Asset Value. Index 4 is numeric in the
+    // legacy layout (nav) and free text in the current one (plan name),
+    // which disambiguates the two formats per row.
+    const legacyNav = parseFloat(parts[4] ?? '');
+    let nav: number;
+    let repurchasePrice: number | null = null;
+    let salePrice: number | null = null;
+    if (!isNaN(legacyNav)) {
+      nav = legacyNav;
+      repurchasePrice = parts[5] ? parseFloat(parts[5]) : null;
+      salePrice = parts[6] ? parseFloat(parts[6]) : null;
+    } else {
+      nav = parseFloat(parts[6] ?? '');
+    }
     const date = parts[7]?.trim() ?? new Date().toISOString().slice(0, 10);
-    
+
     if (isNaN(nav) || nav <= 0) continue;
     
     rows.push({
