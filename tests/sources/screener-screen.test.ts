@@ -6,7 +6,7 @@ import { seedWatchlist } from '../../src/seed/seed-watchlist.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseScreenHtml, slugToInstrumentId, importScreenRows } from '../../src/sources/screener-screen.js';
+import { parseScreenHtml, slugToInstrumentId, importScreenRows, type ParsedScreenRow } from '../../src/sources/screener-screen.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -246,5 +246,107 @@ describe('importScreenRows', () => {
       [result.uploadedId],
     );
     expect(Number(count[0]!.n)).toBe(result.inserted);
+  });
+});
+
+describe('cohort promotion: unknown screen rows become instruments', () => {
+  // Self-contained screen rows with slugs no other test creates.
+  function cohortRow(slug: string, name: string): ParsedScreenRow {
+    return {
+      name,
+      slug,
+      columns: { 'P/E': '10', CMP: '100', 'Mar Cap': '5000', ROCE: '12', 'D/E': '0.5' },
+      cmp: 100,
+      pe: 10,
+      marketCap: 5000,
+      divYieldPct: 1,
+      rocePct: 12,
+      roePct: 10,
+      deRatio: 0.5,
+    };
+  }
+
+  it('creates a real instrument for a screen row that does not resolve', async () => {
+    const rows = [cohortRow('COHORTX', 'Cohort X Ltd')];
+    expect(await slugToInstrumentId(db, 'COHORTX', 'Cohort X Ltd')).toBeNull();
+
+    const result = await importScreenRows(db, rows, {
+      asOf: '2026-09-14',
+      screenUrl: 'cohort-1',
+    });
+
+    const rowsOut = await db.query<{ id: string; kind: string; name: string; metadata: string }>(
+      `SELECT id, kind, name, metadata::text AS metadata FROM instruments WHERE id = 'NSE:COHORTX'`,
+    );
+    expect(rowsOut.length).toBe(1);
+    expect(rowsOut[0]!.kind).toBe('EQUITY');
+    expect(rowsOut[0]!.name).toBe('Cohort X Ltd');
+    expect(JSON.parse(rowsOut[0]!.metadata).source).toBe('screener-cohort');
+    expect(result.createdInstruments).toBe(1);
+    expect(result.inserted).toBe(1);
+  });
+
+  it('derived check: creates exactly the set of unresolvable screen companies', async () => {
+    const rows = [cohortRow('COHORTD1', 'Cohort D1 Ltd'), cohortRow('COHORTD2', 'Cohort D2 Ltd')];
+
+    let expected = 0;
+    for (const r of rows) {
+      if ((await slugToInstrumentId(db, r.slug, r.name)) === null) expected++;
+    }
+    expect(expected).toBeGreaterThan(0);
+
+    const result = await importScreenRows(db, rows, {
+      asOf: '2026-09-14',
+      screenUrl: 'cohort-derived',
+    });
+    expect(result.createdInstruments).toBe(expected);
+    expect(result.inserted).toBe(expected);
+
+    for (const r of rows) {
+      const found = await db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM instruments WHERE id = $1`,
+        [`NSE:${r.slug}`],
+      );
+      expect(Number(found[0]!.n)).toBe(1);
+    }
+  });
+
+  it('a re-import creates no new instruments and reports zero created', async () => {
+    const rows = [cohortRow('COHORTX', 'Cohort X Ltd'), cohortRow('COHORTY', 'Cohort Y Ltd')];
+
+    const first = await importScreenRows(db, rows, {
+      asOf: '2026-09-14',
+      screenUrl: 'cohort-2a',
+    });
+    const before = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM instruments WHERE metadata->>'source' = 'screener-cohort'`,
+    );
+
+    const second = await importScreenRows(db, rows, {
+      asOf: '2026-09-14',
+      screenUrl: 'cohort-2b',
+    });
+    const after = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM instruments WHERE metadata->>'source' = 'screener-cohort'`,
+    );
+
+    expect(second.createdInstruments).toBe(0);
+    expect(Number(after[0]!.n)).toBe(Number(before[0]!.n));
+    expect(second.inserted).toBe(first.inserted);
+  });
+
+  it('does not create instruments for degenerate id-link slugs like "ID"', async () => {
+    const rows = [cohortRow('ID', 'Id Named Company')];
+
+    const result = await importScreenRows(db, rows, {
+      asOf: '2026-09-14',
+      screenUrl: 'cohort-degenerate',
+    });
+    expect(result.createdInstruments).toBe(0);
+    expect(result.inserted).toBe(0);
+    const found = await db.query<{ n: string }>(
+      `SELECT count(*) AS n FROM instruments WHERE id = 'NSE:ID'`,
+    );
+    expect(Number(found[0]!.n)).toBe(0);
   });
 });

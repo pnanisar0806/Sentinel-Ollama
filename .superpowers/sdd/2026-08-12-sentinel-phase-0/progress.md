@@ -521,3 +521,32 @@ avs table allows corrections (no append-only trigger).
   (corrected the stale "weekdays 08:45 digest" line to `workflow_run` while in there).
 - First 19:00 IST run also backfills today's missing `prices_eod` data once the file is out.
 - Committed + pushed.
+
+## 2026-09-15 (screener cohort promotion — screen rows become instruments)
+
+- **The universe-widening step the watchlist pool was waiting on.** `importScreenRows` used to
+  skip every row whose company was not already in `instruments`; the live sentinel run (screen
+  3963033, 2026-09-14) landed only 12 of ~230 for exactly that reason. Now each unknown row is
+  **promoted** via new `ensureScreenInstrument` (internal, not exported): id `NSE:<slug>`, kind
+  EQUITY, currency INR, exchange NSE, `metadata = {"source":"screener-cohort"}`, `on conflict
+  (id) do nothing`. Identity is derived from the screen slug (screener exports no ticker); the
+  human-readable name is trusted from the screen; **ISIN is deliberately left NULL** to be filled
+  by `pnpm backfill:isin` from `EQUITY_L.csv` — never invented.
+- **Known simplification (scope note):** ETF rows would be mis-kinded as EQUITY (source-row
+  kind/exchange dropped at promotion). Low severity, one screen type; noted, not built around.
+- **Degenerate `/company/id/<n>/` rows still refused** (slug len < 3 — the LIKE-guard fix from
+  the 2026-09-14 live run stays; they can't be promoted, so still warn `Unknown instrument
+  (not created)`).
+- **Return contract widened:** `importScreenRows` → `{ uploadedId, inserted, createdInstruments,
+  warnings }`; the screen-job CLI prints `Promoted N new companies into the instruments
+  universe`. `screenerImportCsv` (legacy pinned-spec path) reports `createdInstruments: 0` and
+  never promotes. No migration, no schema change.
+- 4 new tests in `tests/sources/screener-screen.test.ts`: (1) unknown row becomes a real
+  instrument with kind/metadata mark; (2) **derived** exact-count check over two synthetic slugs
+  (COHORTD1/COHORTD2) — earlier fixtures were unusable because the file's own import tests had
+  already promoted every fixture slug; (3) re-import idempotence (`createdInstruments: 0`,
+  count unchanged); (4) degenerate `ID` slug never created and still warned. Fixture-derived
+  approach abandoned in favour of self-contained synthetic rows. **618→622 passed**, tsc clean.
+- Growth path recorded for Phase 2: the pile grows screen-by-screen toward the whole market
+  (~2,600) by pulling more screens over time (whole-market prices already flow daily); news /
+  sentiment / partnerships reading stays planned for the next stage.

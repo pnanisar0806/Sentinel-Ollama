@@ -328,14 +328,40 @@ export async function slugToInstrumentId(
 }
 
 /**
+ * Create the instrument identity a screen row points at. A screener slug is real
+ * market identity — usually the NSE symbol — so this is not an invented ticker:
+ * the row carries the company's true name and the id is keyed to its exchange
+ * listing. ISIN is deliberately left NULL here; it is filled only later from the
+ * NSE EQUITY_L master (never invented). The metadata mark `screener-cohort`
+ * records where the identity came from. Screener's /company/id/<n>/ links produce
+ * degenerate slugs ("ID", no symbol) and are never promoted.
+ */
+async function ensureScreenInstrument(
+  db: Db,
+  slug: string,
+  name: string,
+): Promise<string | null> {
+  if (slug.length < 3) return null;
+  const id = `NSE:${slug}`;
+  await db.query(
+    `insert into instruments (id, kind, name, currency, exchange, metadata)
+     values ($1, 'EQUITY', $2, 'INR', 'NSE', '{"source":"screener-cohort"}'::jsonb)
+     on conflict (id) do nothing`,
+    [id, name],
+  );
+  return id;
+}
+
+/**
  * Import parsed screen rows into fundamentals table.
- * Returns the upload ID, count of inserted rows, and any warnings.
+ * Returns the upload ID, count of inserted rows, count of instrument identities
+ * created for previously unknown screen companies, and any warnings.
  */
 export async function importScreenRows(
   db: Db,
   rows: ParsedScreenRow[],
   opts: { asOf?: string; screenUrl?: string } = {},
-): Promise<{ uploadedId: number; inserted: number; warnings: string[] }> {
+): Promise<{ uploadedId: number; inserted: number; createdInstruments: number; warnings: string[] }> {
   const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10);
   const screenUrl = opts.screenUrl ?? 'screener-screen';
   const warnings: string[] = [];
@@ -362,12 +388,21 @@ export async function importScreenRows(
   }
 
   let inserted = 0;
+  let createdInstruments = 0;
   const seen = new Set<string>();
   for (const row of rows) {
-    const instrumentId = await slugToInstrumentId(db, row.slug, row.name);
+    let instrumentId = await slugToInstrumentId(db, row.slug, row.name);
     if (!instrumentId) {
-      warnings.push(`Unknown instrument: ${row.name} (${row.slug})`);
-      continue;
+      // Cohort promotion: a screen row names a real company, so its identity is
+      // created (exchange-keyed, ISIN filled later by the master). This is how
+      // the watchlist candidate pool grows beyond the owner's held securities.
+      instrumentId = await ensureScreenInstrument(db, row.slug, row.name);
+      if (instrumentId) {
+        createdInstruments++;
+      } else {
+        warnings.push(`Unknown instrument (not created): ${row.name} (${row.slug})`);
+        continue;
+      }
     }
     if (seen.has(instrumentId)) {
       warnings.push(`Duplicate instrument row skipped: ${row.name} (${row.slug})`);
@@ -391,5 +426,5 @@ export async function importScreenRows(
     inserted++;
   }
 
-  return { uploadedId: uploadId, inserted, warnings };
+  return { uploadedId: uploadId, inserted, createdInstruments, warnings };
 }

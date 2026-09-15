@@ -6,6 +6,19 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [x] **SCREENER COHORT PROMOTION — the universe widens on every screen import (2026-09-15).**
+       Rows whose company is not yet in `instruments` are now promoted to real instruments
+       (`NSE:<slug>`, kind EQUITY, name from the screen, metadata `{"source":"screener-cohort"}`)
+       instead of being skipped as "Unknown instrument". ISIN stays NULL and is filled later by
+       `pnpm backfill:isin` from `EQUITY_L.csv` — never invented. Degenerate `/company/id/<n>/`
+       slugs ("ID", len<3) are still refused. `importScreenRows` now returns
+       `createdInstruments` and the CLI prints the promotion count. No migration, no schema
+       change. Re-running the owner's sentinel screen 3963033 now promotes its ~218 previously
+       skipped companies, so the next `pnpm watchlist:propose` draws from a real pool. 4 new
+       tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, degenerate
+       refusal), **618→622 passed**, tsc clean. `IND:INDSxxxxx` cohort placeholders stay
+       un-resolvable (their ids carry no symbol) — separate track.
+
 - [x] **NSE PRICES LANDED IN SYNC FOR THE 2026 SANDBOX (2026-09-15).** The NSE archive host now
       404s *every* 2026 bhavcopy file (2019–2024 still fine) — equity prices had been silently
       dead since June. `downloadBhavcopy` keeps the archive as primary (it carries ISINs) and
@@ -268,9 +281,9 @@ MEMORY.md; the code map lives in index.md.
 - [ ] **Watchlist shortlisting is now an LLM job — RUN IT.** Owner decision 2026-09-13: the
       model shortlists. `pnpm watchlist:propose [--limit N] [--dry-run]` drafts from
       `watchlistCandidates` (excludes held + already-watched, §6.1) and records picks as
-      `source: 'llm-advisor'` proposals the weekly report shows as awaiting sign-off. **It can
-      only choose from instruments that already exist in `instruments`** — so today the pool is
-      tiny, and the run gets genuinely useful only after a real screener import widens it.
+      `source: 'llm-advisor'` proposals the weekly report shows as awaiting sign-off. The pool
+      is no longer fixed at 74: cohort promotion (top line) widens `instruments` on every
+      screener import. Re-run the sentinel screen 3963033 first, then `pnpm watchlist:propose`.
       The 40 static `'advisor'` names in `src/seed/seed-watchlist.ts` remain LLM-recall from the
       Task 6 session; replace them with a proposed shortlist once the pool is real.
 - [ ] **SCREENER PIPELINE — LIVE RUN DONE 2026-09-14; one owner gate decision remains.** HTML
@@ -289,8 +302,9 @@ MEMORY.md; the code map lives in index.md.
       `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the last two, so
       either bake FCF-positivity into the screen query (recommended) or drop red flags in Phase 1
       (recommended). After that: regenerate the watchlist from the ~230-name cohort (§6.1, owner
-      pruning on top) — note only held/watchlist names land in `fundamentals` today because the
-      `instruments` universe is tiny (74 equity/ETF).
+      pruning on top) — held/watchlist names land in `fundamentals` today; the rest of the
+      cohort was promoted into `instruments` by cohort promotion (top line) and now takes
+      fundamentals rows on the next import.
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
@@ -394,5 +408,6 @@ MEMORY.md; the code map lives in index.md.
 | *(this session)* | **Screener.in screen HTML scraper**: `screener-screen.ts` (parse/fetch/slug-map/import), migration 0014 widens `source` back to `'screener-screen'`, `screener-import --screen <url>`, real 42KB page-1/page-2 fixtures, 16 tests; **606 passed**, tsc clean. Works around the paywalled CSV export |
 | *(pending push)* | **Live screener run — 3 defects fixed, 12 rows landed**: `screener:import` now loads `.env` (was silently running against empty in-memory PGlite); `/company/id/` slug no longer substring-matches `NSE:LIQUIDBEES` (LIKE guard, len≥3); mid-loop duplicate inserts deduped with a warning instead of crashing; tooltip-less `Debt / Eq` header aliased to `D/E`. Live sentinel screen run: **12 fundamentals rows in prod** (uploads 1/3, as_of 2026-09-14), partial 2-row upload cleaned. 3 new tests, **609 passed**, tsc clean |
 | *(this session)* | **Extraction model reverted to the proven gemma chain**: `VISION_MODEL_CHAIN` leads `google/gemma-4-31b:free` again; `-fin` stays for text jobs only; the `ling-3.0-flash-vl` leader trial retired. Test asserts the split, **606 passed**, tsc clean |
+| *(pending push)* | **Screener cohort promotion**: unknown screen rows become `NSE:<slug>` instruments (kind EQUITY, `metadata {"source":"screener-cohort"}`, ISIN left NULL for `backfill:isin`), `importScreenRows` returns `createdInstruments`, CLI prints promotion count, degenerate `/company/id/` slugs refused; 4 new tests, **618→622 passed**, tsc clean. Re-import of screen 3963033 widens the pool to ~230 |
 
 (End of file)

@@ -1575,4 +1575,39 @@ Two real defects surfaced once against the real Supabase:
 Prod facts: the live `instruments` table uses **`BSE:`-prefixed ids** for most equities (74
 equity/ETF total) plus `NSE:` for a few (LICI, TECHM, TMCV, LIQUIDBEES). Seed ids are `NSE:` —
 both map fine, but never assume which prefix. The sentinel cohort (~230 names) overlaps the
-local universe by only 12 → only those 12 landed. Universe widening is the pending owner step.
+local universe by only 12 → only those 12 landed. Universe widening is now the screener cohort
+promotion (next section).
+
+### Screener cohort promotion (2026-09-15) — screen rows become instruments
+
+Every `importScreenRows` now promotes rows whose company is NOT yet in `instruments`
+(`ensureScreenInstrument`): id `NSE:<slug>`, kind `EQUITY`, currency INR, exchange NSE,
+`metadata = {"source":"screener-cohort"}` (screen slug derived, not ticker — screener exports
+no ticker). This is the "regenerate the universe from a real screener.in cohort" fix: it is not
+a one-time backfill but happens on every import, so re-running the owner's sentinel screen
+3963033 promotes its ~218 skipped companies and the next `watchlist:propose` draws from a real
+pool.
+
+- **Identity is an inference, not a fact.** `NSE:<slug>` is trusted only to be internally
+  consistent with bhavcopy resolution; the human-readable `name` comes from the screen (the one
+  column it renders that maps to a company). Nothing else is guessed — **ISIN is deliberately
+  left NULL** and filled later by `pnpm backfill:isin` from `EQUITY_L.csv`; never invent one.
+- **Known simplification (scope note):** screen rows for ETFs/funds would be mis-kinded as
+  EQUITY. Asteroid-screen ETFs will land EQ with bogus fundamentals; the screener `kind`/exchange
+  fields on the source row are dropped at promotion. Low severity, one screen type; noted rather
+  than built around.
+- **Degenerate `/company/id/<n>/` rows** (companies without a slug) still resolve to `"ID"` and
+  are refused (len < 3) — the LIKE-guard fix stays. Unknown rows that can't be promoted still
+  warn `Unknown instrument (not created)`.
+- `importScreenRows` return shape is now `{ uploadedId, inserted, createdInstruments, warnings }`;
+  the screen-job CLI prints `Promoted N new companies into the instruments universe`. The legacy
+  `screenerImportCsv` path (unverified spec, `TICKER` mapping) only ever runs on the pinned CSV
+  fixture and never promotes.
+- **The IND cross-listing hole is untouched:** `IND:INDSxxxxx` ids resolve to NSE physical
+  symbols only via the `bhavcopySymbols` map; the rest of the ~10k IND ids have no slug and are
+  silently dropped by slugToInstrumentId — the 40 seeded `'advisor'` watchlist rows pointing at
+  `IND:` names are the live example. Separate track from cohort promotion.
+- 4 new tests (existence/kind/metadata mutation-checked, derived exact-set using synthetic
+  COHORTD1/COHORTD2, re-import idempotence = created 0, degenerate refusal). 618→622 passed,
+  tsc clean. Owner's earlier line "not yet run live + not pushed" is now stale for the *cohort*
+  portion: it promotes on the next live import, no extra flag.

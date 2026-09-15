@@ -14,9 +14,11 @@ export async function screenerImportCsv(
   db: Db,
   csvPath: string,
   opts: { asOf?: string; filename?: string } = {},
-): Promise<{ uploadedId: number; inserted: number; warnings: string[] }> {
+): Promise<{ uploadedId: number; inserted: number; createdInstruments: number; warnings: string[] }> {
   const csvText = readFileSync(csvPath, 'utf8');
-  return importScreener(db, csvText, opts);
+  const result = await importScreener(db, csvText, opts);
+  // The legacy CSV spec is unverified against a real export; it never promotes.
+  return { ...result, createdInstruments: 0 };
 }
 
 /** Import by scraping a screener.in screen URL (HTML). */
@@ -24,7 +26,7 @@ export async function screenerImportScreen(
   db: Db,
   screenUrl: string,
   opts: { asOf?: string; maxPages?: number } = {},
-): Promise<{ uploadedId: number; inserted: number; warnings: string[] }> {
+): Promise<{ uploadedId: number; inserted: number; createdInstruments: number; warnings: string[] }> {
   const result = await fetchScreen(screenUrl, { maxPages: opts.maxPages ?? 10 });
   const importResult = await importScreenRows(db, result.rows, {
     ...(opts.asOf !== undefined ? { asOf: opts.asOf } : {}),
@@ -69,6 +71,9 @@ if (isMainModule(import.meta.url)) {
       }
       console.log(`Fetching screen: ${screenUrl}`);
       result = await screenerImportScreen(db, screenUrl, { asOf: asOfFinal, maxPages });
+      if (result.createdInstruments > 0) {
+        console.log(`Promoted ${result.createdInstruments} new companies into the instruments universe`);
+      }
     } else {
       const csvPath = positional[0];
       if (!csvPath) {
