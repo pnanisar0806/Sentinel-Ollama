@@ -1574,7 +1574,7 @@ Two real defects surfaced once against the real Supabase:
 
 Prod facts: the live `instruments` table uses **`BSE:`-prefixed ids** for most equities (74
 equity/ETF total) plus `NSE:` for a few (LICI, TECHM, TMCV, LIQUIDBEES). Seed ids are `NSE:` —
-both map fine, but never assume which prefix. The sentinel cohort (~230 names) overlaps the
+both map fine, but never assume which prefix. The sentinel cohort (410 records) overlaps the
 local universe by only 12 → only those 12 landed. Universe widening is now the screener cohort
 promotion (next section).
 
@@ -1585,8 +1585,10 @@ Every `importScreenRows` now promotes rows whose company is NOT yet in `instrume
 `metadata = {"source":"screener-cohort"}` (screen slug derived, not ticker — screener exports
 no ticker). This is the "regenerate the universe from a real screener.in cohort" fix: it is not
 a one-time backfill but happens on every import, so re-running the owner's sentinel screen
-3963033 promotes its ~218 skipped companies and the next `watchlist:propose` draws from a real
-pool.
+3963033 promotes its ~398 skipped companies and the next `watchlist:propose` draws from a real
+pool. (Importer's old 10-page cap truncated the 17-page screen to ~230 — fixed 2026-09-16: the
+default page budget is now a 100-page safety valve; screener serves 25 rows/page to the paged
+URL, so the short page is the real terminator.)
 
 - **Identity is an inference, not a fact.** `NSE:<slug>` is trusted only to be internally
   consistent with bhavcopy resolution; the human-readable `name` comes from the screen (the one

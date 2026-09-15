@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
@@ -6,7 +6,7 @@ import { seedWatchlist } from '../../src/seed/seed-watchlist.js';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseScreenHtml, slugToInstrumentId, importScreenRows, type ParsedScreenRow } from '../../src/sources/screener-screen.js';
+import { parseScreenHtml, fetchScreen, slugToInstrumentId, importScreenRows, type ParsedScreenRow } from '../../src/sources/screener-screen.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -348,5 +348,80 @@ describe('cohort promotion: unknown screen rows become instruments', () => {
       `SELECT count(*) AS n FROM instruments WHERE id = 'NSE:ID'`,
     );
     expect(Number(found[0]!.n)).toBe(0);
+  });
+});
+
+/** Build a minimal valid screener screen page carrying `rowCount` data rows. */
+function screenPageHtml(rowCount: number, page: number): string {
+  let rowsHtml = '';
+  for (let i = 1; i <= rowCount; i++) {
+    const slug = `PG${page.toString().padStart(2, '0')}_${i.toString().padStart(3, '0')}`;
+    rowsHtml += `
+      <tr data-row-company-id="${page * 1000 + i}">
+        <td class="text">${i}.</td>
+        <td class="text"><a href="/company/${slug}/">Company ${slug}</a></td>
+        <td>100</td>
+        <td>20</td>
+        <td>0.5</td>
+      </tr>`;
+  }
+  return `<table class="data-table">
+    <tr>
+      <th scope="colgroup"><a>S.No.</a></th>
+      <th scope="colgroup"><a>Company</a></th>
+      <th scope="colgroup"><a>CMP</a></th>
+      <th scope="colgroup"><a>ROCE</a></th>
+      <th scope="colgroup"><a>Debt / Eq</a></th>
+    </tr>${rowsHtml}
+  </table>`;
+}
+
+/** Serve `fullPages` of 25 rows then `trailingRows` on the final page. */
+function mockScreenPages(fullPages: number, trailingRows: number): ReturnType<typeof vi.fn> {
+  return vi.fn(async (input: RequestInfo | URL) => {
+    const page = Number(new URL(String(input)).searchParams.get('page') ?? 1);
+    const html =
+      page <= fullPages
+        ? screenPageHtml(25, page)
+        : page === fullPages + 1
+          ? screenPageHtml(trailingRows, page)
+          : '<html><body>no data-table</body></html>';
+    return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html' } });
+  });
+}
+
+describe('fetchScreen pagination', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('the default page budget reaches a screen longer than 10 pages, ending on the short page', async () => {
+    const fetchMock = mockScreenPages(12, 10);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await fetchScreen('https://www.screener.in/screens/3963033/sentinel/', {
+      delayMs: 0,
+    });
+
+    expect(result.pagesFetched).toBe(13);
+    expect(result.rows).toHaveLength(12 * 25 + 10);
+    const askedPages = fetchMock.mock.calls.map(c => new URL(String(c[0])).searchParams.get('page'));
+    expect(askedPages).toEqual(['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13']);
+  });
+
+  it('an explicit maxPages cap stops earlier than the short page', async () => {
+    const fetchMock = mockScreenPages(12, 10);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await fetchScreen('https://www.screener.in/screens/3963033/sentinel/', {
+      maxPages: 2,
+      delayMs: 0,
+    });
+
+    expect(result.pagesFetched).toBe(2);
+    expect(result.rows).toHaveLength(50);
+    expect(fetchMock.mock.calls).toHaveLength(2);
   });
 });

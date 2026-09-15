@@ -218,12 +218,15 @@ export function parseScreenHtml(html: string): ScreenParseResult {
  * Fetch all pages of a screener.in screen URL.
  * Screens are paginated with ?page=N (25 rows per page).
  * Stops when a page returns fewer than 25 data rows or maxPages is reached.
+ * maxPages is only a safety valve against a runaway loop: real screens end on a
+ * short page long before it (the owner's sentinel screen spans 17 pages, not 10),
+ * so the default of 100 keeps the short-page break the real terminator.
  */
 export async function fetchScreen(
   screenUrl: string,
   opts: { maxPages?: number; delayMs?: number } = {},
 ): Promise<ScreenParseResult & { pagesFetched: number }> {
-  const maxPages = opts.maxPages ?? 10;
+  const maxPages = opts.maxPages ?? 100;
   const delayMs = opts.delayMs ?? 1500;
   const allRows: ParsedScreenRow[] = [];
   const allWarnings: string[] = [];

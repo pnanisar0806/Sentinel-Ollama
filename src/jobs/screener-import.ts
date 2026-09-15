@@ -27,7 +27,7 @@ export async function screenerImportScreen(
   screenUrl: string,
   opts: { asOf?: string; maxPages?: number } = {},
 ): Promise<{ uploadedId: number; inserted: number; createdInstruments: number; warnings: string[] }> {
-  const result = await fetchScreen(screenUrl, { maxPages: opts.maxPages ?? 10 });
+  const result = await fetchScreen(screenUrl, { maxPages: opts.maxPages ?? 100 });
   const importResult = await importScreenRows(db, result.rows, {
     ...(opts.asOf !== undefined ? { asOf: opts.asOf } : {}),
     screenUrl,
@@ -54,7 +54,7 @@ if (isMainModule(import.meta.url)) {
   const asOf = asOfArg ? asOfArg.split('=')[1] : new Date().toISOString().slice(0, 10);
 
   const pagesArg = args.find(a => a.startsWith('--pages='));
-  const maxPages = pagesArg ? Number(pagesArg.split('=')[1]) : 10;
+  const maxPages = pagesArg ? Number(pagesArg.split('=')[1]) : 100;
 
   const env = loadEnv(process.env, ENV_PURPOSES);
   const db = await openDb(env.databaseUrl);
