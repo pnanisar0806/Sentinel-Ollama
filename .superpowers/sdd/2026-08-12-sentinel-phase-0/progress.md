@@ -477,3 +477,33 @@ avs table allows corrections (no append-only trigger).
   trial retired; `TEXT_MODEL` (`-fin`, text-only) stays for advisor/watchlist prose and is kept
   out of the vision chain by test. The stale model-wiring tests were updated together rather
   than left to go red on the swap. 606 passed, `tsc --noEmit` clean.
+
+## 2026-09-15 (NSE 2026 price pipeline — full-market fallback + ISIN backfill)
+
+- **Root cause closed: the NSE archive host stopped serving 2026.** Every `cm<DD><MON><YYYY>bhav.csv.zip`
+  for a 2026 trading date returns 404 (verified live, multiple dates); the same pattern still
+  serves 2019–2024 (2024-03-05 → 200, 1790 rows, ISINs intact). Equity prices had been DDL nicht
+  landing since June. diagnosis confirmed by curl/probes, not assumed.
+- **Fix is archive-first with a whole-market fallback.** `downloadBhavcopy` tries the archive,
+  and on `SourceError NOT_FOUND` falls back to
+  `nsearchives.nseindia.com/products/content/sec_bhavdata_full_<DDMMYYYY>.csv` (numeric month —
+  the alphabetic-month URL 404s; caught by a live probe after the first fallback attempt returned
+  0 rows). Both missing → `{rows: [], report}`, still reported honestly. Live: 11-Sep-2026 →
+  2637 EQ rows, DATE1-truth dates, GOLDBEES/LIQUIDBEES/NIFTYBEES (SERIES=EQ) present.
+- **Full-market rows carry no ISIN.** `parseFullMarketCsv` yields `isin:''`; `ingestPrices` now
+  resolves those rows through the `NSE:<symbol>` id that seeded instruments already hold, so no
+  schema change and no invented instruments. `20MICRONS` (not seeded) correctly lands in
+  `unknownSymbols`.
+- **ISIN backfill from the whole-market master.** `downloadEquityMaster` (`EQUITY_L.csv`, 2306 EQ
+  symbols; GOLDBEES/LIQUIDBEES absent — ETFs excluded there) + `backfillInstrumentIsins` fills
+  only `NULL`/empty instrument ISINs, never clobbering a seeded value (both branches tested,
+  including a non-clobber test). New `pnpm backfill:isin` job. Live run: 1 instrument updated.
+- **`fetchWithRetry` now sends the NSE `Referer` header** (browser posture the site expects) and
+  widens `Accept` to incl. CSV. Fix-on-touch: `formatNseDateNumeric` for the full-market URL.
+- Fixtures: `tests/fixtures/bhavcopy/full_11SEP2026.csv` + `EQUITY_L.csv`. Tests: parseFullMarketCsv,
+  parseEquityMaster, full-market ingest via NSE:<symbol>, backfill fill + no-clobber. Suite
+  **618 passed**, `tsc --noEmit` clean. Commit `316720a`.
+- **Residual, documented in PENDING:** today's full-market file appears only after ~18:00 IST (a
+  17:30 IST cron can re-dispatch for the same day); the index zoo `ind<DDMMMYYYY>.zip` still has
+  no working 2026 source and stays silent-empty. Both environmental/known, neither silent-break.
+- Push of all approved work (AMFI fix + `e745218` + NSE pipeline) per owner instruction.

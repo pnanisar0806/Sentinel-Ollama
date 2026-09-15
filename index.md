@@ -58,6 +58,7 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/jobs/telegram-bot.ts` | CLI entrypoint — `pnpm telegram:bot`. Loads `['telegram','crypto']` env, runs migrations + IPS install, starts the polling bot |
 | `src/notify/telegram-bot.ts` | `TelegramBot`, `displayOrder(positions)`, `resolveProposalTarget(proposals, positions)` — long-polling command bot (`/sync`, `/status`, `/holdings`, `/cost`, `/confirm`, `/reject`, `/fidelity`, `/help`), owner-locked; builds sync sources from the exported `indmoneySource`. Statement photos: single images extract immediately; **albums buffer by `media_group_id`** and flush as one multi-page LLM pass after a short silence. Cost proposals queue until the owner replies `/confirm`; confirmed AND skipped entries leave the queue (a repeat confirm used to double-write). `/holdings` and `/cost` share `displayOrder` — two divergent orderings once wrote a cost to the wrong instrument. Without `LLM_API_KEY` photos are archived and the bot walks the owner through manual `/cost`. **Fidelity RSU path (2026-09-05):** `/fidelity` or an upload hitting `handleFidelity` → `extractRsuVestsFromImage` → `fidelityVestsToProposals` priced at live FX → queued in `fidelityPending`; `/confirm <#>|all` dispatches to the fidelity queue first and writes ACTUAL `rsu_vests` via a PROJECTED `persistVests` ensure + `confirmVest` (grants never auto-created; missing-grant and confirmed entries are consumed so later cost confirms are never blocked); `/reject` clears both queues. Entrypoint is `jobs/telegram-bot.ts` only |
 | `src/jobs/keepalive.ts` | CLI entrypoint — weekly `audit_log` insert to keep the Supabase free tier awake (it is a DB write, not an HTTP ping) |
+| `src/jobs/backfill-isin.ts` | CLI — `pnpm backfill:isin`. Downloads the whole-market master (`EQUITY_L.csv`) and runs `backfillInstrumentIsins` (fill-only, never clobbers a seeded ISIN) |
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
 
 
@@ -114,7 +115,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 
 | File | Role |
 |---|---|
-| `src/sources/bhavcopy.ts` | `downloadBhavcopy`, `downloadIndexSeries`, `parseEquityBhavcopy`, `parseIndexBhavcopy`, `ingestPrices`, `unzipFirstEntry` — NSE EQ + index bhavcopy → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, never created). NSE serves `.csv.zip`, unpacked with stdlib `node:zlib` — no dependency. A 404 is a non-trading day: zero rows, no incident; anything else is a loud `SYNC_FAILURE`. **URL/columns are unverified against live NSE — see the README provisioning table** — **download implemented 2026-09-13** |
+| `src/sources/bhavcopy.ts` | `downloadBhavcopy` (**archive-first** → `sec_bhavdata_full_<DDMMYYYY>.csv` fallback; the archive host 404s all 2026 files — live-verified 2026-09-15. Numeric month only; sends NSE `Referer`), `downloadIndexSeries`, `parseEquityBhavcopy`, `parseFullMarketCsv`, `parseEquityMaster`, `parseIndexBhavcopy`, `ingestPrices` (ISIN-first, else `NSE:<symbol>` id), `backfillInstrumentIsins` (fill NULL/empty ISINs only — never clobbers; ETFs absent from EQUITY_L), `unzipFirstEntry` — NSE EQ + index bhavcopy → `prices_eod`, `index_prices_eod` (watchlist+holdings only; unknown symbols logged, never created). NSE serves `.csv.zip`, unpacked with stdlib `node:zlib` — no dependency. A 404 is a non-trading day: zero rows, no incident; anything else is a loud `SYNC_FAILURE`. The index zoo has **no working 2026 source** (kept silent-empty) — **download implemented 2026-09-13, live-verified 2026-09-15** |
 | `src/sources/amfi.ts` | AMFI daily + historical NAV → `navs` (`nav_micros`, BIGINT) — **implemented 2026-09-11** |
 | `src/sources/screener.ts` | screener.in CSV → `fundamentals` (versioned per upload batch; real CSV = live test) — **implemented 2026-09-11** |
 | `src/sources/screener-screen.ts` | screener.in **screen HTML** → `fundamentals` — `parseScreenHtml(html)` (data-row-company-id rows; header tooltips → canonical keys; `<span>` units stripped; per-column normalization), `fetchScreen(url)` (paginated via `URL.searchParams.set('page', n)` **so query-bearing `/screen/raw/?query=...` URLs page correctly** — the old `base + '?page=N'` stripped queries on page 2; 25/page, stops on short page), `slugToInstrumentId(db, slug)`, `importScreenRows(db, rows, {asOf?, screenUrl})` — idempotent per `(as_of, filename)`, deletes prior batch on re-import because `screener_uploads` is append-only. Built because the CSV export is paywalled; a plain screen URL is public. Requires a screen whose columns carry the §6 gate inputs — **implemented 2026-09-13** |
@@ -150,8 +151,9 @@ that caught the /cost line-number mismatch and the partial-confirm double-write.
 (5 tests) drive the Fidelity RSU flow against real PGlite + a seeded `rsu_grants` table and a
 stubbed Telegram (only `fx.js` mocked; screenshots pre-written so `saveStatementPhoto`
 short-circuits); `tests/notify/digest.test.ts` carries the ACTUAL-filter guard "no double
-forecast" and maturity alert tests. `tests/sources/bhavcopy.test.ts` (8 tests) covers
-parsing + ingestion with mutation checks. `tests/sources/amfi.test.ts` (6 tests) covers
+forecast" and maturity alert tests. `tests/sources/bhavcopy.test.ts` (19 tests: parseEquityBhavcopy,
+parseFullMarketCsv, parseEquityMaster, ISIN + `NSE:<symbol>` ingestion, fill-only backfill incl.
+no-clobber, unzip round-trip) covers parsing + ingestion with mutation checks. `tests/sources/amfi.test.ts` (6 tests) covers
 parsing + ingestion with mutation checks. `tests/sources/screener.test.ts` (8 tests) covers
 parsing + ingestion with mutation checks. `tests/domain/engine.test.ts` (19 tests) covers the
 §6 quality gate, composite banding, relative strength, MF ranking and the `signal_scores`
@@ -166,7 +168,7 @@ caps against stored rows, and a cross-task round-trip proving Task 9 reads what 
 recommendation with every timestamp shown, and a diff proving a deliberately stale price keeps
 a name out of every live recommendation. `tests/domain/scoring.test.ts` (15 tests) covers the
 §13 harness, including the database-level refusal to rewrite a creation snapshot.
-Suite: **590 passed** across 70 files.
+Suite: **618 passed** across 71 files.
 
 `tests/domain/allocation.test.ts` ends with a **seed-backed** block: it loads the real
 portfolio and asserts the exact breach set, drift rows and gold shortfall. Synthetic
@@ -205,7 +207,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 ## Scripts
 
 `pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` · `watchlist:propose` ·
-`telegram:bot` · `indmoney:login` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
+`telegram:bot` · `indmoney:login` · `backfill:isin` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
 
 `indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`
 itself. No dotenv dep — every other script still needs its vars exported. `.env` is

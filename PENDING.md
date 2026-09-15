@@ -6,6 +6,22 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [x] **NSE PRICES LANDED IN SYNC FOR THE 2026 SANDBOX (2026-09-15).** The NSE archive host now
+      404s *every* 2026 bhavcopy file (2019–2024 still fine) — equity prices had been silently
+      dead since June. `downloadBhavcopy` keeps the archive as primary (it carries ISINs) and
+      falls back to the whole-market `sec_bhavdata_full_<DDMMYYYY>.csv` (numeric month) on
+      NOT_FOUND; both missing → empty, still reported. `ingestPrices` now resolves ISIN-less
+      full-market rows through the `NSE:<symbol>` id that seed instruments already carry.
+      `downloadEquityMaster` + `backfillInstrumentIsins` + new `pnpm backfill:isin` fill empty
+      instrument ISINs from `EQUITY_L.csv` (2306 EQ symbols) **without clobbering** seeded
+      values. Live-verified: 2637 full-market rows for 11-Sep-2026 (GOLDBEES 125.12, LIQUIDBEES,
+      M&M, CRISIL all present), archive still serves 2024 data, `pnpm sync` + `pnpm backfill:isin`
+      both green. Commit `316720a`; **611→618 tests pass**, tsc clean.
+      **Two residual gaps, both in the "known" bucket:** (1) today's full-market file only exists
+      after ~18:00 IST, so a 17:30 IST sync gets 0 rows until re-dispatch — environmental, not
+      code; (2) the index zoo (`ind<DDMMMYYYY>.zip`) still has no working 2026 source, kept
+      silent-empty as before. See the resolved NSE line under Waiting on OWNER for the detail.
+
 - [x] **ALL LOCAL WORK NOW COMMITTED + PUSHED TO `main` (2026-09-13).** Ten Phase 1 tasks
       (7–13 incl. holiday seed + LLM model family) plus the screener-screen HTML scraper and
       the extraction-model revert are live on origin/main; GitHub Actions holds the real
@@ -279,10 +295,21 @@ MEMORY.md; the code map lives in index.md.
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close
       the gap)
-- [ ] **NSE bhavcopy + index URL/format — UNVERIFIED against live NSE.** The archive path
-      (`archives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm<DD><MON><YYYY>bhav.csv.zip`)
-      and the CSV column names are fixture-verified only. First live `pnpm sync` on a trading day
-      settles it; a moved path raises `SYNC_FAILURE/nse-bhavcopy` rather than degrading quietly.
+- [x] **NSE bhavcopy + index URL/format — VERIFIED 2026-09-15; 2026 data pipeline rebuilt.** The
+      NSE archive path (`archives.nseindia.com/content/historical/EQUITIES/...`) is correct but
+      **404s for every 2026 file** (verified again live) — it only serves older years, so June's
+      bhavcopy rows silently stopped landing. `downloadBhavcopy` now tries the archive, then falls
+      back to `sec_bhavdata_full_<DDMMYYYY>.csv` (`nsearchives.nseindia.com/products/content`,
+      numeric month — the archive's alphabetic-month URL 404s); both 404 → empty, reported. The
+      full-market file carries SYMBOL/SERIES/DATE1 but **no ISIN**, so `ingestPrices` resolves
+      ISIN-less rows via `NSE:<symbol>` id. `downloadEquityMaster` (`EQUITY_L.csv`, 2306 EQ
+      symbols) + `backfillInstrumentIsins` + `pnpm backfill:isin` fill empty instrument ISINs
+      (only `NULL`/empty, never clobbering a seeded value). Live-verified: 2637 rows for
+      11-Sep-2026 incl. GOLDBEES/LIQUIDBEES/M&M/CRISIL, archive still serves 2024-03-05 (1790
+      rows, ISINs intact). `pnpm sync` green (nse-bhavcopy synced). **Known shape:** today's
+      `sec_bhavdata_full_15092026.csv` 404s until ~18:00 IST (file lands post-close) — a 17:30
+      IST cron run can re-dispatch; the index zoo `ind<DDMMMYYYY>.zip` still has no working 2026
+      source (kept silent-empty).
 - [x] **NSE 2026 holiday calendar — DONE + VERIFIED AGAINST NSE 2026-09-13.** Read from
       nseindia.com in a real browser (its API blocks non-browser clients); all 16 dates in
       `src/seed/seed-holidays.ts` match NSE's own table exactly, including 15-Jan, which the
@@ -334,6 +361,8 @@ MEMORY.md; the code map lives in index.md.
 
 | commit | what |
 |---|---|
+| `316720a` | **NSE 2026 price pipeline**: archive-first → `sec_bhavdata_full` (numeric-month DDMMYYYY) fallback + `NSE:<symbol>` ingest resolution + `EQUITY_L` master + `pnpm backfill:isin` (fill-only, never clobber) + NSE Referer header; 618 passed |
+| `5fd0bb8` | live-test defects: /cost order mismatch, double-confirm writes, jsonb double-encoding (8 sites) |
 | `5fd0bb8` | live-test defects: /cost order mismatch, double-confirm writes, jsonb double-encoding (8 sites) |
 | `b9abca8` | production repair: 89→29 lots audited cleanup; gold identity resolved |
 | `148d635` | upload idempotency (unchanged/superseded/created) + migration 0006 unique index |

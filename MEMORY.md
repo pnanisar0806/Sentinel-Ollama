@@ -1436,10 +1436,32 @@ Tasks 1–13 shipped (11A superseded by `web/`). Suite **576 passed**, `tsc` cle
 - **NSE `.csv.zip` is unpacked with stdlib `node:zlib`** (`unzipFirstEntry`, stored + deflate,
   scans for the central directory when the header carries no size). No dependency added to a
   two-dependency repo.
-- **Unverified by design, now written down:** the NSE archive URL + CSV columns are
-  fixture-verified only (first live trading-day `pnpm sync` settles it; a moved path raises
-  `SYNC_FAILURE/nse-bhavcopy`), and the `holidays` table is EMPTY so only weekends are skipped.
-  Both are owner/provisioning items in PENDING — not guessed.
+- **Unverified by design, now written down:** the `holidays` table is EMPTY so only weekends are
+  skipped — don't guess; it is in PENDING as a provisioning item.
+- **NSE bhavcopy URL verified live and found BROKEN for 2026 (2026-09-15).** The archive host
+  (`archives.nseindia.com/content/historical/EQUITIES/<YYYY>/<MON>/cm…bhav.csv.zip`) still
+  serves 2019–2024 (2024-03-05 → 200, 1790 rows) but returns **404 for every 2026 date** —
+  equity prices had silently stopped landing in June. `downloadBhavcopy` is now archive-`first`
+  (it is the only shape with an ISIN column) and on NOT_FOUND falls back to the whole-market
+  `sec_bhavdata_full_<DDMMYYYY>.csv` (`nsearchives.nseindia.com/products/content`). **Month is
+  NUMERIC** (`11092026`) — the archive's `11SEP2026`-style name 404s there; `formatNseDateNumeric`.
+  Both sources 404 → `{rows: [], report}`, still reported honestly, no incident.
+- **Full-market rows carry no ISIN — resolution by id.** The full-market schema is
+  `SYMBOL,SERIES,DATE1,PREV_CLOSE,…,CLOSE_PRICE` (DATE1 is the trade date, feeds `as_of`);
+  `ingestPrices` resolves its ISIN-less rows through the `NSE:<SYMBOL>` id that seeded
+  instruments already carry (an ISIN row is matched by ISIN first). Unknown symbols are reported,
+  never created. ETFs appear with SERIES=EQ.
+- **Fetch posture:** NSE expects a browser-ish `Referer: https://www.nseindia.com/` + UA header,
+  now sent by `downloadBhavcopy`; `fetchWithRetry` grew an optional `headers` arg.
+- **ISIN backfill is fill-only, never clobber** (`backfillInstrumentIsins` from `EQUITY_L.csv`,
+  2306 EQ symbols; `pnpm backfill:isin`). Only `NSE:%` ids with NULL/empty `isin` are filled.
+  ETFs are absent from EQUITY_L (GOLDBEES/LIQUIDBEES verified missing); backfilling cannot create
+  an instrument. **Caveat: re-seeding overwrites backfilled values** — `seed-data.ts` still
+  carries the RPOWER placeholder ISIN (`seed.ts` upserts `isin = excluded.isin`). `IND:INDSxxxxx`
+  cohort placeholders have no symbol derivable from their id and stay ISIN-less until screener
+  cohort promotion.
+- **Known timing gap:** today's `sec_bhavdata_full_<DDMMYYYY>.csv` appears only after ~18:00 IST,
+  so a 17:30 IST sync reports empty until the file lands — environmental, not a bug.
 - README carries the Phase 1 handoff: the data-flow diagram, how a recommendation is built, the
   two ways it is stopped (FR-31 staleness, IPS §3.7 policy), what the engine will not invent,
   and the §15.1 provisioning table with real statuses.
