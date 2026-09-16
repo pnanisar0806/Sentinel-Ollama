@@ -185,7 +185,46 @@ CI untouched). This supersedes the "throwaway preview, UI stays Phase 2" note ab
   `exclude: ['node_modules']` — keep.
 
 ---
-
+ 
+## Screener CSV columns — RESOLVED 2026-09-15
+ 
+The owner's signed-in CSV export `sentinel2_screener.csv` (412 lines / 17 columns) was the
+missing "real exported file" that the plan flagged as the live test for the CSV parser. The
+public page serves only 13 old columns; the new columns (Profit Var 5Yrs %, Sales Var 5Yrs %,
+Free Cash Flow 5Yrs) exist only in the signed-in author view. The CSV is login-gated; the owner
+provided it via the signed-in session (created by Claude and placed at repo root).
+ 
+**New parser:** `parseScreenPaste(text)` in `src/sources/screener-screen.ts` auto-detects
+delimiter (tab for pasted TSV, comma for CSV) from the first line. Header rows (first cell
+`S.No.`/`Seq.`) reset the column map every ~15 rows (screener repeats headers on paginated
+exports). Maps:
+  - `Profit Var 5Yrs %` → `Profit 5Y CAGR`
+  - `Sales Var 5Yrs %` → `Sales 5Y CAGR`
+  - `Free Cash Flow 5Yrs Rs.Cr.` → `FCF 5Y`
+  - `Debt / Eq` → `D/E`
+  - `EPS 12M Rs.` → `EPS`
+Rows carry `slug: ''` → name-only resolution via `slugToInstrumentId` fuzzy match;
+`ensureScreenInstrument` returns `null` for `slug.length < 3` (no creation from paste/CSV).
+`fcfPos5y` = FCF>0 true, ≤0 false, empty null.
+ 
+**Import paths:**
+  - CLI: `pnpm screener:import --paste <file>` → `screenerImportPaste` → `importScreenRows`
+  - Web: `POST /screener/upload` (multipart `csv` field) in `src/ui/server.ts`
+Both idempotent on `as_of` + filename (`screener-paste:sentinel2_screener.csv`).
+ 
+**Import result:** 389/411 rows landed (22 name mismatches warned, not created — per design).
+Fundamentals `fcf_pos_5y` + `Profit 5Y CAGR`/`Sales 5Y CAGR`/`FCF 5Y` keys populated.
+Signal engine quality gate unblocks on fresh upload. Parser tests added (TSV+CSV fixtures),
+630 tests pass, tsc clean.
+ 
+**Quarterly reminder:** `pnpm screener:remind` (`src/jobs/screener-reminder.ts`) checks
+`assessStaleness` for `screener` source (fundamentals 1 quarter = 90 days). If stale AND no
+reminder in last 30 days (audit_log dedupe), sends Telegram nudge to owner. Workflow
+`.github/workflows/screener-reminder.yml` runs weekly (Mon 07:00 UTC) — data-driven, not
+fragile quarterly cron. Reuses existing staleness engine (FR-31).
+ 
+---
+ 
 ## Kite retired — INDmoney is the only portfolio source (owner decision 2026-09-07)
 
 The web "Connect Kite" flow worked on its first real run and that is exactly how the bug

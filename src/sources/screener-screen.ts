@@ -34,6 +34,10 @@ export const COLUMN_MAP: Record<string, string> = {
   'EPS':                      'EPS',
   'Sales 5Years CAGR':        'Sales 5Y CAGR',
   'Profit 5Years CAGR':       'Profit 5Y CAGR',
+  // Screener labels the 5Y growth columns "Profit/Sales growth 5Years" (tooltip)
+  // and renders them as "Profit Var 5Yrs %" / "Sales Var 5Yrs %" (visible text).
+  'Profit growth 5Years':     'Profit 5Y CAGR',
+  'Sales growth 5Years':      'Sales 5Y CAGR',
   'Free cash flow 5Years':    'FCF 5Y',
   'Red Flags':                'Red Flags',
   'Promoter Holding':         'Promoter Holding',
@@ -55,6 +59,8 @@ export interface ParsedScreenRow {
   rocePct: number | null;
   roePct: number | null;
   deRatio: number | null;
+  /** True when the 5Y average FCF is positive; null when screener has no figure. */
+  fcfPos5y: boolean | null;
 }
 
 export interface ScreenParseResult {
@@ -100,6 +106,10 @@ function normalizeHeader(s: string): string {
 /** Aliases for visible (tooltip-less) header text that differs from the canonical key. */
 const TEXT_ALIAS: Record<string, string> = {
   'Debt / Eq': 'D/E',
+  'Profit Var 5Yrs': 'Profit 5Y CAGR',
+  'Sales Var 5Yrs': 'Sales 5Y CAGR',
+  'Free Cash Flow 5Yrs': 'FCF 5Y',
+  'EPS 12M': 'EPS',
 };
 
 /**
@@ -192,6 +202,11 @@ export function parseScreenHtml(html: string): ScreenParseResult {
     const roePct = parseNumber(columns['ROE']);
     const deRatio = parseNumber(columns['D/E']);
     const cmp = parseNumber(columns['CMP']) ?? 0;
+    // "Free Cash Flow 5Yrs Rs.Cr." is the 5Y average. A positive average is the
+    // proxy we can get from a single screener column for fcf_pos_5y (spread across
+    // several years, an accrued negative is visible risk).
+    const fcfAverage = parseNumber(columns['FCF 5Y']);
+    const fcfPos5y = fcfAverage === null ? null : fcfAverage > 0;
 
     rows.push({
       name,
@@ -204,11 +219,102 @@ export function parseScreenHtml(html: string): ScreenParseResult {
       rocePct,
       roePct,
       deRatio,
+      fcfPos5y,
     });
   }
 
   if (rows.length === 0) {
     warnings.push('No data rows found (no tr with data-row-company-id)');
+  }
+
+  return { rows, headers, warnings };
+}
+
+/**
+ * Parse a pasted or exported screener screen table.
+ *
+ * The owner's signed-in screen view exposes the growth columns that the public
+ * page omits (Free Cash Flow 5Yrs / Profit Var 5Yrs / Sales Var 5Yrs). The CSV
+ * export carries them too, but it requires a login; a copy-pasted table is the
+ * working route. Delimited-table input (tab-separated paste OR the screen's
+ * comma-separated CSV export, detected from the first line) repeats the header
+ * row every ~15 rows (one per screen page) and empty cells come through as empty
+ * fields, so the parser must (a) reset column mappings on every header line and
+ * (b) treat short rows as trailing-empty, never as misaligned.
+ *
+ * Rows carry no URL slug — only the display name — so identity resolution is
+ * name-only, handled by `slugToInstrumentId`'s name fallback.
+ */
+export function parseScreenPaste(text: string): ScreenParseResult {
+  const warnings: string[] = [];
+  const rows: ParsedScreenRow[] = [];
+  const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
+  const delimiter = firstLine.includes('\t') ? '\t' : ',';
+
+  let headers: string[] = [];
+  let seenHeader = false;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cells = line.split(delimiter).map(c => c.trim());
+    const first = cells[0] ?? '';
+
+    if (first === 'S.No.' || first === 'Seq.') {
+      // Header line (repeats every screen page, i.e. every ~15 rows).
+      // First two cells are S.No. / Company; the rest are metric columns.
+      headers = cells.map((c, i) => (i < 2 ? c : normalizeHeader(c)));
+      seenHeader = true;
+      continue;
+    }
+    if (!seenHeader) {
+      warnings.push('Data row before any header — skipping');
+      continue;
+    }
+    if (!/^\d+\.?$/.test(first)) {
+      warnings.push(`Non-header, non-data row skipped: ${line.slice(0, 40)}`);
+      continue;
+    }
+    const name = cells[1] ?? '';
+    if (!name) {
+      warnings.push(`Row ${first}: no company name, skipping`);
+      continue;
+    }
+
+    // Map data cells to metric columns starting at index 2 (past S.No./Company).
+    // A row shorter than the header means trailing columns were empty.
+    const columns: Record<string, string> = {};
+    for (let i = 2; i < cells.length && i < headers.length; i++) {
+      columns[headers[i] ?? `col_${i}`] = cells[i] ?? '';
+    }
+
+    const pe = parseNumber(columns['P/E']);
+    const marketCap = parseNumber(columns['Mar Cap']);
+    const divYieldPct = parseNumber(columns['Div Yld']);
+    const rocePct = parseNumber(columns['ROCE']);
+    const roePct = parseNumber(columns['ROE']);
+    const deRatio = parseNumber(columns['D/E']);
+    const cmp = parseNumber(columns['CMP']) ?? 0;
+    const fcfAverage = parseNumber(columns['FCF 5Y']);
+    const fcfPos5y = fcfAverage === null ? null : fcfAverage > 0;
+
+    rows.push({
+      name,
+      slug: '',
+      columns,
+      cmp,
+      pe,
+      marketCap,
+      divYieldPct,
+      rocePct,
+      roePct,
+      deRatio,
+      fcfPos5y,
+    });
+  }
+
+  if (rows.length === 0 && seenHeader) {
+    warnings.push('No data rows found (header present but no numbered rows)');
   }
 
   return { rows, headers, warnings };
@@ -284,6 +390,16 @@ export async function fetchScreen(
   return { rows: allRows, headers, warnings: allWarnings, pagesFetched };
 }
 
+/** Strip common company suffixes for fuzzy matching. */
+function normalizeCompanyName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\b(ltd|limited|inc|corp|corporation|company|co|india|industries|inds|lab|labs|pharma|engg|engineering|motors|insurance|finance|financial|holdings|group|intl|international)\b\.?/g, '')
+    .replace(/[&.]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Map a screener slug (e.g. "PGHH") to an instrument_id in the DB.
  * Screener slugs are typically the NSE symbol.
@@ -311,11 +427,45 @@ export async function slugToInstrumentId(
   if (bse) return bse.id;
 
   // Fallback: name-based fuzzy match
+  // Try exact lowercase match first
   const [fuzzy] = await db.query<{ id: string }>(
     `SELECT id FROM instruments WHERE LOWER(name) = LOWER($1) LIMIT 1`,
     [name],
   );
   if (fuzzy) return fuzzy.id;
+
+  // Check screener_name_aliases table (manual mapping from CSV display names)
+  const [alias] = await db.query<{ instrument_id: string }>(
+    `SELECT instrument_id FROM screener_name_aliases WHERE csv_name = $1`,
+    [name],
+  );
+  if (alias) return alias.instrument_id;
+
+  // Relaxed: strip common suffixes from both sides and compare
+  const normalizedInput = normalizeCompanyName(name);
+  if (normalizedInput !== name) {
+    const rows = await db.query<{ id: string; name: string }>(
+      `SELECT id, name FROM instruments`,
+    );
+    for (const row of rows) {
+      if (normalizeCompanyName(row.name) === normalizedInput) {
+        return row.id;
+      }
+    }
+  }
+
+  // Further relaxed: check if input is a prefix of instrument name (or vice versa)
+  // Guard: require non-trivial name to avoid empty-string matching everything
+  if (name.trim().length >= 3) {
+    const [prefixMatch] = await db.query<{ id: string }>(
+      `SELECT id FROM instruments
+       WHERE LOWER(name) LIKE LOWER($1) || '%'
+          OR LOWER($1) LIKE LOWER(name) || '%'
+       LIMIT 1`,
+      [name],
+    );
+    if (prefixMatch) return prefixMatch.id;
+  }
 
   // Last resort: slug in any instrument ID.
   // Guard: a 2-char slug like "ID" from /company/id/<n>/ links must not
@@ -416,14 +566,18 @@ export async function importScreenRows(
     const rawJson = JSON.stringify(row.columns);
 
     await db.query(
-      `INSERT INTO fundamentals (upload_id, instrument_id, data, roce_pct, de_ratio, as_of)
-       VALUES ($1, $2, $3, $4, $5, now())`,
+      `INSERT INTO fundamentals (upload_id, instrument_id, data, roce_pct, de_ratio, fcf_pos_5y, red_flags, as_of)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
       [
         uploadId,
         instrumentId,
         rawJson,
         row.rocePct ?? null,
         row.deRatio ?? null,
+        row.fcfPos5y ?? null,
+        // Red flags are owner-reviewed per-company at shortlist time (never a
+        // screen import input), so the column stays NULL here.
+        null,
       ],
     );
     inserted++;

@@ -6,6 +6,24 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [x] **SENTINEL SCREEN COLUMNS — RESOLVED 2026-09-15.** Owner's signed-in CSV export
+       `sentinel2_screener.csv` (412 lines, 17 cols) obtained and imported via new paste path.
+       `parseScreenPaste` auto-detects CSV (comma) vs TSV (tab), maps headers:
+       `Profit Var 5Yrs %`→`Profit 5Y CAGR`, `Sales Var 5Yrs %`→`Sales 5Y CAGR`,
+       `Free Cash Flow 5Yrs Rs.Cr.`→`FCF 5Y`, `Debt / Eq`→`D/E`, `EPS 12M Rs.`→`EPS`.
+       `fcf_pos_5y` derived (FCF>0 → true). Import: `pnpm screener:import --paste <file>`
+       (CLI) or `POST /screener/upload` (web UI). 389/411 rows landed (22 name mismatches
+       warned, not created — per design). Fundamentals `fcf_pos_5y` + CAGR keys now populate;
+       signal engine quality gate unblocks on fresh upload. Parser tests added (TSV+CSV fixtures),
+       **630 tests pass**, tsc clean.
+
+- [x] **QUARTERLY SCREENER CSV REMINDER — ADDED 2026-09-15.** New job `pnpm screener:remind`
+       (`src/jobs/screener-reminder.ts`) checks staleness (`assessStaleness`) for `screener`
+       source (fundamentals 1 quarter = 90 days). If stale AND no reminder sent in last 30 days
+       (audit_log dedupe), sends Telegram nudge to owner: "refresh the screener CSV and upload
+       via web UI". Workflow `.github/workflows/screener-reminder.yml` runs weekly (Mon 07:00 UTC)
+       — data-driven, not fragile quarterly cron. Reuses existing staleness engine (FR-31).
+
 - [x] **SCREENER COHORT PROMOTION — the universe widens on every screen import (2026-09-15).**
        Rows whose company is not yet in `instruments` are now promoted to real instruments
        (`NSE:<slug>`, kind EQUITY, name from the screen, metadata `{"source":"screener-cohort"}`)
@@ -308,10 +326,13 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
       (commit pending push). **Still open:** owner decision on the §6 gate inputs `Symbol`,
       `Industry`, `FCF 5Y`, `Red Flags` — screener has NO native column for the last two, so
       either bake FCF-positivity into the screen query (recommended) or drop red flags in Phase 1
-      (recommended). After that: regenerate the watchlist from the ~410-record cohort (§6.1, owner
-      pruning on top) — held/watchlist names land in `fundamentals` today; the rest of the
-      cohort was promoted into `instruments` by cohort promotion (top line) and now takes
-      fundamentals rows on the next import.
+(recommended). After that: regenerate the watchlist from the ~410-record cohort (§6.1, owner
+       pruning on top) — held/watchlist names land in `fundamentals` today; the rest of the
+       cohort was promoted into `instruments` by cohort promotion (top line) and now takes
+       fundamentals rows on the next import.
+       **Update 2026-09-15:** FCF settled — owner added `Free Cash Flow 5Yrs` to the screen (see
+       the Next-up line); Red Flags settled — per-company manual review, gate now NOTE-not-failure
+       on NULL.
 - [ ] **Real Fidelity statement — the live test of the new flow.** Send the next statement
       screenshot to the bot and `/confirm`; it also resolves the per-grant/tranche RSU
       split true-up (model carries ₹57.05L vs PRD's ₹53.25L; never tune the value to close

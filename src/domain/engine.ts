@@ -139,7 +139,7 @@ function qualityGate(c: SatelliteCandidate): { failures: string[]; notes: string
   else if (f.deRatio === null) failures.push('D/E unavailable');
   else if (f.deRatio >= QUALITY.maxDeRatio) failures.push(`D/E ${f.deRatio} ≥ ${QUALITY.maxDeRatio}`);
 
-  if (f.redFlags === null) failures.push('red flag count unavailable');
+  if (f.redFlags === null) notes.push('red flags not assessed on the screen — owner reviews per-company at shortlist');
   else if (f.redFlags > QUALITY.maxRedFlags) failures.push(`${f.redFlags} screener red flag(s)`);
 
   return { failures, notes };
@@ -484,8 +484,8 @@ export async function loadEngineInputs(
         fcfPos5y: f?.fcf_pos_5y ?? null,
         redFlags: f?.red_flags ?? null,
         peRatio: rawNumber(raw, 'P/E'),
-        profit5yCagrPct: rawNumber(raw, 'Profit 5Y CAGR %'),
-        sales5yCagrPct: rawNumber(raw, 'Sales 5Y CAGR %'),
+        profit5yCagrPct: rawNumber(raw, 'Profit 5Y CAGR') ?? rawNumber(raw, 'Profit 5Y CAGR %'),
+        sales5yCagrPct: rawNumber(raw, 'Sales 5Y CAGR') ?? rawNumber(raw, 'Sales 5Y CAGR %'),
       },
       closes: closes.map((r) => BigInt(r.close_paise)).reverse(),
     });

@@ -130,7 +130,8 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `src/domain/scoring.ts` | `snapshotBenchmark`, `dueEvals`, `evaluateRec`, `runDueEvals`, `calibration`, `addMonths`, `EVAL_HORIZONS`, `MIN_EVALS_FOR_CALIBRATION` — §13 harness. The creation snapshot (instrument close + index close + conviction) is captured once and **migration 0012 refuses to rewrite it**; 3/6/12-month evals accrue onto the same row. Excess return is integer bps. A bucket under the minimum reads **"insufficient data"**, never a percentage; an unscoreable call is never counted as a miss — **implemented 2026-09-13** |
 | `src/notify/report.ts` | `buildReportInput(db, asOf, opts)` + pure `composeReport`/`reportBullets`, `MAX_LIST_ITEMS`, `REDEMPTION_HORIZON_DAYS` — FR-51's five sections (signal review / watchlist changes / recommendation pipeline / staleness / narrative). Runs the week's pipeline: scores, sizes, gates and persists. **Withholds an open recommendation whose instrument is blocked today** into `pipeline.withheld`. Same impure-gather / pure-compose split as `digest.ts`, and deliberately NOT on the funded-status allowlist — **implemented 2026-09-13** |
 | `src/jobs/report.ts` | CLI entrypoint — `pnpm report [--as-of YYYY-MM-DD]`. Replaces the retired `pnpm weekly`. Assembles maturity ROUTING recommendations (the one thing that reads bucket status) and hands them to `buildReportInput` as data, writes `docs/dashboard.html`, sends via Telegram. `parseGsecYield` treats a blank env var as unconfigured, never 0% — **implemented 2026-09-13** |
-| `src/jobs/screener-import.ts` | CLI — `pnpm screener:import <csv>` (screener.in export) **or** `pnpm screener:import --screen <url>` (public screen HTML). The `--screen` path validates each row's slug against `instruments`, promotes unknown companies, and uploads the batch; prints `Promoted N new companies into the instruments universe`. The CSV path always reports `createdInstruments: 0` (pinned unverified spec; never promotes) |
+| `src/jobs/screener-import.ts` | CLI — `pnpm screener:import <csv>` (screener.in export) **or** `pnpm screener:import --screen <url>` (public screen HTML) **or** `pnpm screener:import --paste <file>` (TSV paste or CSV export). The `--paste` path uses `parseScreenPaste` (auto-detects tab/comma delimiter, repeated headers, name-only resolution, no instrument creation) → `importScreenRows`. The `--screen` path validates each row's slug against `instruments`, promotes unknown companies, and uploads the batch; prints `Promoted N new companies into the instruments universe`. The CSV path always reports `createdInstruments: 0` (pinned unverified spec; never promotes) |
+| `src/jobs/screener-reminder.ts` | `pnpm screener:remind` — checks `assessStaleness` for `screener` source (fundamentals 1 quarter = 90d). If stale AND no reminder in last 30d (audit_log dedupe), sends Telegram nudge to owner. Workflow `.github/workflows/screener-reminder.yml` runs weekly Mon 07:00 UTC — data-driven, not fragile quarterly cron. Reuses staleness engine (FR-31) — **implemented 2026-09-15** |
 | `migrations/0014_widen_screener_source.sql` | widens the `fundamentals.source` CHECK back on `'screener-screen'` (0013 had narrowed it to `'screener-in'` only) — ships with `screener-screen.ts` |
 | `migrations/0007_phase1_quotes.sql`, `0008_phase1_intel.sql` | prices_eod / index_prices_eod / navs / holidays; watchlist / screener_uploads / fundamentals / signal_scores / recommendations / suppressed_actions — all append-only + RLS |
 
@@ -200,6 +201,7 @@ the allowlist there, or the suite goes red.
 | `.github/workflows/digest.yml` | `workflow_run` on **sync success** — no fixed cron | Daily digest (FR-50), now runs after the day's sync completes so it never reads stale snapshots; a failed sync = no digest that day. Manual `workflow_dispatch` remains |
 | `.github/workflows/weekly.yml` | `30 4 * * 0` — **Sun 10:00 IST** | Weekly deep report (FR-51) via `pnpm report`. Moved from Sat 08:00 per PRD 12.2 with owner sign-off 2026-09-13 |
 | `.github/workflows/keepalive.yml` | `0 4 * * 0` | Largely subsumed by the daily sync; kept as a belt-and-braces Supabase ping |
+| `.github/workflows/screener-reminder.yml` | `0 7 * * 1` — **weekly Mon 07:00 UTC** | Quarterly screener CSV reminder (FR-52). Runs `pnpm screener:remind`; data-driven (checks staleness), not a fragile quarterly cron. Only sends Telegram when fundamentals are stale (≥90d) and no reminder in last 30d |
 
 None of them pin a pnpm `version:` — `package.json`'s `packageManager` is the single
 source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
@@ -207,7 +209,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 ## Scripts
 
 `pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` · `watchlist:propose` ·
-`telegram:bot` · `indmoney:login` · `backfill:isin` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001)
+`telegram:bot` · `indmoney:login` · `backfill:isin` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001) · `screener:import` · `screener:remind`
 
 `indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`
 itself. No dotenv dep — every other script still needs its vars exported. `.env` is

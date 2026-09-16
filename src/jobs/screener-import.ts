@@ -2,7 +2,7 @@ import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
 import { importScreener } from '../sources/screener.js';
-import { fetchScreen, importScreenRows } from '../sources/screener-screen.js';
+import { fetchScreen, importScreenRows, parseScreenPaste } from '../sources/screener-screen.js';
 import { readFileSync } from 'node:fs';
 import { isMainModule } from '../util/main-module.js';
 
@@ -38,16 +38,35 @@ export async function screenerImportScreen(
   };
 }
 
+/** Import a pasted screen table or the signed-in CSV export (tab- or comma-separated). */
+export async function screenerImportPaste(
+  db: Db,
+  text: string,
+  opts: { asOf?: string; filename?: string } = {},
+): Promise<{ uploadedId: number; inserted: number; createdInstruments: number; warnings: string[] }> {
+  const { rows, warnings } = parseScreenPaste(text);
+  // Paste rows carry no slug, so resolution is name-only and nothing is ever
+  // created from a paste. The filename keys idempotency (re-pasting the same
+  // export on the same as-of replaces that upload).
+  const importResult = await importScreenRows(db, rows, {
+    ...(opts.asOf !== undefined ? { asOf: opts.asOf } : {}),
+    screenUrl: opts.filename ?? 'screener-paste',
+  });
+  return { ...importResult, warnings: [...warnings, ...importResult.warnings] };
+}
+
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args.length < 1) {
     console.error('Usage:');
     console.error('  pnpm screener:import <csv-path> [--as-of=YYYY-MM-DD]');
     console.error('  pnpm screener:import --screen <screen-url> [--as-of=YYYY-MM-DD] [--pages=N]');
+    console.error('  pnpm screener:import --paste <pasted-table-file> [--as-of=YYYY-MM-DD]');
     process.exit(1);
   }
 
   const isScreen = args.includes('--screen');
+  const isPaste = args.includes('--paste');
   const positional = args.filter(a => !a.startsWith('--'));
 
   const asOfArg = args.find(a => a.startsWith('--as-of='));
@@ -63,7 +82,18 @@ if (isMainModule(import.meta.url)) {
   try {
     const asOfFinal: string = asOf ?? new Date().toISOString().slice(0, 10);
     let result;
-    if (isScreen) {
+    if (isPaste) {
+      const pastePath = positional[0];
+      if (!pastePath) {
+        console.error('Error: --paste requires a file path argument');
+        process.exit(1);
+      }
+      const text = readFileSync(pastePath, 'utf8');
+      const filename = pastePath.includes('/') || pastePath.includes('\\')
+        ? pastePath.split(/[\\/]/).pop()!
+        : pastePath;
+      result = await screenerImportPaste(db, text, { asOf: asOfFinal, filename: `screener-paste:${filename}` });
+    } else if (isScreen) {
       const screenUrl = positional[0];
       if (!screenUrl) {
         console.error('Error: --screen requires a URL argument');
