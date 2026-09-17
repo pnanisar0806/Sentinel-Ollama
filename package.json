@@ -8,7 +8,7 @@
     "test:watch": "vitest",
     "migrate": "tsx --env-file=.env src/db/migrate.ts",
     "seed": "tsx --env-file=.env src/seed/seed.ts",
-    "sync": "tsx --env-file=.env src/jobs/sync.ts",
+    "sync": "tsx src/jobs/sync.ts",
     "digest": "tsx --env-file=.env src/jobs/digest.ts",
     "report": "tsx --env-file=.env src/jobs/report.ts",
     "ips": "tsx --env-file=.env src/jobs/ips.ts",
