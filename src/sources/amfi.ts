@@ -202,31 +202,20 @@ export async function ingestNavs(
   asOf: string,
 ): Promise<{ inserted: number; updated: number; unknownSchemes: string[] }> {
   const unknownSchemes: string[] = [];
-  let inserted = 0;
-  let updated = 0;
 
-  // Map scheme codes to instrument_ids for our holdings + watchlist
-  const schemeCodes = [...new Set(rows.map(r => r.schemeCode))];
-  if (schemeCodes.length === 0) {
-    return { inserted: 0, updated: 0, unknownSchemes: [] };
-  }
-
-  const placeholders = schemeCodes.map((_, i) => `$${i + 1}`).join(',');
-  const instrumentMap = new Map<string, string>();
-
-  const instruments = await db.query<{ id: string; isin: string; scheme_code: string | null }>(
-    `select id, isin, scheme_code from instruments 
-     where kind = 'MF' and (
-       isin in (${placeholders}) 
-       or scheme_code in (${schemeCodes.map((_, i) => `$${i + 1 + schemeCodes.length}`).join(',')})
-     )`,
-    [...schemeCodes, ...schemeCodes],
+  // Since we only have a small number of MF instruments in our database,
+  // query all MF instruments directly instead of filtering by massive AMFI lists.
+  const instruments = await db.query<{ id: string; isin: string | null; scheme_code: string | null }>(
+    `select id, isin, scheme_code from instruments where kind = 'MF'`,
   );
 
+  const instrumentMap = new Map<string, string>();
   for (const inst of instruments) {
     if (inst.isin) instrumentMap.set(inst.isin, inst.id);
     if (inst.scheme_code) instrumentMap.set(inst.scheme_code, inst.id);
   }
+
+  let inserted = 0;
 
   for (const row of rows) {
     const instrumentId = instrumentMap.get(row.isinDivReinvestment ?? '') 
@@ -247,15 +236,13 @@ export async function ingestNavs(
          nav_micros = excluded.nav_micros,
          as_of = excluded.as_of
        returning instrument_id, nav_date`,
-      [instrumentId, row.date, navMicros, asOf],
+      [instrumentId, row.date, Math.round(row.nav * 1_000_000), asOf],
     );
     
     if (result.length > 0) {
-      // Check if it was an insert or update by checking if we got a new id
-      // For simplicity, count as inserted
       inserted++;
     }
   }
 
-  return { inserted, updated, unknownSchemes };
+  return { inserted, updated: 0, unknownSchemes };
 }
