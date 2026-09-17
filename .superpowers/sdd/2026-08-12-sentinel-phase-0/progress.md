@@ -1,5 +1,17 @@
 # Sentinel — SDD progress ledger
 
+## 2026-09-17 (Phase 2 planning)
+
+- Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2
+  Task 1 next: paper full Telegram state machine, immutable events, PRD expiry; actual rails,
+  three-falsification breaker, cleanup-only proposals, existing web app and backup/restore.
+  Four paper weeks / ≥5 owner interactions remain unverified implementation acceptance.
+- Phase 2.5 scope clarified: the LLM advisor makes the BUY/SELL/HOLD/WAIT recommendation and
+  timing decision from engine candidates plus structured news/sentiment context; deterministic
+  sizing is an explicit prerequisite, and Phase 2 approval/rails remain hard gates. 11 uniquely
+  numbered tasks; coverage-empty vs failed, capability firewall and point-in-time/model limits
+  corrected. Bot statement confirmations preserved; no application edits in this handoff.
+
 Phase 0: COMPLETE — plan executed through the whole-branch fix wave + scoped re-review;
 PR #1 merged to `main` (2026-08-24). Entries below are post-merge sessions, newest last.
 One line per task / defect / decision; details live in MEMORY.md, not here.

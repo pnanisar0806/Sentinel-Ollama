@@ -16,6 +16,8 @@ web/           local product app (Next.js 15) — pulled forward 2026-09-05; rea
 tests/         vitest, mirrors src/ layout
 docs/superpowers/plans/2026-08-12-sentinel-phase-0.md   the ~4,700-line plan (do not read whole)
 docs/superpowers/plans/2026-09-05-sentinel-phase-1.md   Phase 1 ("Think") plan — 13 tasks, written 2026-09-05; tasks 1-11 executed (11A superseded by `web/`), 12-13 open
+docs/superpowers/plans/2026-09-16-sentinel-phase-2.md   Phase 2 ("Prove") plan — 6 tasks: paper approval state machine, rails, cleanup, existing web/app, scoring + backup/restore; Task 1 next
+docs/superpowers/plans/2026-09-17-sentinel-phase-2.5.md Phase 2.5 ("Advise") plan — 11 tasks: news coverage/sentiment, deterministic sizing prerequisite, LLM BUY/SELL/HOLD/WAIT, bounded replay/calibration; unimplemented
 docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflows)
 .superpowers/sdd/2026-08-12-sentinel-phase-0/           SDD workspace: briefs, review diffs, progress.md
 ```

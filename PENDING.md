@@ -6,6 +6,19 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [x] **PHASE 2 + 2.5 PLANS CORRECTED (2026-09-17).**
+       `docs/superpowers/plans/2026-09-16-sentinel-phase-2.md`: 6 tasks, PRD "Prove",
+       paper-only full Telegram approval flow, real rails/breaker, cleanup, existing web app,
+       scoring and tested backup/restore. `2026-09-17-sentinel-phase-2.5.md`: 11 tasks,
+       LLM BUY/SELL/HOLD/WAIT decisions with explicit deterministic sizing prerequisite,
+       news coverage/failure semantics and bounded point-in-time replay.
+- [ ] **START PHASE 2 TASK 1:** immutable paper intents/events + FR-20–25 state machine.
+       Market expiry EOD; SIP/MF changes 7 days; three consecutive approved falsifications
+       trip the breaker (Task 2). Preserve bot statement confirms; no Kite resurrection.
+       Open inputs: limit-order expiry, reliable FIFO/tax history, backup/auth provisioning.
+       Phase DoD still requires 4 clean paper weeks + ≥5 actual owner interactions.
+       Documentation handoff only this session; no implementation/commit/push claimed.
+
 - [x] **SENTINEL SCREEN COLUMNS — RESOLVED 2026-09-15.** Owner's signed-in CSV export
        `sentinel2_screener.csv` (412 lines, 17 cols) obtained and imported via new paste path.
        `parseScreenPaste` auto-detects CSV (comma) vs TSV (tab), maps headers:
@@ -406,7 +419,6 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
 | commit | what |
 |---|---|
 | `316720a` | **NSE 2026 price pipeline**: archive-first → `sec_bhavdata_full` (numeric-month DDMMYYYY) fallback + `NSE:<symbol>` ingest resolution + `EQUITY_L` master + `pnpm backfill:isin` (fill-only, never clobber) + NSE Referer header; 618 passed |
-| `5fd0bb8` | live-test defects: /cost order mismatch, double-confirm writes, jsonb double-encoding (8 sites) |
 | `5fd0bb8` | live-test defects: /cost order mismatch, double-confirm writes, jsonb double-encoding (8 sites) |
 | `b9abca8` | production repair: 89→29 lots audited cleanup; gold identity resolved |
 | `148d635` | upload idempotency (unchanged/superseded/created) + migration 0006 unique index |

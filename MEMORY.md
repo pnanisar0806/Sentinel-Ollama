@@ -1,6 +1,7 @@
 # Sentinel — durable project memory
 
-Last updated: 2026-09-05. Phase 0 complete + fix wave + re-review; branch merged to `main`.
+Last updated: 2026-09-17. Phase 0 complete + fix wave + re-review; Phase 1 complete; Phase 2
+and Phase 2.5 plans written; branch merged to `main`.
 Post-merge: Supabase provisioned (secrets in GH Actions), production double-count fixed,
 statement-ingestion workstream (photo → LLM proposal → owner confirm → owner lot). Read this
 at session start (see `CLAUDE.md`). Update it when a durable fact changes.
@@ -1245,6 +1246,31 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 | 7 | T6 | `persistSchedules` does `delete` + N sequential inserts, unwrapped (`src/domain/loans.ts:144–171`) — matches existing `seed.ts` convention, so genuinely cross-cutting | final fix wave |
 | 8 | T11A | `indmoney-login.ts` calls `db.close()` only on the success path, so a failed login never closes PGlite. Survived a real crash intact, so robustness not correctness | Task 15 |
 | 9 | T11B | `RemoteIndmoneySource` paces calls with a fixed 9s `spacingMs` rather than reading `retry_after_seconds` from a throttled reply | Task 15, when sync.ts wires it |
+
+---
+
+## Phase 2 / 2.5 planning decision — 2026-09-17
+
+- Phase 2 Task 1 is next. Its corrected plan is `docs/superpowers/plans/2026-09-16-sentinel-phase-2.md`.
+  Phase 2 is PRD "Prove": paper state machine only, immutable intents + transition events,
+  existing `web/app` extension, Telegram primary; statement `/confirm`/`/reject` stay intact.
+  Market expiry EOD / SIP-MF 7 days; breaker = 3 consecutive approved falsifications,
+  not 20% drawdown (that invokes §3.10 behavior). No Phase 2 Kite resurrection or cleanup execution.
+- Phase 2.5 plan is `docs/superpowers/plans/2026-09-17-sentinel-phase-2.5.md`.
+- The Phase 2.5 advisor is deliberately **LLM-led at the recommendation decision**: it may
+  choose BUY, SELL, HOLD, or WAIT, choose timing, and weigh structured company/news/sentiment
+  context against the deterministic engine's validated candidates, trends, portfolio state,
+  sell triggers, and IPS fit.
+- The LLM may not invent instruments, prices, scores, or quantities. General actionable sizing
+  is an explicit Phase 2.5 prerequisite: existing drift paise is not a satellite/exit unit sizer.
+  Candidate quantities are attached deterministically; unknown sizing budget/data withholds that
+  action. FR-21 owner quantity edits remain separate, audited, revalidated revisions requiring
+  fresh approval. Rails, staleness, paper mode and no autonomous execution remain mandatory.
+- Phase 2.5 adds stamped news + versioned sentiment and ADVISE evidence snapshots. Fresh successful
+  empty coverage is valid (with caveat); missing/failed/stale relevant coverage or unclassified
+  events means system no-action, not neutral sentiment or an LLM HOLD. No exhaustive-data claim.
+  Replay requires economic AND availability cutoffs plus historical state/config; unavailable
+  versions are unreconstructable. New model runs on old news are retrospective, not point-in-time.
 
 ---
 
