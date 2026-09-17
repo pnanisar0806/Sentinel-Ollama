@@ -6,12 +6,14 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
-- [ ] **CI/sync repair verified locally (2026-09-18), awaiting commit/push approval.**
-      CI failed at TypeScript (order row types, command arguments, invalid test fixture),
-      not Vitest. Sync YAML had nested step indentation; prior run required missing `.env`.
-      Fixed types/YAML; sync, digest, report and screener reminder use optional `.env`,
-      preserving runner env precedence. YAML parsed, tsc clean, **656 tests pass**, scoped
-      review clean. No live sync or remote recovery verified; no commit/push performed.
+- [x] **CI/sync repair pushed to main (2026-09-18), `573d52a`.**
+      CI run `35265799106` passed (typecheck + tests); manual sync `35265838151` passed
+      in 9m3s, logging `synced: indmoney, frankfurter, nse-bhavcopy, amfi`.
+      Fixed TypeScript, YAML indentation and scheduled scripts requiring missing `.env`.
+      The optional-file notice appears twice through tsx/Node; runner secrets are supplied
+      directly and sync continues normally. Local **656 tests pass**, scoped review clean.
+      Automatic digest `35266731863` started; outcome not yet checked. Verification update
+      recorded locally after the code push.
 
 
 - [x] **AMFI NAV PIPELINE FIXED (2026-09-17).** The AMFI daily NAV ingestion now works for all
