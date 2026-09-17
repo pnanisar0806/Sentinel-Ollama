@@ -19,6 +19,15 @@ import { extname } from 'node:path';
 import { Telegram, escapeMarkdown } from './telegram.js';
 import { extractRsuVestsFromImage, fidelityVestsToProposals, checkFidelityVestExists, type FidelityProposal } from '../sources/fidelity-ingest.js';
 import { persistVests, confirmVest } from '../domain/rsu.js';
+// Order approval imports (Phase 2)
+import {
+  handleApprove,
+  handleModify,
+  handleDefer,
+  handleRejectOrder,
+  handleAlternates,
+  ORDER_COMMANDS,
+} from './order-approval-handlers.js';
 
 const POLL_TIMEOUT = 30; // seconds
 const POLL_INTERVAL_MS = 1000;
@@ -34,6 +43,12 @@ const COMMANDS = {
   fidelity: 'Process a Fidelity NetBenefits RSU statement screenshot',
   status: 'Show staleness and open incidents',
   help: 'Show this help',
+  // Order approval commands (Phase 2)
+  approve: 'Approve a pending order: /approve <order_id> [idempotency_key]',
+  modify: 'Modify a pending order: /modify <order_id> [quantity] [limit_price] [order_type] [defer_until] [alternate_id] [idempotency_key]',
+  defer: 'Defer a pending order: /defer <order_id> <YYYY-MM-DD> [idempotency_key]',
+  reject_order: 'Reject a pending order: /reject_order <order_id> <reason> [idempotency_key]',
+  alternates: 'Show alternates for a pending order: /alternates <order_id>',
 } as const;
 
 type Command = keyof typeof COMMANDS;
@@ -168,7 +183,7 @@ export class TelegramBot {
 
     console.log('[telegram-bot] Command from owner:', cmd, args);
 
-    try {
+try {
       switch (cmd) {
         case 'sync':
           await this.handleSync(sources);
@@ -187,6 +202,21 @@ export class TelegramBot {
           this.fidelityPending = null;
           await this.telegram.send('Discarded. Nothing was written.');
           break;
+        case 'approve':
+          await handleApprove(this.db, async (text) => { await this.telegram.send(text); }, text);
+          break;
+        case 'modify':
+          await handleModify(this.db, async (text) => { await this.telegram.send(text); }, text);
+          break;
+        case 'defer':
+          await handleDefer(this.db, async (text) => { await this.telegram.send(text); }, text);
+          break;
+        case 'reject_order':
+          await handleRejectOrder(this.db, async (text) => { await this.telegram.send(text); }, text);
+          break;
+        case 'alternates':
+          await handleAlternates(this.db, async (text) => { await this.telegram.send(text); }, text);
+          break;
         case 'fidelity':
           await this.handleFidelity(text);
           break;
@@ -198,7 +228,7 @@ export class TelegramBot {
           break;
         default:
           await this.telegram.send(`Unknown command: /${rawCmd}\nUse /help for available commands.`);
-      }
+        }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error('[telegram-bot] Command error:', msg);

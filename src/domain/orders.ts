@@ -1,6 +1,6 @@
 import type { Db } from '../db/client.js';
 import type { Recommendation } from './recommendations.js';
-import { formatPaise } from '../money/paise.js';
+import { formatInr } from '../money/paise.js';
 
 export type OrderStatus =
   | 'DRAFT'
