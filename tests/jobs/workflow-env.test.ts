@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { loadEnv, type Purpose } from '../../src/config/env.js';
 import { ENV_PURPOSES as SYNC_PURPOSES } from '../../src/jobs/sync.js';
 import { ENV_PURPOSES as DIGEST_PURPOSES } from '../../src/jobs/digest.js';
@@ -41,6 +45,59 @@ const JOBS: Array<{ workflow: string; purposes: Purpose[] }> = [
 ];
 
 describe('scheduled jobs start under their own workflow environment', () => {
+  it.each(JOBS)('$workflow keeps all steps at the same sequence indentation', ({ workflow }) => {
+    const text = readFileSync(workflowsDir + workflow, 'utf8');
+    const steps = [...text.matchAll(/^( +)- (?:uses|run):/gm)];
+    expect(steps.length).toBeGreaterThan(0);
+    expect(new Set(steps.map((step) => step[1]?.length))).toEqual(new Set([6]));
+  });
+
+  it('scheduled package scripts do not require a local env file', () => {
+    const { scripts } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    for (const script of ['sync', 'digest', 'report', 'screener:remind']) {
+      expect(scripts[script]).toContain('--env-file-if-exists=.env');
+      expect(scripts[script]).not.toContain('--env-file=.env');
+    }
+  });
+  it('scheduled tsx startup tolerates absent .env and preserves supplied environment values', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sentinel-workflow-env-'));
+    const { scripts } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const cli = createRequire(import.meta.url).resolve('tsx/cli');
+    try {
+      for (const script of ['sync', 'digest', 'report', 'screener:remind']) {
+        const command = scripts[script];
+        if (!command) throw new Error(`Missing script: ${script}`);
+        const flags = command.split(' ').slice(1, -1);
+        const result = spawnSync(process.execPath, [cli, ...flags, '-e', 'process.stdout.write(process.env.SENTINEL_ENV_PROBE ?? "missing")'], {
+          cwd: dir,
+          env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, SENTINEL_ENV_PROBE: 'runner' },
+          encoding: 'utf8',
+          timeout: 10000,
+        });
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toBe('runner');
+      }
+      writeFileSync(join(dir, '.env'), 'SENTINEL_ENV_PROBE=local\n');
+      const flags = scripts.sync!.split(' ').slice(1, -1);
+      for (const supplied of [false, true]) {
+        const result = spawnSync(process.execPath, [cli, ...flags, '-e', 'process.stdout.write(process.env.SENTINEL_ENV_PROBE ?? "missing")'], {
+          cwd: dir,
+          env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, ...(supplied ? { SENTINEL_ENV_PROBE: 'runner' } : {}) },
+          encoding: 'utf8',
+          timeout: 10000,
+        });
+        expect(result.status, result.stderr).toBe(0);
+        expect(result.stdout).toBe(supplied ? 'runner' : 'local');
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30000);
+
   it.each(JOBS)('$workflow supplies everything its job demands', ({ workflow, purposes }) => {
     const env = workflowEnv(workflow);
     expect(Object.keys(env).length).toBeGreaterThan(0);

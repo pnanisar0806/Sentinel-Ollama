@@ -6,6 +6,14 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
+- [ ] **CI/sync repair verified locally (2026-09-18), awaiting commit/push approval.**
+      CI failed at TypeScript (order row types, command arguments, invalid test fixture),
+      not Vitest. Sync YAML had nested step indentation; prior run required missing `.env`.
+      Fixed types/YAML; sync, digest, report and screener reminder use optional `.env`,
+      preserving runner env precedence. YAML parsed, tsc clean, **656 tests pass**, scoped
+      review clean. No live sync or remote recovery verified; no commit/push performed.
+
+
 - [x] **AMFI NAV PIPELINE FIXED (2026-09-17).** The AMFI daily NAV ingestion now works for all
        6 MF instruments. Root cause: seed instruments lacked real AMFI scheme codes/ISINs,
        and `ingestNavs` used a massive 31,978-parameter query that hit PGlite/PostgreSQL limits.

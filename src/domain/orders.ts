@@ -212,7 +212,7 @@ async function getCurrentStatus(db: Db, orderIntentId: string): Promise<OrderSta
 }
 
 async function getOrderWithStatus(db: Db, id: string): Promise<OrderIntent | null> {
-  const [row] = await db.query<Record<string, unknown>>(
+  const [row] = await db.query<Record<string, unknown> & { current_revision: number; quantity: string | number | null }>(
     `select * from order_intents where id = $1`,
     [id],
   );
@@ -220,11 +220,11 @@ async function getOrderWithStatus(db: Db, id: string): Promise<OrderIntent | nul
   const currentStatus = await getCurrentStatus(db, id);
   
   // Get latest revision number and quantity
-  const [revRow] = await db.query<Record<string, unknown>>(
+  const [revRow] = await db.query<{ revision_number: number; quantity: string | number | null }>(
     `select revision_number, quantity from order_revisions where order_intent_id = $1 order by revision_number desc limit 1`,
     [id],
   );
-  const currentRevision = revRow ? (revRow.revision_number as number) : (row.current_revision as number);
+  const currentRevision = revRow ? revRow.revision_number : row.current_revision;
   const currentQuantity = revRow ? normalizeQuantity(revRow.quantity) : normalizeQuantity(row.quantity);
   
   const intent = toOrderIntent({ ...row, current_revision: currentRevision, quantity: currentQuantity }, currentStatus);
@@ -248,7 +248,7 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
     ? computeMarketExpiry()
     : computeSipMfExpiry();
 
-  const [row] = await db.query<Record<string, unknown>>(
+  const [row] = await db.query<Record<string, unknown> & { id: string }>(
     `insert into order_intents
        (recommendation_id, intent, instrument_id, quantity, limit_price_paise, order_type,
         defer_until, alternate_instrument_id, payload_snapshot, expires_at, advisory_path, as_of, source, created_by, status, current_revision)
@@ -270,19 +270,23 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
     ],
   );
 
+  if (!row) throw new Error('Order insert returned no row');
+
   await db.query(
     `insert into order_transitions
        (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
      values ($1, 1, 'DRAFT', 'PENDING_APPROVAL', $2, $3, 1, $4)`,
     [
-      row!.id,
+      row.id,
       'agent',
       JSON.stringify({ ...row, status: 'PENDING_APPROVAL' }),
-      `create:${row!.id}`,
+      `create:${row.id}`,
     ],
   );
 
-  return getOrderWithStatus(db, row!.id) as Promise<OrderIntent>;
+  const order = await getOrderWithStatus(db, row.id);
+  if (!order) throw new Error(`Order ${row.id} not found`);
+  return order;
 }
 
 function computeMarketExpiry(): Date {
@@ -487,13 +491,13 @@ export async function expireOrders(db: Db, now: Date = new Date()): Promise<numb
     const expiresAt = order.expires_at ? new Date(order.expires_at as string) : null;
     if (!expiresAt || expiresAt > now) continue;
     
-    const transitions = await db.query<Record<string, unknown>>(
+    const [transition] = await db.query<{ to_status: OrderStatus }>(
       `select to_status from order_transitions where order_intent_id = $1 order by at desc limit 1`,
       [order.id],
     );
     
-    if (!transitions || transitions.length === 0) continue;
-    const status = transitions[0].to_status as string;
+    if (!transition) continue;
+    const status = transition.to_status;
     if (!['PENDING_APPROVAL','MODIFIED','DEFERRED','APPROVED','ACKNOWLEDGED','AWAITING_SESSION'].includes(status)) continue;
     
     // Use exec with string interpolation for the insert to avoid parameter binding issues

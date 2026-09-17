@@ -23,7 +23,7 @@ function makeRecommendation(overrides: Partial<Recommendation> = {}): Recommenda
     amountPaise: paise(100000).toString(),
     thesis: 'Test thesis within word limit for BUY action with strong fundamentals and favorable valuation',
     ipsClauseRefs: ['3.3'],
-    falsification: { metric: 'composite', op: '<', value: 40 },
+    falsification: { metric: 'roce_pct', op: 'lt', value: 40 },
   };
 
   return buildRecommendation({
@@ -57,9 +57,11 @@ describe('orders domain', () => {
 
       const history = await getOrderHistory(db, order.id);
       expect(history.transitions).toHaveLength(1);
-      expect(history.transitions[0].fromStatus).toBe('DRAFT');
-      expect(history.transitions[0].toStatus).toBe('PENDING_APPROVAL');
-      expect(history.transitions[0].actor).toBe('agent');
+      const [transition] = history.transitions;
+      if (!transition) throw new Error('Expected creation transition');
+      expect(transition.fromStatus).toBe('DRAFT');
+      expect(transition.toStatus).toBe('PENDING_APPROVAL');
+      expect(transition.actor).toBe('agent');
     });
 
     it('creates an advisory order with ACKNOWLEDGED on approve', async () => {
@@ -126,8 +128,10 @@ describe('orders domain', () => {
 
       const history = await getOrderHistory(db, order.id);
       expect(history.revisions).toHaveLength(1);
-      expect(history.revisions[0].revisionNumber).toBe(2);
-      expect(history.revisions[0].prevRevision).toBe(1);
+      const [revision] = history.revisions;
+      if (!revision) throw new Error('Expected modified revision');
+      expect(revision.revisionNumber).toBe(2);
+      expect(revision.prevRevision).toBe(1);
       expect(history.transitions.some(t => t.toStatus === 'MODIFIED')).toBe(true);
     });
 
@@ -196,7 +200,7 @@ describe('orders domain', () => {
       const persisted = await persistRecommendation(db, rec);
       // Create order with already-expired expiry date
       const order = await db.withTransaction(async (tx) => {
-        const [row] = await tx.query<Record<string, unknown>>(
+        const [row] = await tx.query<{ id: string }>(
           `insert into order_intents
              (recommendation_id, intent, instrument_id, quantity, limit_price_paise, order_type,
               defer_until, alternate_instrument_id, payload_snapshot, expires_at, advisory_path, as_of, source, created_by, status, current_revision)
@@ -218,11 +222,13 @@ describe('orders domain', () => {
           ],
         );
         
+        if (!row) throw new Error('Expected inserted order');
+
         await tx.query(
           `insert into order_transitions
              (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
            values ($1, 1, 'DRAFT', 'PENDING_APPROVAL', $2, $3, 1, $4)`,
-          [row!.id, 'agent', JSON.stringify(row), `create:${row!.id}`],
+          [row.id, 'agent', JSON.stringify(row), `create:${row.id}`],
         );
         
         return row;
@@ -231,7 +237,7 @@ describe('orders domain', () => {
       const count = await expireOrders(db, new Date('2020-01-02T00:00:00Z'));
       expect(count).toBe(1);
 
-      const expired = await getOrder(db, order.id!);
+      const expired = await getOrder(db, order.id);
       expect(expired!.status).toBe('EXPIRED');
     });
 
@@ -284,7 +290,9 @@ describe('orders domain', () => {
 
       const history = await getOrderHistory(db, order.id);
       expect(history.simulations).toHaveLength(1);
-      expect(history.simulations[0].simType).toBe('PARTIAL_FILL');
+      const [simulation] = history.simulations;
+      if (!simulation) throw new Error('Expected paper simulation');
+      expect(simulation.simType).toBe('PARTIAL_FILL');
     });
   });
 
@@ -301,7 +309,9 @@ describe('orders domain', () => {
 
       const pending = await getPendingApprovals(db);
       expect(pending).toHaveLength(1);
-      expect(pending[0].instrumentId).toBe('NSE:RPOWER');
+      const [pendingOrder] = pending;
+      if (!pendingOrder) throw new Error('Expected pending order');
+      expect(pendingOrder.instrumentId).toBe('NSE:RPOWER');
     });
   });
 
@@ -337,9 +347,10 @@ describe('order state machine mutation checks', () => {
     await approveOrder(db, order.id, { idempotencyKey: `test-idempotent-${order.id}`, actor: 'owner' });
     await approveOrder(db, order.id, { idempotencyKey: `test-idempotent-${order.id}`, actor: 'owner' });
     
-    const transitions = await db.query(`select count(*) as c from order_transitions where order_intent_id = $1`, [order.id]);
+    const [transitions] = await db.query<{ c: number | string }>(`select count(*) as c from order_transitions where order_intent_id = $1`, [order.id]);
+    if (!transitions) throw new Error('Expected transition count');
     // Should have: DRAFT->PENDING_APPROVAL (from createOrder) + PENDING_APPROVAL->APPROVED (from first approve)
     // Second approve should be idempotent and not create a new transition
-    expect(Number(transitions[0].c)).toBe(2);
+    expect(Number(transitions.c)).toBe(2);
   });
 });

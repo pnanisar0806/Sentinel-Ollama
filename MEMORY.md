@@ -633,6 +633,12 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 ## Gotchas learned the hard way (each cost a fix round)
 
+- **Scheduled scripts must not require `.env` (2026-09-18).** GitHub runners receive env
+  directly and have no gitignored file. `sync`, `digest`, `report`, `screener:remind` use
+  `tsx --env-file-if-exists=.env` under Node 22; existing environment wins over local file.
+  Startup probes cover both modes without executing jobs. Vitest does not typecheck, and
+  regex workflow tests do not validate YAML: run tsc and parse YAML independently.
+
 - **PGlite returns `bigint` columns as JS numbers, not strings**, and `date` columns as
   `Date` objects. The plan's own T8 test asserted `net_paise === '900000'` and would have
   failed on that alone. Always widen through `BigInt()`; never compare a bigint column to a

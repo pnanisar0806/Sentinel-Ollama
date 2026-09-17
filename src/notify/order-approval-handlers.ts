@@ -1,5 +1,5 @@
 import type { Db } from '../db/client.js';
-import { Telegram, escapeMarkdown } from './telegram.js';
+import { escapeMarkdown } from './telegram.js';
 import { formatInr } from '../money/paise.js';
 import {
   getOrder,
@@ -11,24 +11,17 @@ import {
   getOrderHistory,
 } from '../domain/orders.js';
 
-export interface MockLiveInputs {
-  nowPriceCents: bigint;
-  usdInr: number;
-  asOf: string;
-}
-
 /** Handle /approve <order_id> [idempotency_key] */
 export async function handleApprove(db: Db, send: (text: string) => Promise<void>, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 2) {
+  const orderId = parts[1];
+  if (orderId === undefined) {
     await send('Usage: /approve <order_id> [idempotency_key]');
     return;
   }
-  const orderId = parts[1];
   const idempotencyKey = parts[2] || `approve:${parts[1]}:${Date.now()}`;
   try {
-    const { approveOrder } = await import('../domain/orders.js');
-    const order = await approveOrder(db as any, orderId, { idempotencyKey, actor: 'owner' });
+    const order = await approveOrder(db, orderId, { idempotencyKey, actor: 'owner' });
     await send(`✅ Order ${orderId} approved. Status: ${order.status}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -39,26 +32,27 @@ export async function handleApprove(db: Db, send: (text: string) => Promise<void
 /** Handle /modify <order_id> [quantity] [limit_price] [order_type] [defer_until] [alternate_id] [idempotency_key] */
 export async function handleModify(db: Db, send: (text: string) => Promise<void>, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 2) {
+  const orderId = parts[1];
+  if (orderId === undefined) {
     await send('Usage: /modify <order_id> [quantity] [limit_price] [order_type] [defer_until] [alternate_id] [idempotency_key]');
     return;
   }
-  const orderId = parts[1];
-  const idempotencyKey = parts[parts.length - 1].startsWith('idem:') ? parts.pop()! : `mod:${parts[1]}:${Date.now()}`;
+  const lastPart = parts[parts.length - 1];
+  const idempotencyKey = lastPart?.startsWith('idem:') ? lastPart : `mod:${parts[1]}:${Date.now()}`;
+  if (lastPart?.startsWith('idem:')) parts.pop();
   
   const input = {
     idempotencyKey,
     actor: 'owner' as const,
-    quantity: parts[2] && parts[2] !== parts[parts.length - 1] ? parts[2] : undefined,
-    limitPricePaise: parts[3] && parts[3] !== parts[parts.length - 1] ? parts[3] : undefined,
-    orderType: parts[4] && parts[4] !== parts[parts.length - 1] ? parts[4] as 'MARKET' | 'LIMIT' : undefined,
-    deferUntil: parts[5] && parts[5] !== parts[parts.length - 1] ? parts[5] : undefined,
-    alternateInstrumentId: parts[6] && parts[6] !== parts[parts.length - 1] ? parts[6] : undefined,
+    ...(parts[2] && parts[2] !== parts[parts.length - 1] ? { quantity: parts[2] } : {}),
+    ...(parts[3] && parts[3] !== parts[parts.length - 1] ? { limitPricePaise: parts[3] } : {}),
+    ...(parts[4] && parts[4] !== parts[parts.length - 1] ? { orderType: parts[4] as 'MARKET' | 'LIMIT' } : {}),
+    ...(parts[5] && parts[5] !== parts[parts.length - 1] ? { deferUntil: parts[5] } : {}),
+    ...(parts[6] && parts[6] !== parts[parts.length - 1] ? { alternateInstrumentId: parts[6] } : {}),
   };
   
   try {
-    const { modifyOrder } = await import('../domain/orders.js');
-    const order = await modifyOrder(db as any, orderId, input);
+    const order = await modifyOrder(db, orderId, input);
     await send(`✏️ Order ${orderId} modified. Status: ${order.status}, Revision: ${order.currentRevision}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -69,16 +63,15 @@ export async function handleModify(db: Db, send: (text: string) => Promise<void>
 /** Handle /defer <order_id> <YYYY-MM-DD> [idempotency_key] */
 export async function handleDefer(db: Db, send: (text: string) => Promise<void>, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 3) {
+  const orderId = parts[1];
+  const deferUntil = parts[2];
+  if (orderId === undefined || deferUntil === undefined) {
     await send('Usage: /defer <order_id> <YYYY-MM-DD> [idempotency_key]');
     return;
   }
-  const orderId = parts[1];
-  const deferUntil = parts[2];
   const idempotencyKey = parts[3] || `defer:${parts[1]}:${Date.now()}`;
   try {
-    const { deferOrder } = await import('../domain/orders.js');
-    const order = await deferOrder(db as any, orderId, { idempotencyKey: parts[3] || `defer:${parts[1]}:${Date.now()}`, actor: 'owner', deferUntil });
+    const order = await deferOrder(db, orderId, { idempotencyKey: parts[3] || `defer:${parts[1]}:${Date.now()}`, actor: 'owner', deferUntil });
     await send(`⏸️ Order ${parts[1]} deferred until ${deferUntil}. Status: ${order.status}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -89,17 +82,18 @@ export async function handleDefer(db: Db, send: (text: string) => Promise<void>,
 /** Handle /reject <order_id> <reason> [idempotency_key] */
 export async function handleRejectOrder(db: Db, send: (text: string) => Promise<void>, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 3) {
+  const orderId = parts[1];
+  if (orderId === undefined || parts[2] === undefined) {
     await send('Usage: /reject <order_id> <reason> [idempotency_key]');
     return;
   }
-  const orderId = parts[1];
-  const idempotencyKey = parts[parts.length - 1].startsWith('idem:') ? parts.pop()! : `rej:${parts[1]}:${Date.now()}`;
-  const reason = parts.slice(2, parts.length - (parts[parts.length - 1].startsWith('idem:') ? 1 : 0)).join(' ');
+  const lastPart = parts[parts.length - 1];
+  const idempotencyKey = lastPart?.startsWith('idem:') ? lastPart : `rej:${parts[1]}:${Date.now()}`;
+  if (lastPart?.startsWith('idem:')) parts.pop();
+  const reason = parts.slice(2, parts.length - (parts[parts.length - 1]?.startsWith('idem:') ? 1 : 0)).join(' ');
   
   try {
-    const { rejectOrder } = await import('../domain/orders.js');
-    const order = await rejectOrder(db as any, orderId, { idempotencyKey: parts[parts.length - 1].startsWith('idem:') ? parts[parts.length - 1] : `rej:${parts[1]}:${Date.now()}`, actor: 'owner', reason });
+    const order = await rejectOrder(db, orderId, { idempotencyKey, actor: 'owner', reason });
     await send(`❌ Order ${orderId} rejected: ${escapeMarkdown(parts.slice(2, -1).join(' '))}. Status: ${order.status}`);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -110,12 +104,12 @@ export async function handleRejectOrder(db: Db, send: (text: string) => Promise<
 /** Handle /alternates <order_id> - show alternates for a pending order */
 export async function handleAlternates(db: Db, send: (text: string) => Promise<void>, text: string): Promise<void> {
   const parts = text.trim().split(/\s+/);
-  if (parts.length < 2) {
+  const orderId = parts[1];
+  if (orderId === undefined) {
     await send('Usage: /alternates <order_id>');
     return;
   }
-  const { getOrder } = await import('../domain/orders.js');
-  const order = await getOrder(db as any, parts[1]);
+  const order = await getOrder(db, orderId);
   if (!order) {
     await send(`Order ${parts[1]} not found.`);
     return;

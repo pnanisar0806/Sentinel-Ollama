@@ -1,5 +1,19 @@
 # Sentinel — SDD progress ledger
 
+## 2026-09-18 (CI / sync repair)
+
+- GitHub CI failure reproduced with `pnpm exec tsc --noEmit`: order DB row types,
+  unchecked command/test indices, invalid falsification fixture. Narrowed types/guards;
+  retained existing handler edits. No state-machine redesign or weakening compiler gates.
+- Sync had malformed step indentation; previous scheduled run failed on missing `.env`.
+  YAML corrected; sync/digest/report/screener reminder use `--env-file-if-exists=.env`.
+  Regression checks failed before repair; startup probes verify absent file, local loading
+  and runner-env precedence without executing jobs. PyYAML parses all five sync steps.
+- Verification: tsc clean, **656/656 tests**, independent scoped
+  review clean. No standalone lint command configured. Commit/push approval and subsequent
+  GitHub CI/live sync verification remain pending; no production job invoked.
+
+
 ## 2026-09-17 (Phase 2 planning)
 
 - Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2
