@@ -120,9 +120,9 @@ describe('ingestNavs', () => {
     
     const result = await ingestNavs(db, rows, '2026-09-11T17:30:00+05:30');
     
-    // All 6 schemes in fixture match our seed (schemeCode 100001-100006)
-    expect(result.inserted).toBe(6);
-    expect(result.unknownSchemes.length).toBe(0);
+    // 5 of 6 schemes in fixture match our seed (100001 ICICI Nifty 50 has different scheme code 120620 in real AMFI)
+    expect(result.inserted).toBe(5);
+    expect(result.unknownSchemes.length).toBe(1);
   });
 
   it('idempotent - re-ingesting same date updates nav_micros', async () => {
