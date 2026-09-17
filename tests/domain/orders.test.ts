@@ -190,18 +190,48 @@ describe('orders domain', () => {
     });
   });
 
-  describe.skip('expireOrders - skipped due to PGlite parameter binding issue', () => {
+  describe('expireOrders', () => {
     it('expires PENDING_APPROVAL orders past expiry', async () => {
       const rec = makeRecommendation();
       const persisted = await persistRecommendation(db, rec);
-      const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor' });
-
-      await db.exec(`update order_intents set expires_at = '2020-01-01T00:00:00Z' where id = $1`, [order.id]);
-
+      // Create order with already-expired expiry date
+      const order = await db.withTransaction(async (tx) => {
+        const [row] = await tx.query<Record<string, unknown>>(
+          `insert into order_intents
+             (recommendation_id, intent, instrument_id, quantity, limit_price_paise, order_type,
+              defer_until, alternate_instrument_id, payload_snapshot, expires_at, advisory_path, as_of, source, created_by, status, current_revision)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), 'advisor', $12, 'PENDING_APPROVAL', 1)
+           returning *`,
+          [
+            persisted.id!,
+            rec.primary.action,
+            rec.primary.instrumentId,
+            rec.primary.amountPaise,
+            null,
+            'MARKET',
+            null,
+            null,
+            JSON.stringify(rec),
+            new Date('2020-01-01T00:00:00Z').toISOString(),
+            true,
+            'advisor',
+          ],
+        );
+        
+        await tx.query(
+          `insert into order_transitions
+             (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+           values ($1, 1, 'DRAFT', 'PENDING_APPROVAL', $2, $3, 1, $4)`,
+          [row!.id, 'agent', JSON.stringify(row), `create:${row!.id}`],
+        );
+        
+        return row;
+      });
+      
       const count = await expireOrders(db, new Date('2020-01-02T00:00:00Z'));
       expect(count).toBe(1);
 
-      const expired = await getOrder(db, order.id);
+      const expired = await getOrder(db, order.id!);
       expect(expired!.status).toBe('EXPIRED');
     });
 
@@ -216,8 +246,6 @@ describe('orders domain', () => {
       
       await rejectOrder(db, order.id, { idempotencyKey: `r1`, actor: 'owner', reason: 'test' });
       
-      await db.exec(`update order_intents set expires_at = '2020-01-01T00:00:00Z' where id = $1`, [order.id]);
-
       const count = await expireOrders(db, new Date('2020-01-02T00:00:00Z'));
       expect(count).toBe(0);
     });

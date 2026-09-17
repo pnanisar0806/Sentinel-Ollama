@@ -475,11 +475,11 @@ export async function rejectOrder(db: Db, id: string, input: RejectInput): Promi
 }
 
 export async function expireOrders(db: Db, now: Date = new Date()): Promise<number> {
-  const allOrders = await db.exec(
+  const allOrders = await db.query<Record<string, unknown>>(
     `select id, current_revision, payload_snapshot, expires_at
      from order_intents
      where expires_at is not null`,
-  ) as unknown as Record<string, unknown>[];
+  );
   
   let expiredCount = 0;
   
@@ -487,9 +487,10 @@ export async function expireOrders(db: Db, now: Date = new Date()): Promise<numb
     const expiresAt = order.expires_at ? new Date(order.expires_at as string) : null;
     if (!expiresAt || expiresAt > now) continue;
     
-    const transitions = await db.exec(
-      `select to_status from order_transitions where order_intent_id = '${order.id}' order by at desc limit 1`,
-    ) as unknown as Record<string, unknown>[];
+    const transitions = await db.query<Record<string, unknown>>(
+      `select to_status from order_transitions where order_intent_id = $1 order by at desc limit 1`,
+      [order.id],
+    );
     
     if (!transitions || transitions.length === 0) continue;
     const status = transitions[0].to_status as string;
