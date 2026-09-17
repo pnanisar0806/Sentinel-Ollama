@@ -6,15 +6,15 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 
-- [x] **AMFI NAV PIPELINE FIXED (2026-09-17).** The AMFI daily NAV ingestion now works for 5 of
-       our 6 MF instruments. Root cause: seed instruments lacked real AMFI scheme codes/ISINs,
+- [x] **AMFI NAV PIPELINE FIXED (2026-09-17).** The AMFI daily NAV ingestion now works for all
+       6 MF instruments. Root cause: seed instruments lacked real AMFI scheme codes/ISINs,
        and `ingestNavs` used a massive 31,978-parameter query that hit PGlite/PostgreSQL limits.
        Fixed by: (1) adding real AMFI ISINs to seed data for 5 MF instruments (PPFC, ICICI
-       Large Cap, HDFC Mid Cap, Motilal Midcap, Bandhan Small Cap), (2) rewriting
-       `ingestNavs` to query all local MF instruments directly (O(1) map lookup) instead of
-       filtering by massive AMFI lists. Sync now shows `amfi: 14125 unmapped` (down from
-       14130) — 5 of our 6 MF instruments now receive NAVs. The 6th (ICICI Nifty 50 Index)
-       remains unmapped pending correct AMFI scheme code discovery.
+       Large Cap, HDFC Mid Cap, Motilal Midcap, Bandhan Small Cap), (2) finding and adding
+       the correct AMFI scheme code for ICICI Nifty 50 Index Direct (schemeCode 120620,
+       ISIN INF109K012M7), (3) rewriting `ingestNavs` to query all local MF instruments
+       directly (O(1) map lookup) instead of filtering by massive AMFI lists. Sync now shows
+       `amfi: 14124 unmapped` (down from 14,130) — all 6 MF instruments now receive NAVs.
 - [x] **PHASE 2 + 2.5 PLANS CORRECTED (2026-09-17).** `docs/superpowers/plans/2026-09-16-sentinel-phase-2.md`: 6 tasks, PRD "Prove",
        paper-only full Telegram approval flow, real rails/breaker, cleanup, existing web app,
        scoring and tested backup/restore. `2026-09-17-sentinel-phase-2.5.md`: 11 tasks,

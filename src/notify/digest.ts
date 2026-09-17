@@ -67,19 +67,29 @@ async function previousNet(
   return netWorth(positions, liabilitiesPaise).netPaise;
 }
 
-export async function buildDigestInput(db: Db, now: string): Promise<DigestInput> {
+export interface LiveInputs {
+  nowPriceCents: bigint;
+  usdInr: number;
+  asOf: string;
+}
+
+export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInputs | null): Promise<DigestInput> {
   const businessDate = now.slice(0, 10);
 
   // Fetch live NOW price + USD/INR for fresh RSU projection AND employer stock revaluation
-  let liveInputs: { nowPriceCents: bigint; usdInr: number; asOf: string } | null = null;
-  try {
-    liveInputs = await fetchLiveRsuInputs();
-  } catch (e) {
-    console.warn('Live RSU price/FX fetch failed, falling back to seed values:', e);
+  let liveInputsResolved: LiveInputs | null = null;
+  if (liveInputs !== undefined) {
+    liveInputsResolved = liveInputs;
+  } else {
+    try {
+      liveInputsResolved = await fetchLiveRsuInputs();
+    } catch (e) {
+      console.warn('Live RSU price/FX fetch failed, falling back to seed values:', e);
+    }
   }
 
-  const priceUsd = liveInputs ? Number(liveInputs.nowPriceCents) / 100 : ASSUMPTIONS.seedNowPriceUsd;
-  const usdInr = liveInputs ? liveInputs.usdInr : ASSUMPTIONS.seedUsdInr;
+  const priceUsd = liveInputsResolved ? Number(liveInputsResolved.nowPriceCents) / 100 : ASSUMPTIONS.seedNowPriceUsd;
+  const usdInr = liveInputsResolved ? liveInputsResolved.usdInr : ASSUMPTIONS.seedUsdInr;
 
   let positions = await loadPositions(db);
 
