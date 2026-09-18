@@ -25,6 +25,40 @@
 - Limit-order expiry deferred to Task 2 (PRD silent).
 - All 668 tests pass, tsc clean. Ready for Task 2 (rails, freeze, breaker, cleanup).
 
+## 2026-09-18 (Phase 2 Task 2 - Rails, freeze, breaker, behavioral protocol)
+
+- checkRails: validates single-order ceiling (₹1L), tactical budget (₹50k/month),
+  concentration caps, forbidden universe, staleness (FR-31), hold period (12mo),
+  override validity (3 events).
+- checkPortfolioRails: portfolio-level rail check for digest/reporting.
+- Freeze state: /freeze cancels pending/awaiting, /unfreeze typed confirmation.
+- Breaker: 3 consecutive falsifications trip to report-only; /reset_breaker with
+  mandatory post-mortem; audit trail in settings_rails + audit_log.
+- 48h cooling on rail changes; drawdown >15% blocks loosening at activation;
+  drawdown >=20% requires §3.10 IPS citation + typed justification.
+- Paper simulations: SESSION_MISSING, PARTIAL_FILL, BROKER_REJECT, MARKET_CLOSURE,
+  ADVISORY_ACK, ADVISORY_VERIFY, T2_REMINDER, T7_REMINDER.
+- Advisory T+2/T+7 reminders via recordAdvisoryReminder.
+- Architecture test: funded_status firewall preserved; no funded_status leaks.
+- 673 tests pass, tsc clean, CI/sync green. Commit e3dc831.
+
+## 2026-09-19 (Phase 2 Task 3 — Paper legacy cleanup + multi-year LTCG calendar)
+
+- generateCleanupRecommendations: produces FR-11 paper recommendations for:
+  * Smallcase termination: terminate 4 subscriptions, retain constituent ETFs (Nifty BeES, Junior BeES, Gold BeES, Liquid BeES)
+  * Micro-orphans <₹5k: consolidate positions below threshold first
+  * Thesis-less consolidation: every holding without live thesis is a candidate, tax-aware via LTCG harvest
+  * Groww RPOWER: surfaces once as manual closure (legacy_note), not skipped for missing integration
+  * Bond credit review: Sammaan 2026/2029, Edelweiss 2033 as standing review items
+  * Sammaan Sep-2026 maturity routing: pre-approved B3 routing surfaced for event confirmation
+  * LTCG harvest calendar: scheduled across 1–2 fiscal years (Apr–Mar), ₹1.25L/year exemption (pending §15.1 build-time law verification), FIFO lots only
+- Unknown cost basis: never ₹0, surfaces as owner prerequisites
+- toPaperRecommendations: converts cleanup recs to FR-11 objects with 2 alternates (A1 index-route NSE:NIFTYBEES, A2 do-nothing HOLD); legacy_note uses HOLD primary
+- All recommendations PAPER mode: no runCleanup execution, real fills, lot disposal, or actual exemption consumption
+- Wire sell trigger 6 to standing paper queue via FR-11 recommendations
+- 14 new tests in tests/domain/cleanup.test.ts
+- 687 tests pass, tsc clean
+
 ## 2026-09-17 (Phase 2 planning)
 
 - Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2

@@ -5,6 +5,17 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **PHASE 2 TASK 3 COMPLETE (2026-09-19): Paper legacy cleanup + multi-year LTCG calendar (FR-14, §3.9).**
+      Implemented: generateCleanupRecommendations (smallcase termination retaining constituent ETFs, micro-orphans <₹5k, thesis-less consolidation, Groww RPOWER manual closure, bond credit review, Sammaan Sep-2026 maturity routing to B3, LTCG harvest scheduled across 1–2 fiscal years using ₹1.25L/year exemption pending §15.1 law verification). All recommendations are FR-11 paper objects with 2 alternates (index-route A1, do-nothing A2). Uses known FIFO lots only; unknown cost basis → owner prerequisites, never ₹0. toPaperRecommendations converts to persistable recommendations. 14 tests added, all 687 tests pass, tsc clean.
+
+- [x] **PHASE 2 TASK 2 COMPLETE (2026-09-18): Rails, freeze, breaker, behavioral protocol.**
+      Implemented: checkRails (single-order ceiling, tactical budget, concentration,
+      forbidden universe, staleness, hold period, override validity);
+      checkPortfolioRails for digest; freeze/breaker state machine; 48h cooling;
+      drawdown >15% blocks loosening, >=20% requires §3.10 justification;
+      paper simulations; T+2/T+7 advisory reminders.
+      All 673 tests pass, tsc clean, CI/sync green.
+      
 
 - [x] **CI/sync repair pushed to main (2026-09-18), `573d52a`.**
       CI run `35265799106` passed (typecheck + tests); manual sync `35265838151` passed
@@ -39,7 +50,7 @@ MEMORY.md; the code map lives in index.md.
        scoring and tested backup/restore. `2026-09-17-sentinel-phase-2.5.md`: 11 tasks,
        LLM BUY/SELL/HOLD/WAIT decisions with explicit deterministic sizing prerequisite,
        news coverage/failure semantics and bounded point-in-time replay.
-- [ ] **START PHASE 2 TASK 1:** immutable paper intents/events + FR-20–25 state machine.
+- [x] **PHASE 2 TASK 1 COMPLETE (2026-09-18):** Paper approval state machine (FR-20-25). immutable paper intents/events + FR-20–25 state machine.
        Market expiry EOD; SIP/MF changes 7 days; three consecutive approved falsifications
        trip the breaker (Task 2). Preserve bot statement confirms; no Kite resurrection.
        Open inputs: limit-order expiry, reliable FIFO/tax history, backup/auth provisioning.
