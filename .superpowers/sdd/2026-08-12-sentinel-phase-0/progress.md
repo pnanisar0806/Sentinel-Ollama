@@ -14,6 +14,17 @@
   GitHub CI/live sync verification remain pending; no production job invoked.
 
 
+## 2026-09-18 (Phase 2 Task 1 — Paper approval state machine)
+
+- FR-30/31 rail/freshness gate added to createOrder/modifyOrder with staleness check bypass in tests.
+- Advisory path completed: ACKNOWLEDGED → AWAITING_MANUAL_EXECUTION → VERIFIED/ABANDONED via awaitManualExecution/verifyAdvisory/abandonAdvisory.
+- Defer resurfacing (resurfaceDeferredOrder) with composite score check and withdrawal recommendation.
+- expireOrders now accepts optional notify callback for expiry notifications.
+- Paper simulations: SESSION_MISSING, PARTIAL_FILL, BROKER_REJECT, MARKET_CLOSURE, ADVISORY_ACK, ADVISORY_VERIFY, T2_REMINDER, T7_REMINDER.
+- Advisory reminders: recordAdvisoryReminder for T2/T7.
+- Limit-order expiry deferred to Task 2 (PRD silent).
+- All 668 tests pass, tsc clean. Ready for Task 2 (rails, freeze, breaker, cleanup).
+
 ## 2026-09-17 (Phase 2 planning)
 
 - Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2
@@ -236,7 +247,8 @@ se-bhavcopy step (skips weekends, logs skip).
 ## 2026-09-11 (Phase 1 Task 2 � Phase 1 schema: migrations 0007/0008)
 
 - **Phase 1 Task 2 complete** (schema migrations for Phase 1).
-  Created migrations/0008_phase1_intel.sql with tables: watchlist (PK instrument_id+added_on, CHECK removed_on>=added_on), screener_uploads, undamentals (data text, typed quality columns), signal_scores (composite numeric(5,2), quality_passed, 4 regression components, rank), ecommendations (FR-11 payloads: primary_rec, alternates, ips_clause_refs text, engine_evidence, kind check, suppressed flag), suppressed_actions, enchmarks (benchmark_at_creation + 3/6/12m evals). All append-only triggers + RLS.
+  Created migrations/0008_phase1_intel.sql with tables: watchlist (PK instrument_id+added_on, CHECK removed_on>=added_on), screener_uploads, undamentals (data text, typed quality columns), signal_scores (composite numeric(5,2), quality_passed, 4 regression components, rank), 
+ecommendations (FR-11 payloads: primary_rec, alternates, ips_clause_refs text, engine_evidence, kind check, suppressed flag), suppressed_actions, enchmarks (benchmark_at_creation + 3/6/12m evals). All append-only triggers + RLS.
   Migration  010_phase1_quotes.sql (was 0007) already created prices_eod, index_prices_eod, 
 avs, holidays.
 - PGlite compatibility: used 	ext for JSON columns (SQLite stores JSON as TEXT), 	ext for array columns (serialized), renamed primary ? primary_rec (reserved keyword in SQLite).

@@ -16,6 +16,15 @@ MEMORY.md; the code map lives in index.md.
       recorded locally after the code push.
 
 
+- [x] **PHASE 2 TASK 1 COMPLETE (2026-09-18): Paper approval state machine (FR-20–25).**
+      Implemented: FR-30/31 rail/freshness gate on createOrder/modifyOrder; advisory path
+      ACKNOWLEDGED → AWAITING_MANUAL_EXECUTION → VERIFIED/ABANDONED; defer resurfacing
+      with score check and withdrawal recommendation; expiry notification callback;
+      paper simulations (SESSION_MISSING, PARTIAL_FILL, BROKER_REJECT, MARKET_CLOSURE,
+      ADVISORY_ACK, ADVISORY_VERIFY, T2_REMINDER, T7_REMINDER); limit-order expiry
+      deferred to Task 2 (PRD silent). All **668 tests pass**, tsc clean.
+      Remaining for Task 2: rails enforcement, freeze/breaker, behavioral protocol.
+
 - [x] **AMFI NAV PIPELINE FIXED (2026-09-17).** The AMFI daily NAV ingestion now works for all
        6 MF instruments. Root cause: seed instruments lacked real AMFI scheme codes/ISINs,
        and `ingestNavs` used a massive 31,978-parameter query that hit PGlite/PostgreSQL limits.

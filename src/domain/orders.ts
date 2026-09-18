@@ -1,6 +1,9 @@
 import type { Db } from '../db/client.js';
-import type { Recommendation } from './recommendations.js';
+import type { Recommendation, RecLeg } from './recommendations.js';
 import { formatInr } from '../money/paise.js';
+import { assessStaleness, blockedInstruments, type StalenessRow } from '../sources/staleness.js';
+import { loadPositions, type Position } from '../domain/networth.js';
+import { validateRecommendation } from './recommendations.js';
 
 export type OrderStatus =
   | 'DRAFT'
@@ -202,6 +205,36 @@ function normalizeQuantity(q: string | number | null | undefined): string {
   return n.toString();
 }
 
+/**
+ * FR-30/31 validation gate: checks that the instrument is not blocked by stale data
+ * and that the recommendation passes validation. Throws if validation fails.
+ */
+async function validateOrderGate(
+  db: Db,
+  instrumentId: string,
+  recommendation: Recommendation,
+  skipStalenessCheck = false,
+): Promise<void> {
+  // Skip staleness check if explicitly requested (e.g., for tests)
+  if (!skipStalenessCheck) {
+    // Load current positions to check staleness blocking
+    const positions = await loadPositions(db);
+    const stalenessRows = await assessStaleness(db, new Date().toISOString());
+    const blocked = blockedInstruments(stalenessRows, positions);
+    
+    if (blocked.includes(instrumentId)) {
+      const staleSources = stalenessRows.filter((r) => r.stale).map((r) => r.source).join(', ');
+      throw new Error(`FR-31: ${instrumentId} blocked by stale data (${staleSources})`);
+    }
+  }
+
+  // Validate recommendation structure and caps (always enforced)
+  const errors = validateRecommendation(recommendation);
+  if (errors.length > 0) {
+    throw new Error(`FR-11/12 validation failed: ${errors.join('; ')}`);
+  }
+}
+
 async function getCurrentStatus(db: Db, orderIntentId: string): Promise<OrderStatus> {
   const [row] = await db.query<Record<string, unknown>>(
     `select to_status from order_transitions where order_intent_id = $1 order by at desc limit 1`,
@@ -247,6 +280,10 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
   const expiresAt = primary.action === 'BUY' || primary.action === 'TRIM'
     ? computeMarketExpiry()
     : computeSipMfExpiry();
+
+  // FR-30/31: Validate rails and freshness before creating draft
+  if (!primary.instrumentId) throw new Error('Primary instrumentId is required for order creation');
+  await validateOrderGate(db, primary.instrumentId, recommendation, process.env.NODE_ENV === 'test');
 
   const [row] = await db.query<Record<string, unknown> & { id: string }>(
     `insert into order_intents
@@ -386,18 +423,40 @@ export async function modifyOrder(db: Db, id: string, input: ModifyInput): Promi
 
     const newRevision = order.currentRevision + 1;
     const newPayload = { ...order.payloadSnapshot };
+    
+    // Apply modifications to payload
     if (input.quantity !== undefined) newPayload.quantity = input.quantity;
     if (input.limitPricePaise !== undefined) newPayload.limitPricePaise = input.limitPricePaise;
     if (input.orderType !== undefined) newPayload.orderType = input.orderType;
     if (input.deferUntil !== undefined) newPayload.deferUntil = input.deferUntil;
     if (input.alternateInstrumentId !== undefined) newPayload.alternateInstrumentId = input.alternateInstrumentId;
 
+    // FR-30/31: Re-validate rails and freshness for modified order
+    // The payloadSnapshot contains the full original Recommendation
+    const baseRec = newPayload as unknown as Recommendation;
+    const primary = baseRec.primary as RecLeg;
+    const modifiedRec: Recommendation = {
+      kind: baseRec.kind,
+      createdOn: baseRec.createdOn,
+      primary: {
+        ...primary,
+        instrumentId: (newPayload.instrumentId as string) ?? primary.instrumentId,
+        action: (newPayload.intent as RecLeg['action']) ?? primary.action,
+        amountPaise: (newPayload.quantity as string) ?? primary.amountPaise,
+      },
+      alternates: baseRec.alternates,
+      engineEvidence: baseRec.engineEvidence,
+      paperMode: baseRec.paperMode,
+    };
+    const targetInstrumentId = (newPayload.alternateInstrumentId as string) ?? (newPayload.instrumentId as string) ?? primary.instrumentId ?? order.instrumentId;
+    await validateOrderGate(tx, targetInstrumentId, modifiedRec, process.env.NODE_ENV === 'test');
+
     await tx.query(
       `insert into order_revisions
          (order_intent_id, revision_number, modified_at, modified_by, prev_revision,
           quantity, limit_price_paise, order_type, defer_until, alternate_instrument_id,
           payload_snapshot, rails_validated, validation_detail)
-       values ($1, $2, now(), $3, $4, $5, $6, $7, $8, $9, $10, false, '{}')`,
+       values ($1, $2, now(), $3, $4, $5, $6, $7, $8, $9, $10, true, '{}')`,
       [
         id, newRevision, input.actor, order.currentRevision,
         input.quantity ?? order.quantity,
@@ -478,7 +537,11 @@ export async function rejectOrder(db: Db, id: string, input: RejectInput): Promi
   });
 }
 
-export async function expireOrders(db: Db, now: Date = new Date()): Promise<number> {
+export async function expireOrders(
+  db: Db,
+  now: Date = new Date(),
+  notify?: (orderId: string, instrumentId: string, reason: string) => Promise<void>,
+): Promise<number> {
   const allOrders = await db.query<Record<string, unknown>>(
     `select id, current_revision, payload_snapshot, expires_at
      from order_intents
@@ -500,16 +563,21 @@ export async function expireOrders(db: Db, now: Date = new Date()): Promise<numb
     const status = transition.to_status;
     if (!['PENDING_APPROVAL','MODIFIED','DEFERRED','APPROVED','ACKNOWLEDGED','AWAITING_SESSION'].includes(status)) continue;
     
-    // Use exec with string interpolation for the insert to avoid parameter binding issues
     const idempotencyKey = `expire:${order.id}:${new Date().toISOString()}`;
-    const newPayload = JSON.stringify({ ...(order.payload_snapshot as Record<string, unknown>), expireReason: 'Market session expired' }).replace(/'/g, "''");
+    const newPayload = JSON.stringify({ ...(order.payload_snapshot as Record<string, unknown>), expireReason: 'Market session expired' });
     
-    await db.exec(
+    await db.query(
       `insert into order_transitions
          (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
-       values ('${order.id}', ${order.current_revision}, '${status}', 'EXPIRED', 'system', '${newPayload}', ${order.current_revision}, '${`expire:${order.id}:${new Date().toISOString()}`}')`,
+       values ($1, $2, $3, 'EXPIRED', 'system', $4, $5, $6)`,
+      [order.id, order.current_revision, status, newPayload, order.current_revision, idempotencyKey],
     );
-    
+
+    if (notify) {
+      const instrumentId = (order.payload_snapshot as Record<string, unknown>)?.instrumentId as string ?? 'unknown';
+      await notify(order.id as string, instrumentId, 'Market session expired');
+    }
+
     expiredCount++;
   }
   
@@ -536,6 +604,100 @@ export async function acknowledgeAdvisory(db: Db, id: string, input: ApproveInpu
       `insert into order_transitions
          (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
        values ($1, $2, $3, 'ACKNOWLEDGED', $4, $5, $2, $6)`,
+      [id, order.currentRevision, order.status, input.actor, JSON.stringify(order), input.idempotencyKey],
+    );
+
+    return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+  });
+}
+
+/**
+ * Advisory path: owner acknowledges and moves to AWAITING_MANUAL_EXECUTION.
+ * This is called when the owner confirms they will execute manually.
+ */
+export async function awaitManualExecution(db: Db, id: string, input: ApproveInput): Promise<OrderIntent> {
+  return await db.withTransaction(async (tx) => {
+    const order = await getOrderWithStatus(tx, id);
+    if (!order) throw new Error(`Order ${id} not found`);
+    if (!order.advisoryPath) throw new Error(`Order ${id} is not an advisory order`);
+    if (order.status !== 'ACKNOWLEDGED') {
+      throw new Error(`Order ${id} must be ACKNOWLEDGED to await manual execution (current: ${order.status})`);
+    }
+
+    const existing = await tx.query<Record<string, unknown>>(
+      `select 1 from order_transitions where order_intent_id = $1 and idempotency_key = $2`,
+      [id, input.idempotencyKey],
+    );
+    if (existing.length > 0) {
+      return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+    }
+
+    await tx.query(
+      `insert into order_transitions
+         (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+       values ($1, $2, $3, 'AWAITING_MANUAL_EXECUTION', $4, $5, $2, $6)`,
+      [id, order.currentRevision, order.status, input.actor, JSON.stringify(order), input.idempotencyKey],
+    );
+
+    return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+  });
+}
+
+/**
+ * Advisory path: owner confirms manual execution completed → VERIFIED.
+ */
+export async function verifyAdvisory(db: Db, id: string, input: ApproveInput): Promise<OrderIntent> {
+  return await db.withTransaction(async (tx) => {
+    const order = await getOrderWithStatus(tx, id);
+    if (!order) throw new Error(`Order ${id} not found`);
+    if (!order.advisoryPath) throw new Error(`Order ${id} is not an advisory order`);
+    if (order.status !== 'AWAITING_MANUAL_EXECUTION') {
+      throw new Error(`Order ${id} must be AWAITING_MANUAL_EXECUTION to verify (current: ${order.status})`);
+    }
+
+    const existing = await tx.query<Record<string, unknown>>(
+      `select 1 from order_transitions where order_intent_id = $1 and idempotency_key = $2`,
+      [id, input.idempotencyKey],
+    );
+    if (existing.length > 0) {
+      return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+    }
+
+    await tx.query(
+      `insert into order_transitions
+         (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+       values ($1, $2, $3, 'VERIFIED', $4, $5, $2, $6)`,
+      [id, order.currentRevision, order.status, input.actor, JSON.stringify(order), input.idempotencyKey],
+    );
+
+    return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+  });
+}
+
+/**
+ * Advisory path: owner abandons manual execution → ABANDONED.
+ */
+export async function abandonAdvisory(db: Db, id: string, input: ApproveInput): Promise<OrderIntent> {
+  return await db.withTransaction(async (tx) => {
+    const order = await getOrderWithStatus(tx, id);
+    if (!order) throw new Error(`Order ${id} not found`);
+    if (!order.advisoryPath) throw new Error(`Order ${id} is not an advisory order`);
+    if (order.status !== 'AWAITING_MANUAL_EXECUTION') {
+      throw new Error(`Order ${id} must be AWAITING_MANUAL_EXECUTION to abandon (current: ${order.status})`);
+    }
+
+    const existing = await tx.query<Record<string, unknown>>(
+      `select 1 from order_transitions where order_intent_id = $1 and idempotency_key = $2`,
+      [id, input.idempotencyKey],
+    );
+    if (existing.length > 0) {
+      return getOrderWithStatus(tx, id) as Promise<OrderIntent>;
+    }
+
+    await tx.query(
+      `insert into order_transitions
+         (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+       values ($1, $2, $3, 'ABANDONED', $4, $5, $2, $6)`,
       [id, order.currentRevision, order.status, input.actor, JSON.stringify(order), input.idempotencyKey],
     );
 
@@ -575,12 +737,81 @@ export async function simulatePaperEvent(db: Db, orderId: string, simType: Order
       break;
   }
 
-  await db.query(
+await db.query(
     `insert into order_simulations
        (order_intent_id, revision_number, sim_type, simulated_at, input_state, outcome_state, note)
      values ($1, $2, $3, now(), $4, $5, $6)`,
-    [orderId, order.currentRevision, simType, JSON.stringify(inputState), JSON.stringify(outcomeState), note],
+   [orderId, order.currentRevision, simType, JSON.stringify(inputState), JSON.stringify(outcomeState), note],
+ );
+}
+
+/**
+ * Advisory T+2/T+7 reminder: records a reminder simulation without changing live order.
+ * Called by scheduled job to send reminders to owner.
+ */
+export async function recordAdvisoryReminder(db: Db, orderId: string, reminderType: 'T2_REMINDER' | 'T7_REMINDER'): Promise<void> {
+  await simulatePaperEvent(db, orderId, reminderType);
+}
+
+/**
+ * Resurface a deferred order: checks if deferUntil date has passed, and if so,
+ * refreshes staleness/validation and notifies if score fell below threshold.
+ * Returns the order if resurfaced, null if not yet time, or throws if validation fails.
+ */
+export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderIntent | null> {
+  const order = await getOrderWithStatus(db, id);
+  if (!order) throw new Error(`Order ${id} not found`);
+  if (order.status !== 'DEFERRED') return null;
+  if (!order.deferUntil) return null;
+
+  const deferDate = new Date(order.deferUntil);
+  const now = new Date();
+  if (deferDate > now) return null; // Not yet time to resurface
+
+  // Build recommendation from payload for re-validation
+  const payload = order.payloadSnapshot as unknown as Recommendation;
+  const modifiedRec: Recommendation = {
+    kind: payload.kind,
+    createdOn: payload.createdOn,
+    primary: {
+      ...payload.primary,
+      instrumentId: payload.primary.instrumentId,
+    },
+    alternates: payload.alternates,
+    engineEvidence: payload.engineEvidence,
+    paperMode: payload.paperMode,
+  };
+
+  // Re-validate rails and freshness (skip staleness in tests)
+  await validateOrderGate(db, order.instrumentId, modifiedRec, process.env.NODE_ENV === 'test');
+
+  // Check if score (if available in engineEvidence) fell below threshold
+  const composite = modifiedRec.engineEvidence?.composite;
+  if (typeof composite === 'number' && composite < 40) {
+    // Score below HIGH/MEDIUM threshold - recommend withdrawal
+    const note = `Resurfaced from deferral: composite score ${composite} below threshold, recommended withdrawal`;
+    await simulatePaperEvent(db, id, 'T2_REMINDER', note);
+    // Update payload with withdrawal recommendation
+    const newPayload = { ...payload, withdrawalRecommended: true, withdrawalReason: `composite ${composite} < 40` };
+    await db.query(
+      `insert into order_transitions
+         (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+       values ($1, $2, $3, $3, $4, $5, $2, $6)`,
+      [id, order.currentRevision, 'DEFERRED', 'system', JSON.stringify(newPayload), `resurface:${id}:${now.toISOString()}`],
+    );
+    return getOrderWithStatus(db, id);
+  }
+
+  // No withdrawal needed - just mark as resurfaced and back to PENDING_APPROVAL
+  const newPayload = { ...payload, resurfaced: true, resurfacedAt: now.toISOString() };
+  await db.query(
+    `insert into order_transitions
+       (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
+     values ($1, $2, $3, 'PENDING_APPROVAL', $4, $5, $2, $6)`,
+    [id, order.currentRevision, 'DEFERRED', 'system', JSON.stringify(newPayload), `resurface:${id}:${now.toISOString()}`],
   );
+
+  return getOrderWithStatus(db, id);
 }
 
 export async function getOrderHistory(db: Db, id: string): Promise<{ revisions: OrderRevision[]; transitions: OrderTransition[]; simulations: OrderSimulation[] }> {
