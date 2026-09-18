@@ -346,7 +346,7 @@ function generateDashboardHtml(d: DigestInput): string {
       <div class="section-header"><h2>Your Rails (Not IPS)</h2></div>
       <div class="card">
         <ul style="list-style: none;">
-          ${d.railBreaches.map(b => `<li style="margin: 0.5rem 0; padding: 0.75rem; background: var(--red-bg); border: 1px solid var(--red); border-radius: 0.5rem; color: var(--red);">⚠️ ${escapeMarkdown(b.message)}</li>`).join('')}
+          ${d.railBreaches.map(b => `<li style="margin: 0.5rem 0; padding: 0.75rem; background: var(--red-bg); border: 1px solid var(--red); border-radius: 0.5rem; color: var(--red);">⚠️ ${escapeMarkdown(b.detail)}</li>`).join('')}
         </ul>
       </div>
     </div>

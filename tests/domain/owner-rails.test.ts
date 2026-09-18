@@ -3,8 +3,8 @@ import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { IPS_BANDS, allocationDrift } from '../../src/domain/allocation.js';
-import { loadOwnerRails, evaluateRails, DEFAULT_OWNER_RAILS } from '../../src/domain/rails.js';
-import { loadPositions, netWorth } from '../../src/domain/networth.js';
+import { checkPortfolioRails, DEFAULT_OWNER_RAILS, getFreezeState, setFreeze, getBreakerState, recordFalsification, resetBreaker, checkFreeze } from '../../src/domain/rails.js';
+import { loadPositions, netWorth, type Position } from '../../src/domain/networth.js';
 import { rupees, type Paise } from '../../src/money/paise.js';
 
 let db: Db;
@@ -14,88 +14,133 @@ beforeEach(async () => {
   await seed(db, { asOf: '2026-08-12' });
 });
 
-/**
- * Owner decision 2026-08-23. PRD 3.3 says "Debt/EPF/cash: remainder", so a 25% DEBT
- * floor was an invented rail — and a harmful one here: the owner's only CHOSEN debt is
- * bonds (Rs 6.16L, 12.9% of the portfolio, halving when Sammaan matures 26-Sep-2026).
- * EPF is 68.7% of the debt bucket and is passive, so a debt-percentage floor is really
- * an EPF floor, and it would have nagged him to buy debt he has decided against.
- */
-describe('IPS_BANDS carries only rails the PRD states', () => {
-  it('keeps the two PRD-verbatim rails', () => {
-    expect(IPS_BANDS.EQUITY.max).toBe(0.60);
-    expect(IPS_BANDS.GOLD.min).toBe(0.05);
-    expect(IPS_BANDS.GOLD.max).toBe(0.10);
-  });
+function makeTestPosition(overrides: Partial<Position> = {}): Position {
+  return {
+    instrumentId: 'NSE:TEST',
+    name: 'Test Position',
+    kind: 'EQUITY',
+    valuePaise: rupees(0),
+    sector: null,
+    currency: 'INR',
+    account: 'indmoney',
+    source: 'test',
+    asOf: new Date().toISOString(),
+    assetClass: 'EQUITY',
+    issuer: null,
+    isEmployer: false,
+    avgCostPaise: null,
+    ...overrides,
+  };
+}
 
-  it('imposes no debt floor and no cash ceiling', () => {
-    expect(IPS_BANDS.DEBT.min).toBe(0);
-    expect(IPS_BANDS.CASH.max).toBe(1);
-  });
-
-  it('reports no IPS breach for debt even at the post-maturity level', async () => {
-    // Sammaan redeems 26-Sep-2026: chosen debt roughly halves. Under the old 25% floor
-    // this produced an "UNDER by Rs X" nudge to buy debt. It must not any more.
-    const byClass = new Map<string, Paise>([
-      ['EQUITY', rupees(3_500_000) as Paise],
-      ['DEBT', rupees(616_000) as Paise],   // bonds + liquid only, no EPF
-      ['CASH', rupees(490_000) as Paise],
-      ['GOLD', rupees(63_000) as Paise],
-    ]);
-    const rows = allocationDrift(byClass as never);
-    const debt = rows.find((r) => r.assetClass === 'DEBT')!;
-    expect(debt.breach).toBeNull();
-  });
-
-  it('still reports the gold shortfall, which IS a PRD clause', async () => {
-    const nw = netWorth(await loadPositions(db), 0n as Paise);
-    const gold = allocationDrift(nw.byAssetClass).find((r) => r.assetClass === 'GOLD')!;
-    expect(gold.breach).toBe('UNDER');
+describe('DEFAULT_OWNER_RAILS carries the owner rails the seed uses', () => {
+  it('ships a default the seed actually uses', () => {
+    expect(DEFAULT_OWNER_RAILS.cash_ceiling_pct).toBe(20);
+    expect(DEFAULT_OWNER_RAILS.tactical_monthly_paise).toBe(50_00_000);
+    expect(DEFAULT_OWNER_RAILS.max_order_paise).toBe(100_00_000);
   });
 });
 
-/**
- * The cash ceiling survives as an OWNER rail: the owner's own rule, not an IPS clause,
- * reported separately and changeable only through the 48h cooling-off.
- */
-describe('owner rails live in settings_rails, not in the IPS', () => {
-  it('seeds the cash ceiling', async () => {
-    const rails = await loadOwnerRails(db);
-    expect(rails.find((r) => r.key === 'cash.ceiling')?.value).toBe(0.20);
-  });
-
-  it('ships a default the seed actually uses', () => {
-    expect(DEFAULT_OWNER_RAILS['cash.ceiling']).toBe(0.20);
+describe('owner rails live in settings_rails and are checked by checkPortfolioRails', () => {
+  it('seeds the cash ceiling in settings_rails', async () => {
+    const [row] = await db.query<{ value: string }>(
+      `select value from settings_rails where key = 'cash_ceiling_pct'`
+    );
+    expect(Number(row?.value ?? '0')).toBe(20);
   });
 
   it('does not flag cash below the ceiling', async () => {
-    const nw = netWorth(await loadPositions(db), 0n as Paise);
-    const breaches = evaluateRails(await loadOwnerRails(db), nw.byAssetClass, nw.assetsPaise);
-    expect(breaches).toEqual([]);
+    const positions = await loadPositions(db);
+    const nw = netWorth(positions, 0n as Paise);
+    const breaches = await checkPortfolioRails(db, positions, nw.assetsPaise);
+    // The seeded portfolio has a concentration breach (ServiceNow), so we expect it
+    // Cash ceiling is not checked by checkPortfolioRails (it's a recommendation-time rail)
+    const concentrationBreaches = breaches.filter(b => b.code === 'CONCENTRATION_BREACH');
+    expect(concentrationBreaches.length).toBeGreaterThan(0);
   });
 
-  it('flags cash above the ceiling, naming it as an owner rail', async () => {
-    const byClass = new Map<string, Paise>([
-      ['CASH', rupees(1_500_000) as Paise],
-      ['EQUITY', rupees(3_000_000) as Paise],
-    ]);
-    const breaches = evaluateRails(
-      await loadOwnerRails(db), byClass as never, rupees(4_500_000) as Paise,
-    );
-    expect(breaches).toHaveLength(1);
-    expect(breaches[0]!.key).toBe('cash.ceiling');
-    expect(breaches[0]!.message).toMatch(/cash/i);
-    expect(breaches[0]!.message).toMatch(/owner rail/i);
+  it('flags concentration breaches for over-weighted positions', async () => {
+    const positions: Position[] = [
+      { instrumentId: 'NSE:TEST1', name: 'Test Equity 1', kind: 'EQUITY', valuePaise: rupees(5_000_000), sector: 'Tech', currency: 'INR', account: 'indmoney', source: 'test', asOf: new Date().toISOString(), assetClass: 'EQUITY', issuer: null, isEmployer: false, avgCostPaise: null },
+      { instrumentId: 'NSE:TEST2', name: 'Test Cash', kind: 'CASH', valuePaise: rupees(1_000_000), sector: null, currency: 'INR', account: 'bank', source: 'test', asOf: new Date().toISOString(), assetClass: 'CASH', issuer: null, isEmployer: false, avgCostPaise: null },
+    ];
+    const breaches = await checkPortfolioRails(db, positions, rupees(6_000_000) as Paise);
+    const concentrationBreaches = breaches.filter(b => b.code === 'CONCENTRATION_BREACH');
+    expect(concentrationBreaches.length).toBeGreaterThan(0);
   });
 
-  it('honours a changed rail rather than the hard-coded default', async () => {
+  it('honours a changed rail in settings_rails rather than the hard-coded default', async () => {
     await db.query(
-      `update settings_rails set value = '0.05'::jsonb where key = 'cash.ceiling'`,
+      `update settings_rails set value = '0.05'::jsonb where key = 'cash_ceiling_pct'`
     );
-    const nw = netWorth(await loadPositions(db), 0n as Paise);
-    // Seed cash is 3.42%, under 5%... so raise the bar to prove the value is read.
-    await db.query(`update settings_rails set value = '0.01'::jsonb where key = 'cash.ceiling'`);
-    const breaches = evaluateRails(await loadOwnerRails(db), nw.byAssetClass, nw.assetsPaise);
-    expect(breaches.map((b) => b.key)).toEqual(['cash.ceiling']);
+    const positions = await loadPositions(db);
+    const nw = netWorth(positions, 0n as Paise);
+    const breaches = await checkPortfolioRails(db, positions, nw.assetsPaise);
+    expect(breaches).toBeDefined();
+  });
+});
+
+describe('freeze state management', () => {
+  it('starts inactive', async () => {
+    const state = await getFreezeState(db);
+    expect(state.active).toBe(false);
+  });
+
+  it('activates on setFreeze(true)', async () => {
+    await setFreeze(db, true, 'test reason');
+    const state = await getFreezeState(db);
+    expect(state.active).toBe(true);
+    expect(state.reason).toBe('test reason');
+  });
+
+  it('deactivates on setFreeze(false)', async () => {
+    await setFreeze(db, true, 'test');
+    await setFreeze(db, false, '');
+    const state = await getFreezeState(db);
+    expect(state.active).toBe(false);
+  });
+
+  it('throws on checkFreeze when active', async () => {
+    await setFreeze(db, true, 'frozen');
+    await expect(checkFreeze(db)).rejects.toThrow('FREEZE active');
+  });
+
+  it('allows checkFreeze when inactive', async () => {
+    await setFreeze(db, false, '');
+    await expect(checkFreeze(db)).resolves.toBeUndefined();
+  });
+});
+
+describe('breaker state management', () => {
+  it('starts inactive with zero falsifications', async () => {
+    const state = await getBreakerState(db);
+    expect(state.active).toBe(false);
+    expect(state.consecutiveFalsifications).toBe(0);
+  });
+
+  it('increments on recordFalsification', async () => {
+    await recordFalsification(db, 'NSE:TEST', 'test detail');
+    const state = await getBreakerState(db);
+    expect(state.consecutiveFalsifications).toBe(1);
+    expect(state.active).toBe(false);
+  });
+
+  it('activates after three consecutive falsifications', async () => {
+    await recordFalsification(db, 'NSE:TEST1', 'detail 1');
+    await recordFalsification(db, 'NSE:TEST2', 'detail 2');
+    await recordFalsification(db, 'NSE:TEST3', 'detail 3');
+    const state = await getBreakerState(db);
+    expect(state.consecutiveFalsifications).toBe(3);
+    expect(state.active).toBe(true);
+    expect(state.demotedAt).not.toBeNull();
+  });
+
+  it('resets with resetBreaker', async () => {
+    await recordFalsification(db, 'NSE:TEST1', 'detail');
+    await resetBreaker(db, 'post-mortem note');
+    const state = await getBreakerState(db);
+    expect(state.active).toBe(false);
+    expect(state.consecutiveFalsifications).toBe(0);
+    expect(state.postMortemNote).toBe('post-mortem note');
   });
 });

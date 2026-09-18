@@ -1,6 +1,6 @@
 import type { Db } from '../db/client.js';
 import { allocationDrift, concentration, type DriftRow } from '../domain/allocation.js';
-import { evaluateRails, loadOwnerRails, type RailBreach } from '../domain/rails.js';
+import { checkRails, checkPortfolioRails, type RailViolation } from '../domain/rails.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../domain/buckets.js';
 import { fundedStatus } from '../domain/funded-status.js';
 import { escapeMarkdown } from './telegram.js';
@@ -24,7 +24,7 @@ export interface DigestInput {
   drift: DriftRow[];
   breaches: string[];
   /** Owner's own rules. Reported apart from IPS breaches — he can change these. */
-  railBreaches: RailBreach[];
+  railBreaches: { code: string; detail: string }[];
   buckets: BucketStatus[];
   milestones: MilestoneStatus[];
   staleness: StalenessRow[];
@@ -181,7 +181,7 @@ export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInp
     byAccount: [...nw.byAccount.entries()],
     drift: allocationDrift(nw.byAssetClass, nw.assetsPaise),
     breaches: concentration(positions).breaches,
-    railBreaches: evaluateRails(await loadOwnerRails(db), nw.byAssetClass, nw.assetsPaise),
+    railBreaches: await checkPortfolioRails(db, positions, nw.assetsPaise),
     buckets: await bucketStatuses(db),
     milestones: await milestoneStatuses(db, businessDate),
     staleness: await assessStaleness(db, now),
@@ -234,7 +234,7 @@ export function composeDigest(d: DigestInput): string {
     // he is entitled to change these, and the IPS he is held to at a -20% drawdown
     // is not something he can change in a drawdown.
     lines.push('*Your own rails (not IPS)*');
-    for (const b of d.railBreaches) lines.push(`• ⚠️ ${escapeMarkdown(b.message)}`);
+    for (const b of d.railBreaches) lines.push(`• ⚠️ ${escapeMarkdown(b.detail)}`);
     lines.push('');
   }
 
