@@ -63,6 +63,9 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/jobs/backfill-isin.ts` | CLI — `pnpm backfill:isin`. Downloads the whole-market master (`EQUITY_L.csv`) and runs `backfillInstrumentIsins` (fill-only, never clobbers a seeded ISIN) |
 | `src/jobs/ips.ts` | CLI entrypoint — `pnpm ips <clause>` prints the requested IPS clause verbatim |
 | `src/jobs/cleanup.ts` | CLI entrypoint — `pnpm cleanup`. Generates paper cleanup recommendations (smallcase termination, micro-orphans, thesis-less consolidation, Groww RPOWER manual closure, bond credit review, Sammaan maturity routing, LTCG harvest calendar) and persists as FR-11 paper recommendations. Loads `[]` env (DATABASE_URL only) |
+| `src/jobs/schedule.ts` | CLI entrypoint — `pnpm schedule`. Daily scheduled tasks: expire orders past expiry, resurface deferred orders, record T+2/T+7 advisory reminders. All idempotent via idempotency keys. Loads `[]` env |
+| `src/jobs/backup.ts` | CLI entrypoint — `pnpm backup`. Weekly encrypted pg_dump to private GitHub repo; AES-256-GCM with random IV+auth tag; git push to backup branch. Loads `['crypto']` env |
+| `src/jobs/backup-restore.ts` | CLI entrypoint — `pnpm backup:restore <file> [--target-db <url>]`. Decrypts, decompresses, pipes to psql; verifies table counts, immutability triggers, RLS. Loads `['crypto']` env |
 
 
 ## Web app (`web/` — Next.js 15, pulled forward 2026-09-05)

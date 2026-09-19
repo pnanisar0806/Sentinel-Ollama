@@ -389,7 +389,7 @@ export const ORDER_LIKE_PATTERNS = [
   /submit[_A-Z]?order/i,
   /\bmodify_order\b/i,
   /\bcancel_order\b/i,
-  /\/orders\b/,
+  /\/orders(\/|\?|$)/i,
   /\bgtt\b/i,
 ];
 

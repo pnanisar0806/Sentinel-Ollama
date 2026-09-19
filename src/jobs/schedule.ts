@@ -1,0 +1,109 @@
+import { openDb } from '../db/client.js';
+import { runMigrations } from '../db/migrate.js';
+import { loadEnv, type Purpose } from '../config/env.js';
+import { installIps } from '../domain/ips.js';
+import { expireOrders, resurfaceDeferredOrder, recordAdvisoryReminder, getPendingApprovals } from '../domain/orders.js';
+import { isMainModule } from '../util/main-module.js';
+
+/** This job processes scheduled tasks; it needs DATABASE_URL only. */
+export const ENV_PURPOSES: Purpose[] = [];
+
+if (isMainModule(import.meta.url)) {
+  const env = loadEnv(process.env, []);
+  const db = await openDb(env.databaseUrl);
+  await runMigrations(db);
+  await installIps(db);
+
+  const now = new Date().toISOString();
+  console.log(`Running scheduled tasks at ${now}...`);
+
+  // 1. Expire orders past their expiry (idempotent via idempotency key)
+  console.log('\n--- Expiring orders ---');
+  const expiredCount = await expireOrders(db, new Date());
+  console.log(`Expired ${expiredCount} order(s)`);
+
+  // 2. Resurface deferred orders whose deferUntil has passed (idempotent via idempotency key)
+  console.log('\n--- Resurfacing deferred orders ---');
+  const pending = await getPendingApprovals(db);
+  const deferred = pending.filter((o) => o.status === 'DEFERRED');
+  let resurfacedCount = 0;
+  let withdrawalCount = 0;
+  
+  for (const order of deferred) {
+    if (order.deferUntil) {
+      const deferDate = new Date(order.deferUntil);
+      if (deferDate <= new Date()) {
+        console.log(`  Resurfacing ${order.id} (deferred until ${order.deferUntil})...`);
+        const resurfaced = await resurfaceDeferredOrder(db, order.id);
+        if (resurfaced) {
+          resurfacedCount++;
+          if ((resurfaced.payloadSnapshot as Record<string, unknown>)?.withdrawalRecommended) {
+            withdrawalCount++;
+          }
+        }
+      }
+    }
+  }
+  console.log(`Resurfaced ${resurfacedCount} deferred order(s), ${withdrawalCount} withdrawal(s) recommended`);
+
+  // 3. Record T+2/T+7 advisory reminders for advisory orders in AWAITING_MANUAL_EXECUTION
+  console.log('\n--- Recording advisory reminders (T+2/T+7) ---');
+  const advisoryOrders = pending.filter((o) => 
+    o.advisoryPath && o.status === 'AWAITING_MANUAL_EXECUTION'
+  );
+  let t2Count = 0;
+  let t7Count = 0;
+  
+  for (const order of advisoryOrders) {
+    // T+2 reminder: 2 days after AWAITING_MANUAL_EXECUTION transition
+    // T+7 reminder: 7 days after AWAITING_MANUAL_EXECUTION transition
+    // Find the transition to AWAITING_MANUAL_EXECUTION
+    const [transition] = await db.query<{ at: string | Date }>(
+      `select at from order_transitions 
+       where order_intent_id = $1 and to_status = 'AWAITING_MANUAL_EXECUTION' 
+       order by at desc limit 1`,
+      [order.id],
+    );
+    
+    if (transition) {
+      const awaitingDate = transition.at instanceof Date ? transition.at : new Date(transition.at as string);
+      const nowDate = new Date();
+      const daysDiff = Math.floor((nowDate.getTime() - awaitingDate.getTime()) / (1000 * 60 * 60 * 24));
+      
+      // Check if T+2 or T+7 reminder already recorded
+      const [t2] = await db.query<{ count: string }>(
+        `select count(*) as count from order_simulations 
+         where order_intent_id = $1 and sim_type = 'T2_REMINDER'`,
+        [order.id],
+      );
+      const [t7] = await db.query<{ count: string }>(
+        `select count(*) as count from order_simulations 
+         where order_intent_id = $1 and sim_type = 'T7_REMINDER'`,
+        [order.id],
+      );
+      
+      const t2Sent = Number(t2?.count ?? '0') > 0;
+      const t7Sent = Number(t7?.count ?? '0') > 0;
+      
+      if (!t2Sent && daysDiff >= 2) {
+        await recordAdvisoryReminder(db, order.id, 'T2_REMINDER');
+        console.log(`  T2_REMINDER recorded for ${order.id} (${daysDiff} days since awaiting)`);
+        t2Count++;
+      }
+      
+      if (!t7Sent && daysDiff >= 7) {
+        await recordAdvisoryReminder(db, order.id, 'T7_REMINDER');
+        console.log(`  T7_REMINDER recorded for ${order.id} (${daysDiff} days since awaiting)`);
+        t7Count++;
+      }
+    }
+  }
+  console.log(`T+2 reminders: ${t2Count}, T+7 reminders: ${t7Count}`);
+
+  // 4. (Future) Cleanup queue monthly refresh - run on first trading day ~10:00 IST
+  // This would call generateCleanupRecommendations and persist new paper recommendations
+  // Skipped for now - cleanup is a standing queue refreshed on demand via `pnpm cleanup`
+
+  console.log('\n--- Scheduled tasks complete ---');
+  await db.close();
+}

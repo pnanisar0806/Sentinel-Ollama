@@ -1,0 +1,30 @@
+name: Weekly backup
+
+on:
+  schedule:
+    # Weekly Sunday 05:30 UTC = 11:00 IST
+    - cron: '30 5 * * 0'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+      BACKUP_REPO: ${{ secrets.BACKUP_REPO }}
+      BACKUP_BRANCH: ${{ secrets.BACKUP_BRANCH }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx --env-file-if-exists=.env src/jobs/backup.ts

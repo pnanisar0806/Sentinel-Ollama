@@ -68,6 +68,16 @@
 - Navigation updated: Governance group now includes Approvals and Cleanup
 - All 687 tests pass, tsc clean
 
+## 2026-09-19 (Phase 2 Task 5 — Paper scheduling, scoring and backup/restore proof)
+
+- src/jobs/schedule.ts: expireOrders (idempotent via idempotency key), resurfaceDeferredOrder (checks deferUntil, re-validates rails, checks composite score for withdrawal), T+2/T+7 advisory reminders via recordAdvisoryReminder (simulates T2_REMINDER/T7_REMINDER paper events; idempotent via existing simulation check)
+- .github/workflows/schedule.yml: daily at 10:00 IST (04:30 UTC), runs after overnight batch, before market hours
+- src/jobs/backup.ts: weekly encrypted pg_dump to private GitHub repo; AES-256-GCM encryption with random IV + auth tag; git push to backup repo branch
+- src/jobs/backup-restore.ts: restore verification script; decrypts, decompresses, pipes to psql; verifies table counts, immutability triggers, RLS
+- .github/workflows/backup.yml: weekly Sun 11:00 IST (05:30 UTC)
+- ORDER_LIKE_PATTERNS regex updated to `\/orders(\/|\?|$)` to avoid false positives on import paths like `../domain/orders.js`
+- All 689 tests pass, tsc clean
+
 ## 2026-09-17 (Phase 2 planning)
 
 - Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2

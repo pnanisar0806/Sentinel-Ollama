@@ -5,6 +5,9 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **PHASE 2 TASK 5 COMPLETE (2026-09-19): Paper scheduling, scoring and backup/restore proof.**
+      Implemented: src/jobs/schedule.ts (expireOrders, resurfaceDeferredOrder, T+2/T+7 advisory reminders via recordAdvisoryReminder; all idempotent via idempotency keys). .github/workflows/schedule.yml (daily 10:00 IST). src/jobs/backup.ts + backup-restore.ts (weekly encrypted pg_dump to private GitHub repo via AES-256-GCM, git push to backup repo, restore verification script). .github/workflows/backup.yml (weekly Sun 11:00 IST). Updated ORDER_LIKE_PATTERNS regex to avoid false positives on import paths. All 689 tests pass, tsc clean.
+
 - [x] **PHASE 2 TASK 4 COMPLETE (2026-09-19): Web approval/cleanup/rail surfaces.**
       Implemented: /approvals page with pending queue and detail view (immutable history, paper simulations, payload snapshot); actions: Approve/Reject/Defer, plus advisory Await execution/Verify/Abandon. /cleanup page with freeze/breaker state, rail cooling countdown, drawdown, bond maturities (60-day horizon), sell trigger candidates, LTCG harvest notice. API routes at /api/approvals/[id]/{approve,reject,defer,await-exec,verify,abandon} mirroring Telegram bot flow with append-only transitions and audit_log. Navigation updated. All 687 tests pass, tsc clean.
 

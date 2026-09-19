@@ -1,0 +1,28 @@
+name: Daily schedule
+
+on:
+  schedule:
+    # Daily at 10:00 IST = 04:30 UTC
+    # Runs after overnight batch processing but before market hours
+    - cron: '30 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  schedule:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec tsx --env-file-if-exists=.env src/jobs/schedule.ts
