@@ -705,3 +705,28 @@ is 10.7% of today's ₹55.97L base — a fully-funded emergency fund trips this 
 portfolio grows past ~₹60L or B3 is excluded from the ceiling's base. FR-34's 48-hour
 cooling-off was not applied, because `checkRailCooling` blocks every recommendation while
 it runs. Both are owner items in PENDING.md.
+
+## Cash ceiling, round 2 — B3 excluded; migration applied — 2026-09-19
+
+Owner's answer to the B3 collision flagged above: exclude the emergency fund from the
+measured cash. `checkCashCeiling` subtracts `sum(amount_paise)` over `bucket_flows` for
+B3 before comparing to the rail, clamped at zero. Only the funded balance is excused,
+never the ₹6L target — a test asserts that a ₹40k B3 does not excuse a ₹1.5L cash pile.
+B3 is unfunded today, so this subtracts nothing yet.
+
+`bucket_flows` is queried directly rather than through `buckets.ts`, which re-exports the
+reporting-only FI metric. The Task 10 architecture test went red on the first attempt —
+not on an import, but on the identifier appearing in the new doc comment. The guard is
+stricter than the import graph by design, so the comment was reworded rather than the
+test. 692 → 695 tests.
+
+`0018_cash_ceiling_rail.sql` applied to Supabase (`pnpm migrate`): `cash_ceiling_pct = 10`
+in, legacy `cash.ceiling = 0.2` out. That surfaced a unit bug on /rails — every rail went
+through `<Pct>`, which multiplies by 100, so the percent-valued key rendered as 1000.0%
+where the old fraction-valued one rendered 20.0%. The page now formats by the key's unit
+suffix (`_pct` percent, `_paise` through `rupees()`), which also keeps the paise rails
+legible when the remaining seven are wired up.
+
+Verified: 695 tests, tsc clean at root and in web/, `next start` against Supabase serves
+every page 200 with no server errors, /rails shows `cash_ceiling_pct 10%` and no
+CASH_CEILING breach (live cash 7.31%, B3 unfunded).

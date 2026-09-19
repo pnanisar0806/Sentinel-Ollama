@@ -42,8 +42,17 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
   Owner set 10% on 2026-09-19; §3.3 and `src/config/ips-v1.ts` now carry the clause
   byte-identically (`ips-verbatim` fails if they drift) and `installIps` will write IPS v2.
   CASH is `classify()`'s CASH class only — bank balances; EPF, bonds and liquid/debt funds
-  are DEBT. Ceiling inclusive. **B3 breaches it when funded**: ₹6L of bank deposits due
-  Dec 2026 is 10.7% of today's ₹55.97L base.
+  are DEBT. Ceiling inclusive. **The funded B3 balance is subtracted before measuring**
+  (owner decision, same day): holding the emergency fund the IPS mandates is compliance,
+  not idleness, and ₹6L is 10.7% of the ₹55.97L base. Only the balance in `bucket_flows`
+  is excused, never the target — B3 is unfunded today, so it subtracts nothing yet.
+  `bucket_flows` is read directly: `buckets.ts` re-exports the reporting-only FI metric
+  and the Task 10 architecture test refuses a risk function any path to it, **including
+  the identifier appearing in a comment**.
+- **`settings_rails` keys carry their unit in the name.** `_pct` is a percent (10),
+  `_paise` is money; the retired `cash.ceiling` was a bare fraction (0.2). The /rails page
+  formats by suffix — it used to push everything through `<Pct>` (×100) and printed the
+  new rail as 1000.0%.
 - **`getRails` filters `settings_rails` to scalar values** rather than to a key list —
   whatever rows the DB has, show them. `0018_cash_ceiling_rail.sql` reconciles the legacy
   dotted-and-fraction `cash.ceiling = 0.2` key into `cash_ceiling_pct = 10`.

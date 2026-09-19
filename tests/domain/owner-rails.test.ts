@@ -103,6 +103,37 @@ describe('owner rails live in settings_rails and are checked by checkPortfolioRa
     expect(breaches.filter((b) => b.code === 'CASH_CEILING')).toHaveLength(0);
   });
 
+  /** The ceiling measures IDLE cash. B3 is the emergency fund the owner is required to
+   *  hold in bank deposits, so holding it is compliance, not idleness. Only the balance
+   *  actually in B3 is excused — never the ₹6L target, which would excuse cash for a
+   *  fund that does not exist yet. */
+  const fundB3 = (rupeesAmount: number) =>
+    db.query(
+      `insert into bucket_flows (bucket_id, occurred_on, amount_paise, kind, note, as_of, source)
+       values ('B3', '2026-09-19', $1, 'seed', 'test', now(), 'test')`,
+      [String(rupeesAmount * 100)],
+    );
+
+  it('excludes the funded B3 balance from the cash measured against the ceiling', async () => {
+    const positions = cashAnd(150_000, 850_000); // 15% cash, over the 10% ceiling
+    expect(await cashBreaches(positions)).toHaveLength(1);
+
+    await fundB3(60_000); // 6% of the base is emergency fund -> 9% idle, under the cap
+    expect(await cashBreaches(positions)).toHaveLength(0);
+  });
+
+  it('excuses only the funded balance, not the B3 target', async () => {
+    // B3's target is ₹6L but only ₹40k is in it. 15% cash - 4% funded = 11% idle.
+    await fundB3(40_000);
+    expect(await cashBreaches(cashAnd(150_000, 850_000))).toHaveLength(1);
+  });
+
+  it('clamps at zero when B3 exceeds cash rather than going negative', async () => {
+    await fundB3(500_000);
+    const breaches = await cashBreaches(cashAnd(150_000, 850_000));
+    expect(breaches).toHaveLength(0);
+  });
+
   it('honours a changed rail in settings_rails rather than the hard-coded default', async () => {
     const positions = cashAnd(70_000, 930_000); // 7% cash: under the 10% default
     expect(await cashBreaches(positions)).toHaveLength(0);

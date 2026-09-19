@@ -304,11 +304,24 @@ export async function checkPortfolioRails(
 }
 
 /**
- * PRD 3.3: idle cash is capped at a share of total investable assets. The owner set it
+ * PRD 3.3: IDLE cash is capped at a share of total investable assets. The owner set it
  * to 10% on 2026-09-19; the PRD had left cash unbounded as part of the "remainder".
  *
  * "Cash" is `classify()`'s CASH class and nothing else -- bank balances. EPF, bonds and
  * liquid/debt funds are DEBT and are not idle cash, so they do not count here.
+ *
+ * The **funded B3 balance is subtracted first**. B3 is the emergency fund the IPS
+ * requires the owner to hold in bank deposits (AU SFB, then IDFC First, split beyond 5L
+ * for DICGC cover), so holding it is compliance, not idleness -- and its 6,00,000 target
+ * is 10.7% of the 2026-09-19 portfolio, which would breach a 10% ceiling the day it
+ * completed. Only the balance ACTUALLY in `bucket_flows` is excused: excusing the target
+ * would exempt 6L of genuinely idle cash for a fund that does not exist yet. As of
+ * 2026-09-19 B3 is unfunded, so this subtracts nothing.
+ *
+ * `bucket_flows` is queried directly rather than through `buckets.ts`. That module
+ * re-exports the reporting-only FI-progress metric, and a sizing or risk function may not
+ * reach it, transitively or otherwise. The Task 10 architecture test enforces that, and
+ * it refuses the identifier in a comment too -- which is how this note got reworded.
  *
  * The rail is read from `settings_rails` per PRD 11 ("all rails live in settings_rails"),
  * falling back to DEFAULT_OWNER_RAILS when the row is absent. Ceiling is inclusive.
@@ -330,12 +343,20 @@ async function checkCashCeiling(
   for (const p of positions) {
     if (p.assetClass === 'CASH') cash += p.valuePaise;
   }
-  const actualPct = (Number(cash) / Number(totalAssets)) * 100;
+
+  const [b3Row] = await db.query<{ balance: string | number | null }>(
+    `select sum(amount_paise) as balance from bucket_flows where bucket_id = 'B3'`,
+  );
+  const b3 = b3Row?.balance == null ? 0n : BigInt(b3Row.balance);
+  const idle = cash > b3 ? cash - b3 : 0n;
+
+  const actualPct = (Number(idle) / Number(totalAssets)) * 100;
   if (actualPct <= capPct) return null;
 
+  const excused = b3 > 0n ? ` after excluding the B3 emergency fund (${formatInr(paise(b3))})` : '';
   return {
     code: 'CASH_CEILING',
-    detail: `Cash ceiling: ${actualPct.toFixed(1)}% of assets in idle cash (cap ${capPct}%)`,
+    detail: `Cash ceiling: ${actualPct.toFixed(1)}% of assets in idle cash${excused} (cap ${capPct}%)`,
   };
 }
 

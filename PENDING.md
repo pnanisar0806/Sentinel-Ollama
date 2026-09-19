@@ -39,10 +39,12 @@ MEMORY.md; the code map lives in index.md.
       bonds and liquid funds do not count. Live cash is 7.31% (₹4,09,349 of ₹55,96,653),
       so no breach today. 692 tests.
 
-- [ ] **RUN `pnpm migrate` AGAINST SUPABASE for `0018_cash_ceiling_rail.sql`.** It inserts
-      `cash_ceiling_pct = 10` and **deletes** the legacy `cash.ceiling = 0.2` row. Not run
-      from here — it removes a row from the production DB. Until it runs, enforcement is
-      already correct (the fallback is 10) but /rails still displays the stale 20% row.
+- [x] **`0018_cash_ceiling_rail.sql` APPLIED TO SUPABASE (2026-09-19).** `cash_ceiling_pct
+      = 10` inserted, legacy `cash.ceiling = 0.2` deleted. Verified through /rails, which
+      now lists the new key. The migration exposed a unit bug: the page rendered every
+      rail through `<Pct>` (×100), so the percent-valued key printed as **1000.0%** where
+      the old fraction-valued one printed 20.0%. The page now formats by the key's unit
+      suffix — `_pct` as a percent, `_paise` through `rupees()`.
 
 - [ ] **FR-34 48-hour cooling-off was NOT applied to this rail change.** The PRD says rail
       edits take effect after 48 hours. This one ships in code and takes effect on deploy.
@@ -50,12 +52,16 @@ MEMORY.md; the code map lives in index.md.
       `checkRailCooling` returns COOLING_NOT_ELAPSED, which blocks *every* recommendation
       for those 48 hours — not what was asked for. Owner's call whether to backfill it.
 
-- [ ] **B3 WILL BREACH THE 10% CEILING WHEN IT COMPLETES.** B3 (emergency fund) targets
-      ₹6,00,000 in bank deposits, due Dec 2026 via the Sammaan maturity (~₹3.1L) and the
-      Nov-2026 vest (~₹2.1L). That is 10.7% of today's ₹55.97L base on its own, so a
-      fully-funded emergency fund trips CASH_CEILING unless the portfolio grows past
-      ~₹60L first, or B3's balance is excluded from the ceiling's base. Flagged before the
-      decision; the owner chose 10% anyway. Revisit when B3 funds.
+- [x] **B3 IS EXCLUDED FROM THE CASH CEILING (owner decision 2026-09-19).**
+      `checkCashCeiling` subtracts the funded B3 balance (`sum(amount_paise)` over
+      `bucket_flows`) before measuring. Only the balance actually in B3 is excused, never
+      its ₹6L target — excusing the target would exempt ₹6L of genuinely idle cash for a
+      fund that does not exist. **B3 is unfunded today, so this subtracts nothing**; it
+      starts mattering as the Sammaan maturity and Nov-2026 vest land. Clamped at zero if
+      B3 ever exceeds cash. `bucket_flows` is queried directly, not through `buckets.ts`
+      — that module re-exports the reporting-only FI metric and the Task 10 architecture
+      test refuses it to a risk function. The test caught the identifier in a code
+      *comment*, which is the guard working as designed.
 
 - [ ] **THE OTHER SEVEN OWNER RAILS ARE STILL CONSTANTS IN CODE.** PRD §11 says “all rails
       live in `settings_rails`”. Only `cash_ceiling_pct` does. `checkRails` and
