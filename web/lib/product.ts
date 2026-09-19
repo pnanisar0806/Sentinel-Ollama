@@ -55,8 +55,11 @@ export const AREAS: Area[] = [
     name: 'Owner rails',
     stage: 'live',
     what: 'The owner\u2019s own rules, reported separately from IPS clauses.',
-    works: ['cash.ceiling at 20%', 'Breach messages'],
-    missing: ['More rail types as the owner defines them'],
+    works: ['Cash ceiling at 10% (PRD §3.3, read from settings_rails)', 'Breach messages'],
+    missing: [
+      'The other seven owner rails are constants in code, not read from settings_rails',
+      'More rail types as the owner defines them',
+    ],
   },
   {
     slug: 'rsu',

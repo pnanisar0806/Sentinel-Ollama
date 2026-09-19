@@ -143,6 +143,7 @@ Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constr
 - Equity ceiling ~60% of total investable assets (calibrated so a 2008-grade equity crash ≈ −25 to −30% portfolio drawdown).
 - Gold: 5–10% band (via existing Zerodha Gold ETF; gold fund-of-fund on Coin acceptable for SIP automation).
 - Debt/EPF/cash: remainder; EPF counts as debt-like.
+- Cash ceiling: ≤10% of total investable assets — bank balances only; EPF, bonds and liquid/debt funds count as debt, not cash. Idle cash above the ceiling is uninvested capital and must be deployed or routed to B3.
 - B2 (house fund): 100% capital-preservation instruments once seeded.
 
 ## 3.4 Equity structure: core–satellite 75/25

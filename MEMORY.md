@@ -29,16 +29,27 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 - **Every page and route handler carries `export const dynamic = 'force-dynamic'`**, so
   `next build` never opens a DB connection. Verify a web change with `DATABASE_URL= pnpm
   --dir web build` (must pass with the var *empty*) and then `next start` against Supabase.
-- **Owner rails are written and never read.** `DEFAULT_OWNER_RAILS` is imported by
-  `seed.ts` alone. `checkRails` and `checkPortfolioRails` enforce hard-coded
-  `100_00_000n` / `50_00_000n` literals and `CAPS` from `src/domain/allocation.ts`; there
-  is no `CASH_CEILING` violation code, so the cash ceiling is not enforced at all. The
-  production DB holds only the legacy `cash.ceiling = 0.2` while `seed.ts` writes eight
-  differently-named keys (`cash_ceiling_pct = 20`, …), so the two never meet.
-  `tests/domain/owner-rails.test.ts` claims the opposite in a test whose only assertion is
-  `expect(breaches).toBeDefined()`. `getRails` therefore filters `settings_rails` to scalar
-  values rather than to a key list — whatever rows the DB actually has, show them. Owner
-  true-up before Phase 3: either the engine reads the table, or the table stops pretending.
+- **One owner rail is read from the DB; the other seven are constants.** PRD §11 says
+  “all rails live in `settings_rails`”. As of 2026-09-19 only `cash_ceiling_pct` does —
+  `checkCashCeiling` reads it, falling back to `DEFAULT_OWNER_RAILS`. `checkRails` and the
+  rest of `checkPortfolioRails` still enforce hard-coded `100_00_000n` / `50_00_000n` and
+  `CAPS` from `src/domain/allocation.ts`, and `DEFAULT_OWNER_RAILS` is otherwise imported
+  by `seed.ts` alone. **Four seeded values contradict the PRD** — `employer_cap_pct` 25 vs
+  10, `mf_scheme_cap_pct` 10 vs 35, `sector_cap_pct` 20 vs 25, `issuer_cap_pct` 15 vs 10 —
+  so wiring the rest to the table means fixing those first, not copying constants across.
+- **The cash ceiling is 10%, and it is an owner amendment, not a PRD original.** The PRD
+  gave no cash number (§3.3: “Debt/EPF/cash: remainder”); the seeded 20% was invented.
+  Owner set 10% on 2026-09-19; §3.3 and `src/config/ips-v1.ts` now carry the clause
+  byte-identically (`ips-verbatim` fails if they drift) and `installIps` will write IPS v2.
+  CASH is `classify()`'s CASH class only — bank balances; EPF, bonds and liquid/debt funds
+  are DEBT. Ceiling inclusive. **B3 breaches it when funded**: ₹6L of bank deposits due
+  Dec 2026 is 10.7% of today's ₹55.97L base.
+- **`getRails` filters `settings_rails` to scalar values** rather than to a key list —
+  whatever rows the DB has, show them. `0018_cash_ceiling_rail.sql` reconciles the legacy
+  dotted-and-fraction `cash.ceiling = 0.2` key into `cash_ceiling_pct = 10`.
+- **`checkPortfolioRails` raises a permanent false `TACTICAL_BUDGET_EXCEEDED`** (line 281):
+  it sums the whole EQUITY/ETF/MF book's market value against the ₹50k/month flow budget.
+  A stock compared to a flow. `checkRails`'s per-order version is correct. Not yet fixed.
 
 ## Fidelity RSU flow — SHIPPED 2026-09-05 (evening)
 

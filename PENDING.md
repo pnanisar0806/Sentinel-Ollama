@@ -29,23 +29,47 @@ MEMORY.md; the code map lives in index.md.
       "Include source files outside of the Root Directory in the Build Step" enabled** —
       the app imports `../../src/**` and the build fails without it.
 
-- [ ] **OWNER TRUE-UP: owner rails are stored but never read. Three separate problems.**
-      (a) Production `settings_rails` carries only the legacy `cash.ceiling = 0.2` (plus
-      the `freeze_state` / `breaker_state` blobs). (b) `seed.ts` writes eight rails under
-      *different* names and units — `cash_ceiling_pct = 20`, `max_order_paise`,
-      `single_stock_cap_pct`, `employer_cap_pct`, `mf_scheme_cap_pct`, `sector_cap_pct`,
-      `issuer_cap_pct`, `tactical_monthly_paise` — so re-seeding would add eight rows
-      *next to* the legacy one, not reconcile with it. (c) **Nothing reads any of them.**
-      `DEFAULT_OWNER_RAILS` is imported by `seed.ts` alone; `checkRails` and
-      `checkPortfolioRails` use hard-coded `100_00_000n` / `50_00_000n` literals and the
-      `CAPS` constants in `src/domain/allocation.ts`. Editing a rail in the DB changes
-      nothing about enforcement, and there is no `CASH_CEILING` violation code at all —
-      the cash ceiling is not enforced anywhere. `tests/domain/owner-rails.test.ts`
-      “honours a changed rail in settings_rails rather than the hard-coded default”
-      asserts only `expect(breaches).toBeDefined()`, so it passes either way.
-      Owner's call: make the rails engine read `settings_rails` (and settle one naming
-      convention), or drop the table's numeric rows and state plainly that rails are
-      code constants.
+- [x] **CASH CEILING SET TO 10% AND ENFORCED (owner decision 2026-09-19).** The PRD had
+      no cash number at all — §3.3 said only “Debt/EPF/cash: remainder”, and the seeded
+      20% was invented. Owner chose 10%. `PRD_investment_agent.md` §3.3 and
+      `src/config/ips-v1.ts` both gain the clause (byte-identical, `ips-verbatim` holds
+      them together); `checkCashCeiling` in `src/domain/rails.ts` enforces it, reading
+      `cash_ceiling_pct` from `settings_rails` per PRD §11 with `DEFAULT_OWNER_RAILS` as
+      the fallback. Ceiling is inclusive; CASH is `classify()`'s CASH class only, so EPF,
+      bonds and liquid funds do not count. Live cash is 7.31% (₹4,09,349 of ₹55,96,653),
+      so no breach today. 692 tests.
+
+- [ ] **RUN `pnpm migrate` AGAINST SUPABASE for `0018_cash_ceiling_rail.sql`.** It inserts
+      `cash_ceiling_pct = 10` and **deletes** the legacy `cash.ceiling = 0.2` row. Not run
+      from here — it removes a row from the production DB. Until it runs, enforcement is
+      already correct (the fallback is 10) but /rails still displays the stale 20% row.
+
+- [ ] **FR-34 48-hour cooling-off was NOT applied to this rail change.** The PRD says rail
+      edits take effect after 48 hours. This one ships in code and takes effect on deploy.
+      Writing a `last_rail_change.cooling_until` row would have honoured it literally but
+      `checkRailCooling` returns COOLING_NOT_ELAPSED, which blocks *every* recommendation
+      for those 48 hours — not what was asked for. Owner's call whether to backfill it.
+
+- [ ] **B3 WILL BREACH THE 10% CEILING WHEN IT COMPLETES.** B3 (emergency fund) targets
+      ₹6,00,000 in bank deposits, due Dec 2026 via the Sammaan maturity (~₹3.1L) and the
+      Nov-2026 vest (~₹2.1L). That is 10.7% of today's ₹55.97L base on its own, so a
+      fully-funded emergency fund trips CASH_CEILING unless the portfolio grows past
+      ~₹60L first, or B3's balance is excluded from the ceiling's base. Flagged before the
+      decision; the owner chose 10% anyway. Revisit when B3 funds.
+
+- [ ] **THE OTHER SEVEN OWNER RAILS ARE STILL CONSTANTS IN CODE.** PRD §11 says “all rails
+      live in `settings_rails`”. Only `cash_ceiling_pct` does. `checkRails` and
+      `checkPortfolioRails` still use hard-coded `100_00_000n` / `50_00_000n` and the
+      `CAPS` constants in `src/domain/allocation.ts`, and four of the seeded values
+      contradict the PRD (`employer_cap_pct` 25 vs 10, `mf_scheme_cap_pct` 10 vs 35,
+      `sector_cap_pct` 20 vs 25, `issuer_cap_pct` 15 vs 10). Wiring them up means fixing
+      those four first — copying the constants across would loosen the employer cap.
+
+- [ ] **`checkPortfolioRails` raises a permanent false TACTICAL_BUDGET_EXCEEDED.**
+      `src/domain/rails.ts:281` sums the market value of the whole EQUITY/ETF/MF book and
+      compares that stock to the ₹50k/month flow budget, so it fires for any portfolio
+      over ₹50k — it is one of the four breaches /rails shows today, reading
+      “would exceed ₹50k/month (used: ₹0)”. The per-order check in `checkRails` is correct.
 
 - [x] **PHASE 2 TASK 6 COMPLETE (2026-09-19): Provisioning, handoff and Phase 2 acceptance.**
       Updated SETUP.md with Phase 2 jobs (schedule, backup, backup-restore), Vercel single-owner web deployment, updated GitHub secrets table. Documented all paper-only boundaries and unresolved data. Full test suite (689) + root/web typechecks pass. PENDING/MEMORY/index/progress updated.

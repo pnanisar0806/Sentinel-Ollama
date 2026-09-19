@@ -676,3 +676,32 @@ it cannot reach the database is the one thing this product must never do.
 
 Verified: `DATABASE_URL= pnpm --dir web build` clean, `next start` against Supabase serves all
 19 pages 200 with no server errors, `tsc --noEmit` clean at root and in `web/`, 689 tests pass.
+
+## Cash ceiling — owner amendment 2026-09-19 (out of band, not a plan task)
+
+The PRD carried no cash number. §3.3 said only "Debt/EPF/cash: remainder; EPF counts as
+debt-like", and the 20% in `DEFAULT_OWNER_RAILS` was invented by whoever wrote the seed.
+Flagged to the owner before acting, along with the consequence below; owner chose 10%.
+
+- `PRD_investment_agent.md` §3.3 and `src/config/ips-v1.ts` both gain the clause, written
+  byte-identically — `tests/domain/ips-verbatim.test.ts` compares every line of PRD
+  section 3 against `IPS_V1_TEXT`, so the two cannot drift. `installIps` will write IPS v2
+  on the next run; that is the designed mechanism for a policy change, not a side effect.
+- `checkCashCeiling` in `src/domain/rails.ts` enforces it, reading `cash_ceiling_pct` from
+  `settings_rails` per PRD §11 with `DEFAULT_OWNER_RAILS` as the fallback. New
+  `CASH_CEILING` violation code. CASH is `classify()`'s CASH class only, so EPF, bonds and
+  liquid/debt funds do not count toward it. Ceiling is inclusive.
+- `migrations/0018_cash_ceiling_rail.sql` reconciles the production DB, which held only a
+  legacy dotted-and-fraction `cash.ceiling = 0.2`, into `cash_ceiling_pct = 10`.
+- TDD: four tests written red first (over the cap, exactly at the cap, DEBT/EPF not
+  counted, and a DB value overriding the default). The pre-existing test named "honours a
+  changed rail in settings_rails rather than the hard-coded default" asserted only
+  `expect(breaches).toBeDefined()` and passed against code that read nothing — rewritten
+  to set the rail to 5, prove the same 7% portfolio now breaches, and check the detail
+  string carries the DB value. 689 → 692 tests, tsc clean at root and in web/.
+
+Surfaced, not silently absorbed: B3 targets ₹6,00,000 of bank deposits by Dec 2026, which
+is 10.7% of today's ₹55.97L base — a fully-funded emergency fund trips this rail unless the
+portfolio grows past ~₹60L or B3 is excluded from the ceiling's base. FR-34's 48-hour
+cooling-off was not applied, because `checkRailCooling` blocks every recommendation while
+it runs. Both are owner items in PENDING.md.

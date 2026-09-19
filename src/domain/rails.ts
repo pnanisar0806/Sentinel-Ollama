@@ -13,7 +13,7 @@ export const RAIL_CONSTRAINTS = {
 
 /** Default owner rails seeded by `seed.ts`. Idempotent — existing values are preserved. */
 export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
-  cash_ceiling_pct: 20,
+  cash_ceiling_pct: 10,
   tactical_monthly_paise: 50_00_000,
   max_order_paise: 100_00_000,
   single_stock_cap_pct: 10,
@@ -27,6 +27,7 @@ export type RailViolation =
   | { code: 'MAX_ORDER_EXCEEDED'; detail: string }
   | { code: 'TACTICAL_BUDGET_EXCEEDED'; detail: string }
   | { code: 'CONCENTRATION_BREACH'; detail: string }
+  | { code: 'CASH_CEILING'; detail: string }
   | { code: 'FORBIDDEN_UNIVERSE'; detail: string }
   | { code: 'STALE_DATA'; detail: string }
   | { code: 'NO_CATCH_UP'; detail: string }
@@ -287,6 +288,10 @@ export async function checkPortfolioRails(
     violations.push({ code: 'TACTICAL_BUDGET_EXCEEDED', detail: `Tactical deployment would exceed ₹50k/month (used: ${formatInr(paise(tacticalUsed))})` });
   }
 
+  // Cash ceiling (PRD 3.3)
+  const cashViolation = await checkCashCeiling(db, positions, totalAssets);
+  if (cashViolation) violations.push(cashViolation);
+
   // Cooling period
   const coolingViolation = await checkRailCooling(db);
   if (coolingViolation) violations.push(coolingViolation);
@@ -296,6 +301,42 @@ export async function checkPortfolioRails(
   if (drawdownViolation) violations.push(drawdownViolation);
 
   return violations;
+}
+
+/**
+ * PRD 3.3: idle cash is capped at a share of total investable assets. The owner set it
+ * to 10% on 2026-09-19; the PRD had left cash unbounded as part of the "remainder".
+ *
+ * "Cash" is `classify()`'s CASH class and nothing else -- bank balances. EPF, bonds and
+ * liquid/debt funds are DEBT and are not idle cash, so they do not count here.
+ *
+ * The rail is read from `settings_rails` per PRD 11 ("all rails live in settings_rails"),
+ * falling back to DEFAULT_OWNER_RAILS when the row is absent. Ceiling is inclusive.
+ */
+async function checkCashCeiling(
+  db: Db,
+  positions: import('./networth.js').Position[],
+  totalAssets: import('../money/paise.js').Paise,
+): Promise<{ code: string; detail: string } | null> {
+  if (totalAssets <= 0n) return null;
+
+  const [row] = await db.query<{ value: number | string }>(
+    `select value from settings_rails where key = 'cash_ceiling_pct'`,
+  );
+  const capPct = row ? Number(row.value) : Number(DEFAULT_OWNER_RAILS.cash_ceiling_pct);
+  if (!Number.isFinite(capPct)) return null;
+
+  let cash = 0n;
+  for (const p of positions) {
+    if (p.assetClass === 'CASH') cash += p.valuePaise;
+  }
+  const actualPct = (Number(cash) / Number(totalAssets)) * 100;
+  if (actualPct <= capPct) return null;
+
+  return {
+    code: 'CASH_CEILING',
+    detail: `Cash ceiling: ${actualPct.toFixed(1)}% of assets in idle cash (cap ${capPct}%)`,
+  };
 }
 
 export async function checkFreeze(db: Db): Promise<void> {
