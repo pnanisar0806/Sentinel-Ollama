@@ -210,11 +210,11 @@ wiring; backup/restore workflow and runbook in `docs/SETUP.md`.
 
 ### Task 6: Provisioning, handoff and Phase 2 acceptance
 
-- [ ] Document Vercel single-user deployment and only actually needed secrets/env; do not add
+- [x] Document Vercel single-user deployment and only actually needed secrets/env; do not add
   unused Kite credentials/static-IP work. Document jobs, paper-only boundaries and unresolved data.
-- [ ] Run relevant tests, full suite, root/web typechecks and deployment checks if provisioned;
+- [x] Run relevant tests, full suite, root/web typechecks and deployment checks if provisioned;
   record actual results, not an inherited test count as proof.
-- [ ] Update PENDING/MEMORY/index/progress with implementation versus observed-paper status.
+- [x] Update PENDING/MEMORY/index/progress with implementation versus observed-paper status.
 - [ ] PRD §14 Phase 2 DoD, verbatim: **"4 clean weeks of paper operation; owner completes ≥5
   approval-flow interactions end-to-end in paper; scorecard renders; a simulated rail violation
   and breaker trip both behave to spec."** Record dated evidence. Tests cannot replace four

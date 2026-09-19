@@ -78,6 +78,16 @@
 - ORDER_LIKE_PATTERNS regex updated to `\/orders(\/|\?|$)` to avoid false positives on import paths like `../domain/orders.js`
 - All 689 tests pass, tsc clean
 
+## 2026-09-19 (Phase 2 Task 6 — Provisioning, handoff and Phase 2 acceptance)
+
+- SETUP.md updated: Phase 2 jobs (schedule, backup, backup-restore) added to jobs table; Vercel single-owner web deployment documented (Step 7); GitHub secrets table updated with BACKUP_REPO, BACKUP_BRANCH, GH_TOKEN; schedule and backup workflows added to cron table
+- All paper-only boundaries documented: web app read-only, `/import` owner-gated write, no Kite credentials used, no execution paths in domain/jobs
+- Unresolved data documented: INDmoney OAuth token in local PGlite, backup repo not yet created, web app deployed but unlisted
+- Full test suite: 689 tests pass, tsc clean (root + web)
+- PENDING/MEMORY/index/progress updated with implementation status
+- PRD §14 Phase 2 DoD: **"4 clean weeks of paper operation; owner completes ≥5 approval-flow interactions end-to-end in paper; scorecard renders; a simulated rail violation and breaker trip both behave to spec."** Tests cannot replace four elapsed weeks or five owner interactions. Owner paper-scorecard review gates Phase 3 (§13).
+- Remaining for Phase 3 gate: owner completes 4 clean paper weeks + ≥5 approval interactions; simulated rail violation + breaker trip verification
+
 ## 2026-09-17 (Phase 2 planning)
 
 - Phase 2 / 2.5 planning correction complete (documentation only; no commit/push). Phase 2

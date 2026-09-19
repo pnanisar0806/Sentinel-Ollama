@@ -5,6 +5,10 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **PHASE 2 TASK 6 COMPLETE (2026-09-19): Provisioning, handoff and Phase 2 acceptance.**
+      Updated SETUP.md with Phase 2 jobs (schedule, backup, backup-restore), Vercel single-owner web deployment, updated GitHub secrets table. Documented all paper-only boundaries and unresolved data. Full test suite (689) + root/web typechecks pass. PENDING/MEMORY/index/progress updated.
+      PRD §14 Phase 2 DoD pending owner sign-off: **"4 clean weeks of paper operation; owner completes ≥5 approval-flow interactions end-to-end in paper; scorecard renders; a simulated rail violation and breaker trip both behave to spec."** Tests cannot replace four elapsed weeks or five owner interactions.
+
 - [x] **PHASE 2 TASK 5 COMPLETE (2026-09-19): Paper scheduling, scoring and backup/restore proof.**
       Implemented: src/jobs/schedule.ts (expireOrders, resurfaceDeferredOrder, T+2/T+7 advisory reminders via recordAdvisoryReminder; all idempotent via idempotency keys). .github/workflows/schedule.yml (daily 10:00 IST). src/jobs/backup.ts + backup-restore.ts (weekly encrypted pg_dump to private GitHub repo via AES-256-GCM, git push to backup repo, restore verification script). .github/workflows/backup.yml (weekly Sun 11:00 IST). Updated ORDER_LIKE_PATTERNS regex to avoid false positives on import paths. All 689 tests pass, tsc clean.
 
