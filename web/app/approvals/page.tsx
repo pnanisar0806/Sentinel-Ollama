@@ -14,7 +14,7 @@ export default async function ApprovalsPage() {
     intent: i.intent,
     instrument: i.instrumentId,
     qty: i.quantity,
-    limitPrice: i.limitPricePaise ? rupees(BigInt(i.limitPricePaise)) : 'MARKET',
+    limitPrice: i.limitPricePaise ? rupees(BigInt(i.limitPricePaise).toString()) : 'MARKET',
     createdAt: fmtDateTime(i.createdAt),
     expiresAt: i.expiresAt ? fmtDateTime(i.expiresAt) : '—',
     advisory: i.advisoryPath ? '⚠' : '—',
@@ -27,7 +27,7 @@ export default async function ApprovalsPage() {
     intent: i.intent,
     instrument: i.instrumentId,
     qty: i.quantity,
-    limitPrice: i.limitPricePaise ? rupees(BigInt(i.limitPricePaise)) : 'MARKET',
+    limitPrice: i.limitPricePaise ? rupees(BigInt(i.limitPricePaise).toString()) : 'MARKET',
     createdAt: fmtDateTime(i.createdAt),
     expiresAt: i.expiresAt ? fmtDateTime(i.expiresAt) : '—',
   }));
@@ -75,7 +75,7 @@ export default async function ApprovalsPage() {
               { label: 'Limit', align: 'right', value: (r) => <span className="tnum">{r.limitPrice}</span> },
               { label: 'Created', value: (r) => r.createdAt },
               { label: 'Expires', value: (r) => r.expiresAt },
-              { label: 'Advisory', align: 'center', value: (r) => r.advisory },
+              { label: 'Advisory', align: 'right', value: (r) => r.advisory },
             ]}
           />
         )}

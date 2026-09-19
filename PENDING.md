@@ -5,6 +5,29 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **WEB APP BUILDS AND RENDERS AGAINST THE REAL DB (2026-09-19).** `web/` never
+      typechecked before: `web/lib/data.ts` imported `evaluateRails` / `loadOwnerRails` /
+      `OwnerRail` from `src/domain/rails.ts`, none of which existed. `getRails` now uses the
+      real `checkPortfolioRails(db, positions, total)`; the rails page reads `{code, detail}`.
+      Every page/route carries `export const dynamic = 'force-dynamic'` so `next build`
+      needs no DATABASE_URL. `src/config/ips-v1.md` → `src/config/ips-v1.ts` (a template
+      literal): webpack can neither run its `readFileSync(new URL(…, import.meta.url))` nor
+      ship the file to Vercel. That deletes `web/lib/domain-ips-shim.ts` and the
+      `NormalModuleReplacementPlugin` in `web/next.config.ts`. `currentIps` now normalises
+      `effective_at` (postgres-js returns a `Date`, PGlite a string) — the shim had been
+      hiding that bug. Verified: `next build` with no DATABASE_URL, then `next start` against
+      Supabase — all 19 pages 200, zero server errors. 689 tests, both typechecks clean.
+      **Not yet pushed / deployed to Vercel.**
+
+- [ ] **OWNER TRUE-UP: production `settings_rails` holds only `cash.ceiling = 0.2`.**
+      `DEFAULT_OWNER_RAILS` in `src/domain/rails.ts` defines eight rails
+      (`cash_ceiling_pct`, `tactical_monthly_paise`, `max_order_paise`,
+      `single_stock_cap_pct`, `employer_cap_pct`, `mf_scheme_cap_pct`, `sector_cap_pct`,
+      `issuer_cap_pct`) and `seed.ts` inserts them, but the Supabase DB was seeded before
+      that and only carries the legacy `cash.ceiling` key (plus the `freeze_state` /
+      `breaker_state` blobs). The /rails page therefore lists one rail. Not invented over:
+      the owner decides whether to re-seed the eight defaults or keep the legacy key.
+
 - [x] **PHASE 2 TASK 6 COMPLETE (2026-09-19): Provisioning, handoff and Phase 2 acceptance.**
       Updated SETUP.md with Phase 2 jobs (schedule, backup, backup-restore), Vercel single-owner web deployment, updated GitHub secrets table. Documented all paper-only boundaries and unresolved data. Full test suite (689) + root/web typechecks pass. PENDING/MEMORY/index/progress updated.
       PRD §14 Phase 2 DoD pending owner sign-off: **"4 clean weeks of paper operation; owner completes ≥5 approval-flow interactions end-to-end in paper; scorecard renders; a simulated rail violation and breaker trip both behave to spec."** Tests cannot replace four elapsed weeks or five owner interactions.

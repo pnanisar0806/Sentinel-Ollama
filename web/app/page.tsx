@@ -2,6 +2,8 @@ import type { Paise } from '../../src/money/paise.js';
 import { getOverview } from '../lib/data';
 import { Badge, Card, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function OverviewPage() {
   const { input, blocked } = await getOverview();
 
@@ -52,7 +54,7 @@ export default async function OverviewPage() {
           >
             {input.railBreaches.length === 0
               ? <Notice tone="green">All owner rails satisfied.</Notice>
-              : <ul>{input.railBreaches.map((b) => <li key={b.key}>{b.message}</li>)}</ul>}
+              : <ul>{input.railBreaches.map((b) => <li key={b.code}>{b.detail}</li>)}</ul>}
           </Card>
         </div>
 

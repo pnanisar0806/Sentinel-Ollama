@@ -1,12 +1,14 @@
-import { openDb } from '../../../../../src/db/client.js';
-import { db } from '../../../../../web/lib/data.js';
+import { db } from '@/lib/data';
 import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  
   const d = await db();
   
   const [intent] = await d.query<{

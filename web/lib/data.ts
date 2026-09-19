@@ -1,20 +1,23 @@
 import { addP, type Paise } from '../../src/money/paise.js';
 import { openDb, type Db } from '../../src/db/client.js';
 import { buildDigestInput, type DigestInput } from '../../src/notify/digest.js';
-import { loadPositions, type Position, type AssetClass } from '../../src/domain/networth.js';
+import { loadPositions, type Position } from '../../src/domain/networth.js';
 import {
   assessStaleness,
   blockedInstruments,
   type StalenessRow,
 } from '../../src/sources/staleness.js';
-import { evaluateRails, loadOwnerRails, type RailBreach, type OwnerRail } from '../../src/domain/rails.js';
+import {
+  checkPortfolioRails,
+  getFreezeState,
+  getBreakerState,
+} from '../../src/domain/rails.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../../src/domain/buckets.js';
 import { currentIps } from '../../src/domain/ips.js';
 import { projectVests, type VestEvent } from '../../src/domain/rsu.js';
 import { fetchLiveRsuInputs } from '../../src/sources/rsu-live.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
-import { getFreezeState, getBreakerState } from '../../src/domain/rails.js';
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { concentration } from '../../src/domain/allocation.js';
 
@@ -58,13 +61,18 @@ export async function getAllocation() {
 
 export async function getRails() {
   const input = await getDigest();
-  const positions = await loadPositions(await db(), input.businessDate);
-  const byClass = new Map<AssetClass, Paise>();
-  for (const p of positions) {
-    byClass.set(p.assetClass, addP(byClass.get(p.assetClass) ?? (0n as Paise), p.valuePaise));
-  }
-  const total = addP(...byClass.values());
-  return { rails: await loadOwnerRails(await db()), breaches: evaluateRails(await loadOwnerRails(await db()), byClass, total) };
+  const d = await db();
+  const positions = await loadPositions(d, input.businessDate);
+  const total = addP(...positions.map((p) => p.valuePaise));
+  // settings_rails mixes scalar owner rails with state blobs (freeze_state,
+  // breaker_state, paper_mode). Only the scalars are rails.
+  const settings = await d.query<{ key: string; value: unknown }>(
+    'select key, value from settings_rails order by key',
+  );
+  const rails = settings
+    .filter((r) => typeof r.value !== 'object' || r.value === null)
+    .map((r) => ({ key: r.key, value: Number(r.value) }));
+  return { rails, breaches: await checkPortfolioRails(d, positions, total) };
 }
 
 export interface BucketsData {
@@ -233,17 +241,21 @@ export interface OrderSimulationRow {
   note: string;
 }
 
+function isDate(v: string | Date | null | undefined): v is Date {
+  return v instanceof Date;
+}
+
 export async function getOrderIntents(): Promise<OrderIntentRow[]> {
   const d = await db();
   const rows = await d.query<OrderIntentRow>(
     'select * from order_intents order by created_at desc',
   );
-  return rows.map((r) => ({
-    ...r,
-    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
-    expiresAt: r.expiresAt ? (r.expiresAt instanceof Date ? r.expiresAt.toISOString() : String(r.expiresAt)) : null,
-    asOf: r.asOf instanceof Date ? r.asOf.toISOString() : String(r.asOf),
-  }));
+  return rows.map((r) => {
+    const createdAt = isDate(r.createdAt) ? r.createdAt.toISOString() : String(r.createdAt);
+    const expiresAt = r.expiresAt ? (isDate(r.expiresAt) ? r.expiresAt.toISOString() : String(r.expiresAt)) : null;
+    const asOf = isDate(r.asOf) ? r.asOf.toISOString() : String(r.asOf);
+    return { ...r, createdAt, expiresAt, asOf };
+  });
 }
 
 export async function getOrderIntent(id: string): Promise<OrderIntentRow | null> {
@@ -253,12 +265,10 @@ export async function getOrderIntent(id: string): Promise<OrderIntentRow | null>
     [id],
   );
   if (!row) return null;
-  return {
-    ...row,
-    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
-    expiresAt: row.expiresAt ? (row.expiresAt instanceof Date ? row.expiresAt.toISOString() : String(row.expiresAt)) : null,
-    asOf: row.asOf instanceof Date ? row.asOf.toISOString() : String(row.asOf),
-  };
+  const createdAt = isDate(row.createdAt) ? row.createdAt.toISOString() : String(row.createdAt);
+  const expiresAt = row.expiresAt ? (isDate(row.expiresAt) ? row.expiresAt.toISOString() : String(row.expiresAt)) : null;
+  const asOf = isDate(row.asOf) ? row.asOf.toISOString() : String(row.asOf);
+  return { ...row, createdAt, expiresAt, asOf };
 }
 
 export async function getOrderTransitions(orderIntentId: string): Promise<OrderTransitionRow[]> {
@@ -267,10 +277,10 @@ export async function getOrderTransitions(orderIntentId: string): Promise<OrderT
     'select * from order_transitions where order_intent_id = $1 order by at desc',
     [orderIntentId],
   );
-  return rows.map((r) => ({
-    ...r,
-    at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
-  }));
+  return rows.map((r) => {
+    const at = isDate(r.at) ? r.at.toISOString() : String(r.at);
+    return { ...r, at };
+  });
 }
 
 export async function getOrderSimulations(orderIntentId: string): Promise<OrderSimulationRow[]> {
@@ -279,10 +289,10 @@ export async function getOrderSimulations(orderIntentId: string): Promise<OrderS
     'select * from order_simulations where order_intent_id = $1 order by simulated_at desc',
     [orderIntentId],
   );
-  return rows.map((r) => ({
-    ...r,
-    simulatedAt: r.simulatedAt instanceof Date ? r.simulatedAt.toISOString() : String(r.simulatedAt),
-  }));
+  return rows.map((r) => {
+    const simulatedAt = isDate(r.simulatedAt) ? r.simulatedAt.toISOString() : String(r.simulatedAt);
+    return { ...r, simulatedAt };
+  });
 }
 
 export async function getApprovalData() {

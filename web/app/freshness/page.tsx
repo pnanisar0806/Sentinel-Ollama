@@ -1,6 +1,8 @@
 import { getFreshness } from '../../lib/data';
 import { Badge, Card, DataTable, Notice, PageHead } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 const fmtAge = (ageHours: number): string =>
   ageHours === Infinity ? 'never' : `${Math.round(ageHours * 10) / 10}h`;
 

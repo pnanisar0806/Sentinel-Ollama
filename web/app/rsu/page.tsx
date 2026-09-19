@@ -1,6 +1,8 @@
 import { getRsu } from '../../lib/data';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RsuPage() {
   const r = await getRsu();
 

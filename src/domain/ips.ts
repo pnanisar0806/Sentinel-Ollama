@@ -1,11 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import type { Db } from '../db/client.js';
+import { IPS_V1_TEXT } from '../config/ips-v1.js';
 
-export const IPS_V1_TEXT = readFileSync(
-  fileURLToPath(new URL('../config/ips-v1.md', import.meta.url)),
-  'utf8',
-);
+export { IPS_V1_TEXT };
 
 /** Versioned and append-only in spirit: a new version is a new row, never an edit. */
 /**
@@ -62,14 +58,17 @@ export async function installIps(
 export async function currentIps(
   db: Db,
 ): Promise<{ version: number; fullText: string; effectiveAt: string }> {
-  const [row] = await db.query<{ version: number; full_text: string; effective_at: string | null }>(
+  const [row] = await db.query<{ version: number; full_text: string; effective_at: string | Date | null }>(
     'select version, full_text, effective_at from ips_versions order by version desc limit 1',
   );
   if (!row) throw new Error('no IPS installed — run installIps() before generating anything');
   return {
     version: Number(row.version),
     fullText: row.full_text,
-    effectiveAt: row.effective_at ?? new Date().toISOString(),
+    // postgres-js hands back a Date for timestamptz; PGlite hands back a string.
+    effectiveAt: row.effective_at instanceof Date
+      ? row.effective_at.toISOString()
+      : row.effective_at ?? new Date().toISOString(),
   };
 }
 

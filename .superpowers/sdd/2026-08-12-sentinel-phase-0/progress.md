@@ -651,3 +651,28 @@ avs table allows corrections (no append-only trigger).
 - Growth path recorded for Phase 2: the pile grows screen-by-screen toward the whole market
   (~2,600) by pulling more screens over time (whole-market prices already flow daily); news /
   sentiment / partnerships reading stays planned for the next stage.
+
+## Web app build fix — 2026-09-19 (out of band, not a plan task)
+
+The Next.js app had never been typechecked: `web/lib/data.ts` imported `evaluateRails`,
+`loadOwnerRails` and `OwnerRail` from `src/domain/rails.ts`, none of which exist. `getRails`
+now calls the real `checkPortfolioRails(db, positions, total)` and the rails page renders
+`{code, detail}`. `settings_rails` is filtered to scalar rows, so the freeze/breaker state
+blobs stay off the page.
+
+`src/config/ips-v1.md` became `src/config/ips-v1.ts` (template literal). Its module-scope
+`readFileSync(new URL(..., import.meta.url))` could not survive webpack and the file would
+not have shipped to Vercel. That removed `web/lib/domain-ips-shim.ts` and the
+`NormalModuleReplacementPlugin` in `web/next.config.ts` — and exposed a real bug the shim had
+been masking: `currentIps` returned postgres-js's `Date` where its type promised a string, so
+`/ips` 500'd. Normalised in `src/domain/ips.ts`.
+
+`export const dynamic = 'force-dynamic'` on every page and route handler; `next build` no
+longer needs a DATABASE_URL. Rejected from the prior session's draft: a mock `Db` returning
+empty rows at build time, `MOCK_APPROVED`/`MOCK_REJECTED` responses from the approval
+endpoints, and a rewrite of `/api/import/[id]/confirm` that dropped its 404/400 error mapping
+and broke empty-body "confirm all". An approval endpoint that answers `{success: true}` when
+it cannot reach the database is the one thing this product must never do.
+
+Verified: `DATABASE_URL= pnpm --dir web build` clean, `next start` against Supabase serves all
+19 pages 200 with no server errors, `tsc --noEmit` clean at root and in `web/`, 689 tests pass.

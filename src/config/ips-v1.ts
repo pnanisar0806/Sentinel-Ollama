@@ -1,4 +1,9 @@
-# Investment Policy Statement — Version 1
+/** The Investment Policy Statement, verbatim from PRD section 3.
+ *
+ * Kept as a TypeScript module, not a .md read at import time: the Next.js web app
+ * bundles this module, and a `readFileSync(new URL(...))` neither survives webpack nor
+ * ships the file to Vercel. `tests/domain/ips-verbatim.test.ts` holds it to the PRD. */
+export const IPS_V1_TEXT = `# Investment Policy Statement — Version 1
 
 **Owner:** Anirban Sarkar
 **Effective:** 2026-08-12
@@ -47,4 +52,4 @@ Slab-taxed credit-risk paper must beat the owner's highest loan rate (currently 
 - Sammaan Sep-2026 maturity proceeds route to B3 (emergency fund) — pre-approved standing instruction, still surfaced for confirmation at the event.
 
 ## 3.10 Behavioral protocol
-At −20% portfolio drawdown from peak: agent surfaces this IPS, the owner's 2022 history, and requires a typed justification before processing any SIP pause or panic-sell request. All such events are logged and replayed in the recovery report.
+At −20% portfolio drawdown from peak: agent surfaces this IPS, the owner's 2022 history, and requires a typed justification before processing any SIP pause or panic-sell request. All such events are logged and replayed in the recovery report.`;

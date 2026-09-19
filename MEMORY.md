@@ -8,6 +8,32 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 
 ---
 
+## Web app bundling — the Next.js build (2026-09-19)
+
+- **`web/` was never typechecked before this.** `web/lib/data.ts` imported `evaluateRails`,
+  `loadOwnerRails` and `OwnerRail` from `src/domain/rails.ts`; none existed. The real
+  function is `checkPortfolioRails(db, positions, total)` → `{code, detail}[]`, and
+  `getRails` uses it now. `pnpm --dir web typecheck` is part of the gate from here on.
+- **Nothing in `src/` may read a file at module scope.** webpack rewrites
+  `new URL(…, import.meta.url)` into an inert asset handle, and Vercel never ships the
+  file anyway. That is why `src/config/ips-v1.md` is now `src/config/ips-v1.ts`, a plain
+  template literal. Adding another `readFileSync` to a module the web app imports breaks
+  the deploy, not the tests.
+- **Deleted with it:** `web/lib/domain-ips-shim.ts` and the `NormalModuleReplacementPlugin`
+  in `web/next.config.ts`. The shim was a second copy of `currentIps`/`ipsClause`/`renderIps`
+  that had silently drifted *ahead* of the real module — it normalised `effective_at`,
+  `src/domain/ips.ts` did not, so `/ips` 500'd the moment the shim went. Fixed at the root:
+  **postgres-js returns a `Date` for timestamptz, PGlite returns a string.** Any `Promise<{
+  …: string }>` over a timestamp column is a lie under Supabase that the PGlite test suite
+  cannot catch.
+- **Every page and route handler carries `export const dynamic = 'force-dynamic'`**, so
+  `next build` never opens a DB connection. Verify a web change with `DATABASE_URL= pnpm
+  --dir web build` (must pass with the var *empty*) and then `next start` against Supabase.
+- **Production `settings_rails` carries only `cash.ceiling = 0.2`**, not the eight
+  `DEFAULT_OWNER_RAILS` keys `seed.ts` inserts — the DB predates them. `getRails` filters
+  `settings_rails` to scalar values (the `freeze_state`/`breaker_state` blobs are not rails)
+  rather than to a key list. Owner true-up item: re-seed or keep the legacy key.
+
 ## Fidelity RSU flow — SHIPPED 2026-09-05 (evening)
 
 Fidelity screenshot → `extractRsuVestsFromImage` (`sources/fidelity-ingest.ts`) → priced

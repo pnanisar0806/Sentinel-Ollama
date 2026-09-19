@@ -20,18 +20,10 @@ try {
 }
 
 const config: NextConfig = {
-  webpack(cfg, { webpack }) {
+  webpack(cfg) {
     // The repo's src/ uses typescript ESM style imports with .js specifiers
     // (resolveable by tsc, not by webpack's default extensions).
     cfg.resolve.extensionAlias = { '.js': ['.ts', '.tsx', '.js', '.jsx'] };
-    // src/domain/ips.ts reads its markdown via import.meta.url, which webpack
-    // rewrites into an asset URL that cannot be readFileSync'd. Swap that one
-    // module for a bundle-safe shim that reads the file from disk instead.
-    cfg.plugins.push(
-      new webpack.NormalModuleReplacementPlugin(/\/domain\/ips\.js$/, (res: { request: string }) => {
-        res.request = resolve(process.cwd(), 'lib', 'domain-ips-shim.ts');
-      }),
-    );
     return cfg;
   },
 };

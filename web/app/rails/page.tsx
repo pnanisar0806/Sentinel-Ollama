@@ -1,6 +1,8 @@
 import { getRails } from '../../lib/data';
 import { Badge, Card, DataTable, Notice, PageHead, Pct } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RailsPage() {
   const { rails, breaches } = await getRails();
 
@@ -36,7 +38,7 @@ export default async function RailsPage() {
         >
           {breaches.length === 0
             ? <Notice tone="green">All owner rails satisfied.</Notice>
-            : <ul>{breaches.map((b) => <li key={b.key}>{b.message}</li>)}</ul>}
+            : <ul>{breaches.map((b) => <li key={b.code}>{b.detail}</li>)}</ul>}
           <p className="dim" style={{ marginBottom: 0 }}>Rails feed the daily digest, which stays the primary surface.</p>
         </Card>
       </div>

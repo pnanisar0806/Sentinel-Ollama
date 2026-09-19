@@ -49,7 +49,7 @@ export default async function ApprovalDetailPage({ params }: PageProps) {
             {intent.intent} · {' '}
             {intent.orderType} · {' '}
             Qty: {intent.quantity} · {' '}
-            Limit: {intent.limitPricePaise ? rupees(BigInt(intent.limitPricePaise)) : 'MARKET'}
+            Limit: {intent.limitPricePaise ? rupees(BigInt(intent.limitPricePaise).toString()) : 'MARKET'}
             {isAdvisory && <span> · <Badge tone="amber">Advisory</Badge></span>}
           </>
         }
@@ -66,7 +66,7 @@ export default async function ApprovalDetailPage({ params }: PageProps) {
             <div><strong>Intent:</strong> {intent.intent}</div>
             <div><strong>Order type:</strong> {intent.orderType}</div>
             <div><strong>Quantity:</strong> <span className="tnum">{intent.quantity}</span></div>
-            <div><strong>Limit price:</strong> {intent.limitPricePaise ? rupees(BigInt(intent.limitPricePaise)) : 'Market'}</div>
+            <div><strong>Limit price:</strong> {intent.limitPricePaise ? rupees(BigInt(intent.limitPricePaise).toString()) : 'Market'}</div>
             <div><strong>Defer until:</strong> {intent.deferUntil ? fmtDateTime(intent.deferUntil) : 'Not deferred'}</div>
             <div><strong>Alternate instrument:</strong> {intent.alternateInstrumentId ?? '—'}</div>
             <div><strong>Created by:</strong> {intent.createdBy}</div>
@@ -147,8 +147,8 @@ export default async function ApprovalDetailPage({ params }: PageProps) {
                   { label: 'To', value: (r) => <span className="mono">{r.to}</span> },
                   { label: 'Actor', value: (r) => r.actor },
                   { label: 'At', value: (r) => r.at },
-                  { label: 'Rev', align: 'center', value: (r) => r.revision },
-                  { label: 'Expected rev', align: 'center', value: (r) => r.expectedRev },
+                  { label: 'Rev', align: 'right', value: (r) => r.revision },
+                  { label: 'Expected rev', align: 'right', value: (r) => r.expectedRev },
                   { label: 'Idempotency', value: (r) => <span className="mono dim">{r.idempotencyKey}</span> },
                 ]}
               />

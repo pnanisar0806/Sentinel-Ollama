@@ -1,6 +1,8 @@
 import { getBuckets } from '../../lib/data';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Pct } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function BucketsPage() {
   const { input, buckets, milestones } = await getBuckets();
 

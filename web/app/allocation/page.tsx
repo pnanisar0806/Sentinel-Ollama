@@ -2,6 +2,8 @@ import { concentration } from '../../../src/domain/allocation.js';
 import { getAllocation } from '../../lib/data';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Pct } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AllocationPage() {
   const { input, positions } = await getAllocation();
   const c = concentration(positions);

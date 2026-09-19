@@ -1,6 +1,8 @@
 import { getHoldings } from '../../lib/data';
 import { Badge, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function HoldingsPage() {
   const { positions, blocked, businessDate } = await getHoldings();
 

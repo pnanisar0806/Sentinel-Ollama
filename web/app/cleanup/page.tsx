@@ -1,6 +1,6 @@
-import { getCleanupCalendar } from '../../../lib/data.js';
-import { Badge, Card, DataTable, Notice, PageHead, Pct } from '../../../lib/ui.js';
-import { fmtDateTime, relTime, formatInr } from '../../../lib/format.js';
+import { getCleanupCalendar } from '@/lib/data';
+import { Badge, Card, DataTable, Notice, PageHead, Pct } from '@/lib/ui';
+import { fmtDateTime, relTime, rupees } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,9 +34,9 @@ export default async function CleanupPage() {
     symbol: r.symbol,
     maturity: r.maturityDate,
     daysUntil: r.daysUntil,
-    faceValue: formatInr(r.facePaise),
-    couponDue: r.couponDuePaise ? formatInr(r.couponDuePaise) : '—',
-    total: formatInr(r.facePaise + (r.couponDuePaise ?? 0n)),
+    faceValue: rupees(r.facePaise.toString()),
+    couponDue: r.couponDuePaise ? rupees(r.couponDuePaise.toString()) : '\u2014',
+    total: rupees((r.facePaise + (r.couponDuePaise ?? 0n)).toString()),
   }));
 
   return (
@@ -102,7 +102,7 @@ export default async function CleanupPage() {
                   Portfolio drawdown: {drawdownPct}%
                 </Badge>
                 {drawdownPct >= 20 && <span className="dim"> — §3.10 justification required for any SIP pause/panic sell</span>}
-                {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — Rail loosening blocked at drawdown >15%</span>}
+                {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — Rail loosening blocked at drawdown {'>'}15%</span>}
               </div>
             )}
           </div>
@@ -167,7 +167,7 @@ export default async function CleanupPage() {
           <div className="card-body">
             <Notice tone="indigo">
               Cleanup recommendations are generated via <code>pnpm cleanup</code> and appear as paper FR-11 recommendations.
-              They include: smallcase termination, micro-orphans <₹5k, thesis-less consolidation, Groww RPOWER manual closure,
+              They include: smallcase termination, micro-orphans {'<\u20b95k'}, thesis-less consolidation, Groww RPOWER manual closure,
               bond credit review, Sammaan maturity routing to B3, and LTCG harvest scheduled across 1–2 fiscal years.
             </Notice>
             <p className="dim">Run <code>pnpm cleanup</code> to refresh the standing queue. All recommendations are PAPER mode — no execution without fresh approval.</p>

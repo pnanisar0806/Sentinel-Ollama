@@ -1,6 +1,8 @@
 import { getAudit } from '../../lib/data';
 import { Badge, Card, DataTable, Notice, PageHead } from '../../lib/ui';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AuditPage() {
   const rows = await getAudit();
 
