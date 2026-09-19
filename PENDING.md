@@ -46,11 +46,30 @@ MEMORY.md; the code map lives in index.md.
       the old fraction-valued one printed 20.0%. The page now formats by the key's unit
       suffix — `_pct` as a percent, `_paise` through `rupees()`.
 
-- [ ] **FR-34 48-hour cooling-off was NOT applied to this rail change.** The PRD says rail
-      edits take effect after 48 hours. This one ships in code and takes effect on deploy.
-      Writing a `last_rail_change.cooling_until` row would have honoured it literally but
-      `checkRailCooling` returns COOLING_NOT_ELAPSED, which blocks *every* recommendation
-      for those 48 hours — not what was asked for. Owner's call whether to backfill it.
+- [ ] **FR-34 COOLING-OFF IS UNIMPLEMENTED, AND THE RAILS ENGINE DOES NOT GATE ANYTHING.**
+      Investigated 2026-09-19 while deciding whether to backfill a cooling row for the
+      cash-ceiling change. What is actually true:
+      - **`last_rail_change` is read in three places and written in none.** There is no
+        code path that records a rail edit, so `checkRailCooling` never fires and
+        `checkDrawdownLoosening` can never see `direction: 'loosen'`. FR-34 exists as a
+        reader with no writer.
+      - **`checkRails` — the per-order rail gate — is never called.** `digest.ts` imports
+        it and does not use it. Nothing else references it. MAX_ORDER_EXCEEDED,
+        TACTICAL_BUDGET_EXCEEDED, FORBIDDEN_UNIVERSE, HOLD_PERIOD, OVERRIDE_INVALID and
+        the drawdown codes are unreachable in production.
+      - **`validateOrderGate` in `orders.ts:212` does not consult rails.** The FR-30/31
+        gate on `createOrder`/`modifyOrder` checks staleness and FR-11/12 structure only.
+        An order breaching every concentration cap is created without complaint.
+      - **`checkFreeze`, `setFreeze` and `recordFalsification` are referenced only by
+        their own tests.** `/freeze` and the 3-strike breaker change state that nothing
+        reads on the write path; the web surfaces them as status.
+      - The only live rail path is `checkPortfolioRails`, and it is pure reporting — the
+        digest's breach list and the /rails page.
+      This bears directly on the Phase 2 DoD line “a simulated rail violation and breaker
+      trip both behave to spec”. They behave to spec in tests, which call the functions
+      directly. Nothing in the running system calls them. Owner decision on sequencing:
+      this is arguably the Phase 3 blocker, since Phase 3 is the first phase where an
+      unblocked order reaches a broker.
 
 - [x] **B3 IS EXCLUDED FROM THE CASH CEILING (owner decision 2026-09-19).**
       `checkCashCeiling` subtracts the funded B3 balance (`sum(amount_paise)` over

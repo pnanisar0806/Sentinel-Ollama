@@ -56,6 +56,15 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 - **`getRails` filters `settings_rails` to scalar values** rather than to a key list —
   whatever rows the DB has, show them. `0018_cash_ceiling_rail.sql` reconciles the legacy
   dotted-and-fraction `cash.ceiling = 0.2` key into `cash_ceiling_pct = 10`.
+- **The rails engine reports; it does not gate.** `checkRails` (the per-order gate) is
+  imported by `digest.ts` and never called — by anything. `validateOrderGate`
+  (`orders.ts:212`), the FR-30/31 gate on order create/modify, checks staleness and
+  FR-11/12 structure only and never consults rails. `checkFreeze`, `setFreeze` and
+  `recordFalsification` are referenced only by their own tests. `last_rail_change` has
+  three readers and no writer, so FR-34's 48-hour cooling-off and the drawdown
+  loosening-block are both unreachable. The one live path is `checkPortfolioRails`, which
+  feeds the digest breach list and /rails. Verified 2026-09-19 — do not read the Phase 2
+  ledger's “rails enforced” as meaning enforced on the order path.
 - **`checkPortfolioRails` raises a permanent false `TACTICAL_BUDGET_EXCEEDED`** (line 281):
   it sums the whole EQUITY/ETF/MF book's market value against the ₹50k/month flow budget.
   A stock compared to a flow. `checkRails`'s per-order version is correct. Not yet fixed.
