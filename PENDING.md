@@ -29,14 +29,23 @@ MEMORY.md; the code map lives in index.md.
       "Include source files outside of the Root Directory in the Build Step" enabled** —
       the app imports `../../src/**` and the build fails without it.
 
-- [ ] **OWNER TRUE-UP: production `settings_rails` holds only `cash.ceiling = 0.2`.**
-      `DEFAULT_OWNER_RAILS` in `src/domain/rails.ts` defines eight rails
-      (`cash_ceiling_pct`, `tactical_monthly_paise`, `max_order_paise`,
+- [ ] **OWNER TRUE-UP: owner rails are stored but never read. Three separate problems.**
+      (a) Production `settings_rails` carries only the legacy `cash.ceiling = 0.2` (plus
+      the `freeze_state` / `breaker_state` blobs). (b) `seed.ts` writes eight rails under
+      *different* names and units — `cash_ceiling_pct = 20`, `max_order_paise`,
       `single_stock_cap_pct`, `employer_cap_pct`, `mf_scheme_cap_pct`, `sector_cap_pct`,
-      `issuer_cap_pct`) and `seed.ts` inserts them, but the Supabase DB was seeded before
-      that and only carries the legacy `cash.ceiling` key (plus the `freeze_state` /
-      `breaker_state` blobs). The /rails page therefore lists one rail. Not invented over:
-      the owner decides whether to re-seed the eight defaults or keep the legacy key.
+      `issuer_cap_pct`, `tactical_monthly_paise` — so re-seeding would add eight rows
+      *next to* the legacy one, not reconcile with it. (c) **Nothing reads any of them.**
+      `DEFAULT_OWNER_RAILS` is imported by `seed.ts` alone; `checkRails` and
+      `checkPortfolioRails` use hard-coded `100_00_000n` / `50_00_000n` literals and the
+      `CAPS` constants in `src/domain/allocation.ts`. Editing a rail in the DB changes
+      nothing about enforcement, and there is no `CASH_CEILING` violation code at all —
+      the cash ceiling is not enforced anywhere. `tests/domain/owner-rails.test.ts`
+      “honours a changed rail in settings_rails rather than the hard-coded default”
+      asserts only `expect(breaches).toBeDefined()`, so it passes either way.
+      Owner's call: make the rails engine read `settings_rails` (and settle one naming
+      convention), or drop the table's numeric rows and state plainly that rails are
+      code constants.
 
 - [x] **PHASE 2 TASK 6 COMPLETE (2026-09-19): Provisioning, handoff and Phase 2 acceptance.**
       Updated SETUP.md with Phase 2 jobs (schedule, backup, backup-restore), Vercel single-owner web deployment, updated GitHub secrets table. Documented all paper-only boundaries and unresolved data. Full test suite (689) + root/web typechecks pass. PENDING/MEMORY/index/progress updated.

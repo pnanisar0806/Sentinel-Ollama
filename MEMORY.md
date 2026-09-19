@@ -29,10 +29,16 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 - **Every page and route handler carries `export const dynamic = 'force-dynamic'`**, so
   `next build` never opens a DB connection. Verify a web change with `DATABASE_URL= pnpm
   --dir web build` (must pass with the var *empty*) and then `next start` against Supabase.
-- **Production `settings_rails` carries only `cash.ceiling = 0.2`**, not the eight
-  `DEFAULT_OWNER_RAILS` keys `seed.ts` inserts — the DB predates them. `getRails` filters
-  `settings_rails` to scalar values (the `freeze_state`/`breaker_state` blobs are not rails)
-  rather than to a key list. Owner true-up item: re-seed or keep the legacy key.
+- **Owner rails are written and never read.** `DEFAULT_OWNER_RAILS` is imported by
+  `seed.ts` alone. `checkRails` and `checkPortfolioRails` enforce hard-coded
+  `100_00_000n` / `50_00_000n` literals and `CAPS` from `src/domain/allocation.ts`; there
+  is no `CASH_CEILING` violation code, so the cash ceiling is not enforced at all. The
+  production DB holds only the legacy `cash.ceiling = 0.2` while `seed.ts` writes eight
+  differently-named keys (`cash_ceiling_pct = 20`, …), so the two never meet.
+  `tests/domain/owner-rails.test.ts` claims the opposite in a test whose only assertion is
+  `expect(breaches).toBeDefined()`. `getRails` therefore filters `settings_rails` to scalar
+  values rather than to a key list — whatever rows the DB actually has, show them. Owner
+  true-up before Phase 3: either the engine reads the table, or the table stops pretending.
 
 ## Fidelity RSU flow — SHIPPED 2026-09-05 (evening)
 
