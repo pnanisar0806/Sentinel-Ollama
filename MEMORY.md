@@ -1745,3 +1745,27 @@ URL, so the short page is the real terminator.)
   COHORTD1/COHORTD2, re-import idempotence = created 0, degenerate refusal). 618→622 passed,
   tsc clean. Owner's earlier line "not yet run live + not pushed" is now stale for the *cohort*
   portion: it promotes on the next live import, no extra flag.
+
+### Migration prefix collisions — kept, guarded, never renamed (2026-09-20)
+
+Two prefixes carry two migrations each: `0008_bond_units` + `0008_phase1_intel`, and
+`0009_amfi_scheme_code` + `0009_web_uploads`. (`0007` is *not* a collision — the other
+quotes file is `0010_phase1_quotes`; an earlier note claiming a 0007 pair was wrong.)
+
+`runMigrations` sorts on the whole filename (`src/db/migrate.ts:21`), so a duplicate prefix
+hands ordering to whatever follows the underscore — `bond_units` before `phase1_intel`,
+`amfi_scheme_code` before `web_uploads`. Deterministic, not racy: JS default sort is
+UTF-16 code-unit order, no locale. **Not a live defect** — neither pair has an intra-pair
+dependency; all four only need `instruments` from `0001`.
+
+- **Never renumber an applied migration.** `schema_migrations` is keyed by filename
+  (`name text primary key`) and `runMigrations` reads the applied set *before* the loop, so
+  a renamed file reads as unapplied and re-runs — `0008_phase1_intel` re-running means
+  `create table watchlist` against an existing table. A rename would require a permanent
+  legacy-name alias map in the runner; rejected as cruft for a cosmetic renumber.
+- Guarded instead by two tests in `tests/db/migrate.test.ts` (`migration numbering`): no new
+  duplicate prefixes, and the `LEGACY_DUPLICATE_PREFIXES` exemption set must stay honest
+  (each listed prefix must still have exactly 2 files, so the exemption can't rot into
+  cover for a fresh collision). File list is read from the real `migrations/` dir, not
+  hard-coded. Both mutation-checked red: adding `0011_dupe_probe.sql` fails the first,
+  adding a single-file prefix to the exemption set fails the second. 697 tests, tsc clean.

@@ -1,9 +1,48 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
+
+const MIGRATIONS_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
+
+// 0008 and 0009 each carry two migrations. Both pairs are order-independent --
+// neither member depends on the other, both need only `instruments` from 0001 --
+// and renaming a migration that has already been applied makes it read as
+// unapplied and re-run, so these names stay. New collisions are not allowed:
+// runMigrations sorts on the whole filename, so a duplicate prefix hands the
+// ordering to whatever follows the underscore.
+const LEGACY_DUPLICATE_PREFIXES = new Set(['0008', '0009']);
+
+async function migrationPrefixes(): Promise<Map<string, string[]>> {
+  const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
+  const byPrefix = new Map<string, string[]>();
+  for (const file of files) {
+    const prefix = file.slice(0, 4);
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), file]);
+  }
+  return byPrefix;
+}
+
+describe('migration numbering', () => {
+  it('has no duplicate prefixes beyond the documented legacy pairs', async () => {
+    const collisions = [...(await migrationPrefixes())]
+      .filter(([prefix, files]) => files.length > 1 && !LEGACY_DUPLICATE_PREFIXES.has(prefix))
+      .map(([, files]) => files.join(' + '));
+    expect(collisions).toEqual([]);
+  });
+
+  it('keeps the legacy exception list honest', async () => {
+    const byPrefix = await migrationPrefixes();
+    for (const prefix of LEGACY_DUPLICATE_PREFIXES) {
+      // If a legacy pair is ever renumbered, drop it from the set rather than
+      // leaving a stale exemption that would hide a fresh collision.
+      expect(byPrefix.get(prefix)?.length, `prefix ${prefix}`).toBe(2);
+    }
+  });
+});
 
 describe('migration runner', () => {
   it('applies migrations once and is idempotent', async () => {
