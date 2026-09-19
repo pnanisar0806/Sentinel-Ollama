@@ -19,14 +19,15 @@ MEMORY.md; the code map lives in index.md.
       Supabase — all 19 pages 200, zero server errors. 689 tests, both typechecks clean.
       Pushed to `main` (f30a99e). **Still not deployed** — see the Vercel item below.
 
-- [ ] **VERCEL DEPLOY IS BLOCKED ON TWO THINGS.** `docs/SETUP.md` step 7 still reads
-      ⬜ Not deployed, and the project has to be created from the owner's Vercel account
-      with `DATABASE_URL` pasted in as an env var. Before that is attempted: with Root
-      Directory = `web`, Vercel installs `web/package.json` only, which lists just
-      next/react/typescript. The bundle pulls in `src/db/client.ts`, which imports
-      `postgres` and `@electric-sql/pglite` — resolved locally by walking up to the root
-      `node_modules`, absent on Vercel. Either add both to `web/package.json` or make the
-      repo a pnpm workspace and point Vercel's install command at the root. Owner's call.
+- [ ] **VERCEL DEPLOY — owner step, one setting left to get right.** `docs/SETUP.md`
+      step 7 still reads ⬜ Not deployed; the project has to be created from the owner's
+      Vercel account with `DATABASE_URL` pasted in as an env var. The dependency half is
+      fixed: `postgres` and `@electric-sql/pglite` are now direct deps of
+      `web/package.json`, so an install rooted at `web/` gets them (they used to resolve
+      only by walking up to the repo-root `node_modules`, which Vercel would not have).
+      Still required in the Vercel project settings: Root Directory = `web` **with
+      "Include source files outside of the Root Directory in the Build Step" enabled** —
+      the app imports `../../src/**` and the build fails without it.
 
 - [ ] **OWNER TRUE-UP: production `settings_rails` holds only `cash.ceiling = 0.2`.**
       `DEFAULT_OWNER_RAILS` in `src/domain/rails.ts` defines eight rails
