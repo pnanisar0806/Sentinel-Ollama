@@ -17,7 +17,16 @@ MEMORY.md; the code map lives in index.md.
       `effective_at` (postgres-js returns a `Date`, PGlite a string) — the shim had been
       hiding that bug. Verified: `next build` with no DATABASE_URL, then `next start` against
       Supabase — all 19 pages 200, zero server errors. 689 tests, both typechecks clean.
-      **Not yet pushed / deployed to Vercel.**
+      Pushed to `main` (f30a99e). **Still not deployed** — see the Vercel item below.
+
+- [ ] **VERCEL DEPLOY IS BLOCKED ON TWO THINGS.** `docs/SETUP.md` step 7 still reads
+      ⬜ Not deployed, and the project has to be created from the owner's Vercel account
+      with `DATABASE_URL` pasted in as an env var. Before that is attempted: with Root
+      Directory = `web`, Vercel installs `web/package.json` only, which lists just
+      next/react/typescript. The bundle pulls in `src/db/client.ts`, which imports
+      `postgres` and `@electric-sql/pglite` — resolved locally by walking up to the root
+      `node_modules`, absent on Vercel. Either add both to `web/package.json` or make the
+      repo a pnpm workspace and point Vercel's install command at the root. Owner's call.
 
 - [ ] **OWNER TRUE-UP: production `settings_rails` holds only `cash.ceiling = 0.2`.**
       `DEFAULT_OWNER_RAILS` in `src/domain/rails.ts` defines eight rails
