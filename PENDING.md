@@ -5,6 +5,9 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **PHASE 2 TASK 4 COMPLETE (2026-09-19): Web approval/cleanup/rail surfaces.**
+      Implemented: /approvals page with pending queue and detail view (immutable history, paper simulations, payload snapshot); actions: Approve/Reject/Defer, plus advisory Await execution/Verify/Abandon. /cleanup page with freeze/breaker state, rail cooling countdown, drawdown, bond maturities (60-day horizon), sell trigger candidates, LTCG harvest notice. API routes at /api/approvals/[id]/{approve,reject,defer,await-exec,verify,abandon} mirroring Telegram bot flow with append-only transitions and audit_log. Navigation updated. All 687 tests pass, tsc clean.
+
 - [x] **PHASE 2 TASK 3 COMPLETE (2026-09-19): Paper legacy cleanup + multi-year LTCG calendar (FR-14, §3.9).**
       Implemented: generateCleanupRecommendations (smallcase termination retaining constituent ETFs, micro-orphans <₹5k, thesis-less consolidation, Groww RPOWER manual closure, bond credit review, Sammaan Sep-2026 maturity routing to B3, LTCG harvest scheduled across 1–2 fiscal years using ₹1.25L/year exemption pending §15.1 law verification). All recommendations are FR-11 paper objects with 2 alternates (index-route A1, do-nothing A2). Uses known FIFO lots only; unknown cost basis → owner prerequisites, never ₹0. toPaperRecommendations converts to persistable recommendations. 14 tests added, all 687 tests pass, tsc clean.
 

@@ -13,6 +13,10 @@ import { currentIps } from '../../src/domain/ips.js';
 import { projectVests, type VestEvent } from '../../src/domain/rsu.js';
 import { fetchLiveRsuInputs } from '../../src/sources/rsu-live.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
+import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
+import { getFreezeState, getBreakerState } from '../../src/domain/rails.js';
+import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
+import { concentration } from '../../src/domain/allocation.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -181,4 +185,168 @@ export async function getAudit(limit = 80): Promise<AuditRow[]> {
     actor: r.actor,
     payloadText: typeof r.payload === 'string' ? r.payload : JSON.stringify(r.payload ?? {}),
   }));
+}
+
+export interface OrderIntentRow {
+  id: string;
+  stableTag: string;
+  createdAt: string;
+  createdBy: 'advisor' | 'owner';
+  recommendationId: number;
+  intent: 'BUY' | 'SELL' | 'SWITCH' | 'HOLD';
+  instrumentId: string;
+  quantity: string;
+  limitPricePaise: string | null;
+  orderType: 'MARKET' | 'LIMIT';
+  deferUntil: string | null;
+  alternateInstrumentId: string | null;
+  payloadSnapshot: Record<string, unknown>;
+  currentRevision: number;
+  expiresAt: string | null;
+  advisoryPath: boolean;
+  asOf: string;
+  source: string;
+  status: string;
+}
+
+export interface OrderTransitionRow {
+  id: string;
+  orderIntentId: string;
+  revisionNumber: number;
+  fromStatus: string;
+  toStatus: string;
+  actor: 'owner' | 'agent' | 'broker' | 'system';
+  at: string;
+  payloadSnapshot: Record<string, unknown>;
+  expectedRevision: number;
+  idempotencyKey: string | null;
+}
+
+export interface OrderSimulationRow {
+  id: string;
+  orderIntentId: string;
+  revisionNumber: number;
+  simType: string;
+  simulatedAt: string;
+  inputState: Record<string, unknown>;
+  outcomeState: Record<string, unknown>;
+  note: string;
+}
+
+export async function getOrderIntents(): Promise<OrderIntentRow[]> {
+  const d = await db();
+  const rows = await d.query<OrderIntentRow>(
+    'select * from order_intents order by created_at desc',
+  );
+  return rows.map((r) => ({
+    ...r,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : String(r.createdAt),
+    expiresAt: r.expiresAt ? (r.expiresAt instanceof Date ? r.expiresAt.toISOString() : String(r.expiresAt)) : null,
+    asOf: r.asOf instanceof Date ? r.asOf.toISOString() : String(r.asOf),
+  }));
+}
+
+export async function getOrderIntent(id: string): Promise<OrderIntentRow | null> {
+  const d = await db();
+  const [row] = await d.query<OrderIntentRow>(
+    'select * from order_intents where id = $1',
+    [id],
+  );
+  if (!row) return null;
+  return {
+    ...row,
+    createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt),
+    expiresAt: row.expiresAt ? (row.expiresAt instanceof Date ? row.expiresAt.toISOString() : String(row.expiresAt)) : null,
+    asOf: row.asOf instanceof Date ? row.asOf.toISOString() : String(row.asOf),
+  };
+}
+
+export async function getOrderTransitions(orderIntentId: string): Promise<OrderTransitionRow[]> {
+  const d = await db();
+  const rows = await d.query<OrderTransitionRow>(
+    'select * from order_transitions where order_intent_id = $1 order by at desc',
+    [orderIntentId],
+  );
+  return rows.map((r) => ({
+    ...r,
+    at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
+  }));
+}
+
+export async function getOrderSimulations(orderIntentId: string): Promise<OrderSimulationRow[]> {
+  const d = await db();
+  const rows = await d.query<OrderSimulationRow>(
+    'select * from order_simulations where order_intent_id = $1 order by simulated_at desc',
+    [orderIntentId],
+  );
+  return rows.map((r) => ({
+    ...r,
+    simulatedAt: r.simulatedAt instanceof Date ? r.simulatedAt.toISOString() : String(r.simulatedAt),
+  }));
+}
+
+export async function getApprovalData() {
+  const d = await db();
+  const intents = await getOrderIntents();
+  const pending = intents.filter((i) => ['PENDING_APPROVAL', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'].includes(i.status));
+  const history = intents.filter((i) => !['PENDING_APPROVAL', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'].includes(i.status));
+  return { pending, history, all: intents };
+}
+
+export interface CleanupCalendarData {
+  redemptions: Redemption[];
+  freezeState: { active: boolean; frozenAt: string | null; reason: string | null };
+  breakerState: { active: boolean; consecutiveFalsifications: number; lastFalsificationAt: string | null; demotedAt: string | null; postMortemNote: string | null };
+  railCoolingUntil: string | null;
+  exitCandidates: ExitCandidate[];
+  drawdownPct: number | null;
+}
+
+export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
+  const d = await db();
+  const now = new Date().toISOString().slice(0, 10);
+  
+  // Get redemptions within 60 days
+  const redemptions = await listRedemptionsUntil(d, 60, new Date(now));
+  
+  // Get freeze and breaker state
+  const freezeState = await getFreezeState(d);
+  const breakerState = await getBreakerState(d);
+  
+  // Get rail cooling
+  const [coolingRow] = await d.query<{ value: { cooling_until: string } | string }>(
+    `select value from settings_rails where key = 'last_rail_change'`
+  );
+  let railCoolingUntil: string | null = null;
+  if (coolingRow) {
+    const val = typeof coolingRow.value === 'string' ? JSON.parse(coolingRow.value) : coolingRow.value;
+    if (val.cooling_until && new Date(val.cooling_until) > new Date()) {
+      railCoolingUntil = val.cooling_until;
+    }
+  }
+  
+  // Get drawdown
+  const [drawdown] = await d.query<{ current_pct: number }>(
+    `select current_pct from portfolio_drawdown where as_of = (select max(as_of) from portfolio_drawdown)`
+  );
+  
+  // Get exit candidates (sell triggers)
+  const input = await buildDigestInput(d, new Date().toISOString());
+  const positions = await loadPositions(d, input.businessDate);
+  const blocked = blockedInstruments(input.staleness, positions);
+  const exitState: ExitState = {
+    positions,
+    blockedIds: blocked,
+    alternatives: [], // Better alternatives would need composite scores
+  };
+  const exitCandidates = await evaluateExits(d, exitState, now.slice(0, 7));
+  
+  return {
+    redemptions,
+    freezeState,
+    breakerState,
+    railCoolingUntil,
+    exitCandidates,
+    drawdownPct: drawdown?.current_pct ?? null,
+  };
 }

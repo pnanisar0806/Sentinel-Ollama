@@ -156,21 +156,24 @@ Telegram, digest/report wiring; domain/bot/architecture tests.
 **Files:** `src/domain/cleanup.ts`, `src/jobs/cleanup.ts`, tests; schema only if existing
 recommendation/event records cannot express the standing queue.
 
-- [ ] Generate PAPER FR-11 recommendations: terminate all four smallcase subscriptions while
+- [x] Generate PAPER FR-11 recommendations: terminate all four smallcase subscriptions while
   retaining constituent ETFs, thesis-less consolidation, micro-orphans <₹5k first, bond credit
   review, and existing Sammaan Sep-2026 maturity → B3 routing surfaced for event confirmation.
-- [ ] Groww Reliance Power surfaces once as **close manually**, not SKIPPED solely because
+- [x] Groww Reliance Power surfaces once as **close manually**, not SKIPPED solely because
   integration is absent. Do not duplicate a closure already evidenced by owner records.
-- [ ] Schedule eligible equity LTCG harvesting across 1–2 fiscal years (Apr–Mar), using the
+- [x] Schedule eligible equity LTCG harvesting across 1–2 fiscal years (Apr–Mar), using the
   PRD's ₹1.25L exemption parameter pending §15.1 build-time law verification. It is not a
   customizable tax allowance or an exemption for every asset class.
-- [ ] Use known FIFO acquisition dates, units and costs only. Existing aggregate owner-cost
+- [x] Use known FIFO acquisition dates, units and costs only. Existing aggregate owner-cost
   lots (quantity may be 1) are not reliable acquisition lots. Missing history/realized gains/
   corporate actions → unknown estimates and named owner-data prerequisites, never ₹0 tax or
   a fabricated available exemption. Show STCG/LTCG and remaining budget only when supported.
-- [ ] Wire sell trigger 6 to the standing paper queue. No `runCleanup` execution, real fills,
+- [x] Wire sell trigger 6 to the standing paper queue. No `runCleanup` execution, real fills,
   lot disposal, or actual exemption consumption; planned and realized amounts remain distinct.
   Full tax engine/seeded FIFO and live realization are Phase 3.
+
+**Implemented:** `src/domain/cleanup.ts` (generateCleanupRecommendations, toPaperRecommendations),
+`src/jobs/cleanup.ts` (CLI), `tests/domain/cleanup.test.ts` (14 tests). All 687 tests pass, tsc clean.
 
 ### Task 4: Extend existing web approval/cleanup/rail surfaces
 

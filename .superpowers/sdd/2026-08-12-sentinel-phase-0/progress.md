@@ -51,13 +51,22 @@
   * Groww RPOWER: surfaces once as manual closure (legacy_note), not skipped for missing integration
   * Bond credit review: Sammaan 2026/2029, Edelweiss 2033 as standing review items
   * Sammaan Sep-2026 maturity routing: pre-approved B3 routing surfaced for event confirmation
-  * LTCG harvest calendar: scheduled across 1–2 fiscal years (Apr–Mar), ₹1.25L/year exemption (pending §15.1 build-time law verification), FIFO lots only
+  * LTCG harvest calendar: scheduled across 1–2 fiscal years (Apr–Mar), ₹1.25L/year exemption (pending §15.1 law verification), FIFO lots only
 - Unknown cost basis: never ₹0, surfaces as owner prerequisites
 - toPaperRecommendations: converts cleanup recs to FR-11 objects with 2 alternates (A1 index-route NSE:NIFTYBEES, A2 do-nothing HOLD); legacy_note uses HOLD primary
 - All recommendations PAPER mode: no runCleanup execution, real fills, lot disposal, or actual exemption consumption
 - Wire sell trigger 6 to standing paper queue via FR-11 recommendations
 - 14 new tests in tests/domain/cleanup.test.ts
 - 687 tests pass, tsc clean
+
+## 2026-09-19 (Phase 2 Task 4 — Web approval/cleanup/rail surfaces)
+
+- /approvals page: pending queue with status badges, created/expiry dates; detail view at /approvals/[id] showing immutable history (order_transitions), paper simulations (order_simulations), payload snapshot, current revision
+- Actions on detail view: Approve (PENDING→APPROVED/ACKNOWLEDGED), Reject (any pending→REJECTED), Defer (sets defer_until, status→DEFERRED), Await execution (ACKNOWLEDGED→AWAITING_MANUAL_EXECUTION, advisory only), Verify (AWAITING_MANUAL_EXECUTION→VERIFIED, advisory only), Abandon (AWAITING_MANUAL_EXECUTION→ABANDONED, advisory only)
+- /cleanup page: freeze state (active/frozenAt/reason), breaker state (active/consecutive falsifications/post-mortem), rail cooling countdown, portfolio drawdown with §3.10 gating, bond maturities within 60 days (face value, coupon due, total), sell trigger candidates this month (trigger, instrument, action, evidence, hold overrides)
+- API routes: /api/approvals/[id]/{approve,reject,defer,await-exec,verify,abandon} — each creates append-only order_transitions row + audit_log entry; mirrors Telegram bot platform functions
+- Navigation updated: Governance group now includes Approvals and Cleanup
+- All 687 tests pass, tsc clean
 
 ## 2026-09-17 (Phase 2 planning)
 

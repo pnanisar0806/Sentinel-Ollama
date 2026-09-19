@@ -1,0 +1,179 @@
+import { getCleanupCalendar } from '../../../lib/data.js';
+import { Badge, Card, DataTable, Notice, PageHead, Pct } from '../../../lib/ui.js';
+import { fmtDateTime, relTime, formatInr } from '../../../lib/format.js';
+
+export const dynamic = 'force-dynamic';
+
+export default async function CleanupPage() {
+  const { redemptions, freezeState, breakerState, railCoolingUntil, exitCandidates, drawdownPct } = await getCleanupCalendar();
+
+  const statusMap: Record<string, { label: string; tone: 'green' | 'amber' | 'indigo' | 'gray' | 'red' }> = {
+    falsification: { label: 'FALSIFICATION', tone: 'red' },
+    'red-flag': { label: 'RED FLAG', tone: 'red' },
+    'hard-cap': { label: 'HARD CAP', tone: 'amber' },
+    underperformance: { label: 'UNDERPERF', tone: 'amber' },
+    'better-alternative': { label: 'BETTER ALT', tone: 'indigo' },
+    'credit-maturity': { label: 'MATURITY', tone: 'indigo' },
+  };
+
+  const exitRows = exitCandidates.map((c) => ({
+    key: `${c.trigger}-${c.instrumentId}`,
+    trigger: statusMap[c.trigger]?.label ?? c.trigger,
+    instrument: c.instrumentId,
+    action: c.action,
+    month: c.month,
+    evidence: c.evidence,
+    overridesHold: c.overridesMinimumHold ? 'Yes' : 'No',
+    blockedByHold: c.blockedByMinimumHold ? '⚠ BLOCKED' : 'No',
+    ips: c.ipsClauseRefs.join(', '),
+  }));
+
+  const redemptionRows = redemptions.map((r) => ({
+    key: r.instrumentId,
+    instrument: r.instrumentId,
+    symbol: r.symbol,
+    maturity: r.maturityDate,
+    daysUntil: r.daysUntil,
+    faceValue: formatInr(r.facePaise),
+    couponDue: r.couponDuePaise ? formatInr(r.couponDuePaise) : '—',
+    total: formatInr(r.facePaise + (r.couponDuePaise ?? 0n)),
+  }));
+
+  return (
+    <>
+      <PageHead
+        title="Cleanup calendar"
+        sub="Standing cleanup queue (IPS §3.9) — micro-orphans, thesis-less consolidation, LTCG harvest across fiscal years, bond maturities, and behavioral rails."
+      />
+
+      <div className="grid">
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Freeze state</span>
+            <span className="card-aside">{freezeState.active ? 'ACTIVE' : 'INACTIVE'}</span>
+          </header>
+          <div className="card-body">
+            <Badge tone={freezeState.active ? 'red' : 'green'}>{freezeState.active ? 'FREEZE ACTIVE' : 'Normal'}</Badge>
+            {freezeState.active && (
+              <>
+                <p style={{ marginTop: 8 }}>Frozen since: {freezeState.frozenAt ? fmtDateTime(freezeState.frozenAt) : 'unknown'}</p>
+                <p>Reason: {freezeState.reason ?? '—'}</p>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Breaker (3 falsifications → report-only)</span>
+            <span className="card-aside">{breakerState.active ? 'TRIPPED' : 'OK'}</span>
+          </header>
+          <div className="card-body">
+            <Badge tone={breakerState.active ? 'red' : 'green'}>{breakerState.active ? 'BREAKER TRIPPED' : 'Normal'}</Badge>
+            <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+              <div>Consecutive falsifications: <strong>{breakerState.consecutiveFalsifications}</strong> / 3</div>
+              <div>Last falsification: {breakerState.lastFalsificationAt ? fmtDateTime(breakerState.lastFalsificationAt) : '—'}</div>
+              {breakerState.active && (
+                <>
+                  <div>Demoted at: {breakerState.demotedAt ? fmtDateTime(breakerState.demotedAt) : '—'}</div>
+                  <div>Post-mortem: {breakerState.postMortemNote ?? 'Not recorded'}</div>
+                </>
+              )}
+            </div>
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Rail cooling & Drawdown</span>
+            <span className="card-aside">
+              {railCoolingUntil ? `Cooling until ${fmtDateTime(railCoolingUntil)}` : 'No cooling'}
+              {drawdownPct !== null && ` · Drawdown: ${drawdownPct}%`}
+            </span>
+          </header>
+          <div className="card-body">
+            {railCoolingUntil && (
+              <Badge tone="amber">Rail change cooling until {fmtDateTime(railCoolingUntil)}</Badge>
+            )}
+            {!railCoolingUntil && <Badge tone="green">No cooling period active</Badge>}
+            {drawdownPct !== null && (
+              <div style={{ marginTop: 8 }}>
+                <Badge tone={drawdownPct >= 20 ? 'red' : drawdownPct >= 15 ? 'amber' : 'green'}>
+                  Portfolio drawdown: {drawdownPct}%
+                </Badge>
+                {drawdownPct >= 20 && <span className="dim"> — §3.10 justification required for any SIP pause/panic sell</span>}
+                {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — Rail loosening blocked at drawdown >15%</span>}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Bond maturities (60-day horizon)</span>
+            <span className="card-aside">{redemptions.length} upcoming</span>
+          </header>
+          <div className="card-body">
+            {redemptions.length === 0 ? (
+              <Notice tone="gray">No maturities in horizon.</Notice>
+            ) : (
+              <DataTable
+                rows={redemptionRows}
+                cols={[
+                  { label: 'Instrument', value: (r) => <span className="mono">{r.instrument}</span> },
+                  { label: 'Symbol', value: (r) => r.symbol },
+                  { label: 'Maturity', value: (r) => r.maturity },
+                  { label: 'Days', align: 'right', value: (r) => r.daysUntil },
+                  { label: 'Face value', align: 'right', value: (r) => <span className="tnum">{r.faceValue}</span> },
+                  { label: 'Coupon due', align: 'right', value: (r) => <span className="tnum">{r.couponDue}</span> },
+                  { label: 'Total', align: 'right', value: (r) => <span className="tnum">{r.total}</span> },
+                ]}
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Sell trigger candidates (this month)</span>
+            <span className="card-aside">{exitCandidates.length} candidate(s)</span>
+          </header>
+          <div className="card-body">
+            {exitCandidates.length === 0 ? (
+              <Notice tone="green">No exit triggers fired this month.</Notice>
+            ) : (
+              <DataTable
+                rows={exitRows}
+                cols={[
+                  { label: 'Trigger', value: (r) => <Badge tone={statusMap[r.trigger]?.tone ?? 'gray'}>{r.trigger}</Badge> },
+                  { label: 'Instrument', value: (r) => <span className="mono">{r.instrument}</span> },
+                  { label: 'Action', value: (r) => r.action },
+                  { label: 'Month', value: (r) => r.month },
+                  { label: 'Evidence', value: (r) => <span className="dim">{r.evidence}</span> },
+                  { label: 'Overrides hold', value: (r) => r.overridesHold },
+                  { label: 'Blocked by hold', value: (r) => r.blockedByHold },
+                  { label: 'IPS refs', value: (r) => <span className="mono dim">{r.ips}</span> },
+                ]}
+              />
+            )}
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">LTCG Harvest (IPS §3.9)</span>
+            <span className="card-aside">₹1.25L/year exemption</span>
+          </header>
+          <div className="card-body">
+            <Notice tone="indigo">
+              Cleanup recommendations are generated via <code>pnpm cleanup</code> and appear as paper FR-11 recommendations.
+              They include: smallcase termination, micro-orphans <₹5k, thesis-less consolidation, Groww RPOWER manual closure,
+              bond credit review, Sammaan maturity routing to B3, and LTCG harvest scheduled across 1–2 fiscal years.
+            </Notice>
+            <p className="dim">Run <code>pnpm cleanup</code> to refresh the standing queue. All recommendations are PAPER mode — no execution without fresh approval.</p>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}

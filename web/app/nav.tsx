@@ -26,6 +26,8 @@ const GROUPS: {
     label: 'Governance',
     items: [
       { href: '/rails', label: 'Owner rails', stage: 'live' },
+      { href: '/approvals', label: 'Approvals', stage: 'live' },
+      { href: '/cleanup', label: 'Cleanup', stage: 'live' },
       { href: '/rsu', label: 'RSU', stage: 'live' },
       { href: '/ips', label: 'IPS', stage: 'live' },
       { href: '/freshness', label: 'Data freshness', stage: 'live' },

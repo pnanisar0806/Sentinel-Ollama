@@ -83,10 +83,13 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `web/lib/domain-ips-shim.ts` | webpack-safe stand-in for `src/domain/ips.ts` (see next.config); reads the same immutable `src/config/ips-v1.md` and re-exports `IPS_V1_TEXT`, `currentIps`, `ipsClause`, `renderIps` |
 | `web/app/{page,holdings,allocation,buckets,rails,rsu,ips,freshness,audit}/page.tsx` | live Phase 0 views via the pure domain functions |
 | `web/app/{watchlist,signals,recommendations,maturity,narrative,scoring}/page.tsx` | honest shells ("builds in Task N") |
+| `web/app/approvals/page.tsx` | `/approvals` — pending queue with status badges, detail view at `/approvals/[id]` with immutable history, paper simulations, payload snapshot; actions: Approve/Reject/Defer, plus advisory Await/Verify/Abandon |
+| `web/app/cleanup/page.tsx` | `/cleanup` — standing cleanup calendar (IPS §3.9): freeze/breaker state, rail cooling, drawdown, bond maturities (60-day), sell trigger candidates, LTCG harvest notice |
+| `web/app/api/approvals/[id]/{approve,reject,defer,await-exec,verify,abandon}/route.ts` | POST endpoints mirroring Telegram bot approval flow; append-only transitions + audit_log |
 | `web/app/product/page.tsx` | AREAS map |
 | `web/lib/ingest.ts` | server-only import helpers: `ensureWebIngestion` (applies migration 0009 on first `/import` load), `archiveFiles`, `insertUpload`, `extractBrokerage` (displayOrder + knownTickers + LLM + conflict detection), `extractFidelity` (LLM + FX + grant dedupe), `listUploads`, `confirmUpload` (brokerage via `insertOwnerCostLot`, fidelity via `persistVests`+`confirmVest`), `rejectUpload`, `resolveUpload` (status + audit_log) |
 | `web/lib/format.ts` | client-safe helpers: `fmtDate`, `fmtDateTime`, `relTime`, `rupees`, `unitsStr` |
-| `web/app/nav.tsx` | client nav: Portfolio / Intake (Import statements) / Governance / Phase 1 «soon» chips / System |
+| `web/app/nav.tsx` | client nav: Portfolio / Intake (Import statements) / Governance (Owner rails, Approvals, Cleanup, RSU, IPS, Freshness, Audit) / Phase 1 «soon» chips / System |
 | `web/app/import/page.tsx` | `/import` — pending + history sections; LLM-configured notice |
 | `web/app/import/upload-form.tsx` | multi-file upload: kind toggle (brokerage/fidelity), file picker, submit, refresh |
 | `web/app/import/review-panel.tsx` | per-proposal review: status badges, selectable subset confirm, reject-all, conflict badge |
