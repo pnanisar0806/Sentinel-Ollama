@@ -729,3 +729,41 @@ at all, and nothing in this package substitutes for them.
 
 Every engine item here ships with its page in the same task — see CLAUDE.md
 "Backend and UI ship together".
+
+- [x] **Sizing authority settled 2026-09-20 — code sizes, advisor selects.** Envelope
+      ₹20,000/month. The LLM picks which candidate and whether to act at all; deterministic
+      code attaches the quantity. MF modification authorised, which unlocks `mf_switch`.
+      See MEMORY for the reasoning and the firewall constraint it respects.
+
+- [ ] **BUILD: monthly financial snapshot + expense and surplus trend.** Owner's ask —
+      the modelled ₹77,350 of fixed outflows cannot see credit-card spend, so the ₹82,124
+      modelled surplus is not the real one. Measure it instead, monthly, via the
+      balance-delta identity (MEMORY has the derivation and why card billing dates and
+      double counting both fall out of it):
+
+          spend = take-home − Δsavings − Δinvested_cost − loan payments + Δcard outstanding
+
+      - [ ] Snapshot job: persist month-end savings balances, per-card outstanding,
+            `invested_value` per asset type, and the month's loan payment. All from
+            INDmoney's snapshot endpoints — there is no transaction feed and none is
+            needed. Append-only, each row carrying `as_of` and `source`.
+      - [ ] Derive spend and realised surplus per month; trend both.
+      - [ ] Page under `web/app/` per the backend-and-UI rule, showing modelled vs realised
+            surplus side by side so the gap is visible rather than argued about.
+      - [ ] **Owner check first:** is INDmoney's `total_due` the full outstanding including
+            unbilled, or only the billed statement? If billed-only the identity lags a
+            cycle. Compare one card against the issuer's current-outstanding figure.
+      - [ ] Note: **cannot be backfilled.** INDmoney serves today only, so the trend begins
+            at the first snapshot and needs 2-3 months to mean anything.
+
+- [ ] **Acquisition dates missing — blocks every tax-aware sell.** `lots` has 95 rows over
+      29 instruments, all with cost, but `acquired_on` is `2026-08-25` on all of them (the
+      upload date). Holding period is therefore unknown, so LTCG/STCG cannot be split and
+      no sell can be priced for tax. Cost basis is NOT the gap; dates are. Zerodha's tax
+      P&L export carries them.
+
+- [ ] **Smallcase provenance — owner to supply.** Which of the 25 individual stocks came
+      from the four smallcases versus bought directly. Owner will try to export a smallcase
+      report. Units themselves are NOT needed from the owner — INDmoney already returns real
+      units for all 29 holdings; the DB's `quantity = 1` rows are a stale-ingestion bug on
+      our side, not missing data upstream.

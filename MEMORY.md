@@ -1897,3 +1897,61 @@ are placeholders, not holdings. Phase 2.5 Task 4 sizes a SELL "by actually owned
 ₹6,55,400, 79% of the ₹8,29,400 smallcase-related total, so this is not a rounding
 concern. Fixing the units is a prerequisite to any smallcase exit advice, ahead of the
 decompose-vs-single question.
+
+### Owner decisions 2026-09-20 — advisor authority, and measuring real spend
+
+**Sizing authority (resolves the Task 4 blocker, within the firewall).** Owner declined to
+set a hard per-action rule and asked to "let the advisor decide". Taken as: **code sizes,
+advisor selects.** Deterministic code computes each candidate's size from the ₹20,000
+monthly envelope plus the rails; the LLM chooses *which* candidate and *whether* to act
+(BUY/SELL/HOLD/WAIT, including none). This keeps PRD §6.7 and Phase 2.5's
+"model-supplied numeric overrides fail" intact — confirmed with the owner, who agreed the
+reading. Owner additionally authorises the advisor to propose **MF modifications**, which
+unlocks `mf_switch`. Consequence: changing a SIP changes the ₹30,254 commitment and so the
+free envelope, therefore the sizer must re-read live SIPs each run and never cache them.
+
+**Why the modelled surplus is wrong, from the owner: credit cards.** `surplus.ts` subtracts
+five fixed outflows totalling ₹77,350 and nothing else, so it cannot see card spend. The
+owner wants surplus and expenses measured from real month-end data instead.
+
+**The balance-delta identity makes billing dates irrelevant.** Cards bill on different days
+(20th, 28th/29th, others), so no statement-aligned sum gives a calendar month. It does not
+need to. For month M:
+
+    total spend = take-home − Δ(savings) − Δ(invested cost) − loan payments + Δ(card outstanding)
+
+Card *payments* cancel out of that derivation entirely — a payment moves money from the
+savings term to the card term and nets to zero — so **the billing cycle never has to be
+aligned, and no expense can be counted twice.** A swipe is counted once, when it raises the
+card outstanding; paying the bill later is a transfer, not an expense.
+
+INDmoney supplies every term as a **snapshot** (no transaction feed, and none needed):
+
+- `networth_holdings(SA)` — savings balances per bank (HDFC + SBI, ₹2,46,348.75 today).
+- `networth_snapshot.liabilities.credit_cards` — per-card dues across 6 cards
+  (₹1,03,325.57 today; Regalia Gold ₹43,869, Yes Klick ₹43,242.57, BPCL SBI ₹9,001,
+  ICICI Amazon Pay ₹7,213, two at zero).
+- `networth_snapshot.investments[].invested_value` — **cumulative cost**, so its month-on-
+  month delta is money actually deployed, immune to market movement. Do not use
+  `current_value` for this.
+- Loan payments come from the existing `loan_schedule`.
+
+**Unverified and load-bearing:** whether `total_due` is the full outstanding *including
+unbilled* spend or only the billed statement amount. If it is billed-only, the identity
+lags by up to one cycle and under-reports a month in which spending accelerated. Only two
+of the six cards even carry a `due_date`, which is weak evidence either way. Owner to check
+one card's INDmoney figure against the issuer's current-outstanding. CRED is not obviously
+better here — it is also statement-centric; the issuer app's "current outstanding" is the
+figure that settles it.
+
+**This cannot be backfilled.** INDmoney serves only today's snapshot, so the trend starts
+the first month a snapshot job runs and needs 2-3 months before it says anything. The
+`misc: ₹10,000` assumption is exactly what it will falsify or confirm.
+
+### Cost basis exists; acquisition dates do not (2026-09-20)
+
+`lots` holds 95 rows across 29 instruments and **every one carries a cost** — the owner's
+Zerodha average-price upload landed. But `acquired_on` is `2026-08-25` on all 95 rows: the
+upload date, not the purchase date. Cost basis is therefore usable for P&L and useless for
+holding period, so **no LTCG/STCG split can be computed** and a tax-aware sell is blocked
+on real acquisition dates, not on cost. Zerodha's tax P&L report carries them.
