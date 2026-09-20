@@ -1,4 +1,4 @@
-import { openDb } from '../db/client.js';
+import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
 import { installIps } from '../domain/ips.js';
@@ -6,6 +6,31 @@ import { loadPositions, type Position } from '../domain/networth.js';
 import { generateCleanupRecommendations, toPaperRecommendations, type CleanupRec } from '../domain/cleanup.js';
 import { persistRecommendation, isPaperMode, type OverrideEvent, buildRecommendation } from '../domain/recommendations.js';
 import { isMainModule } from '../util/main-module.js';
+import { seedSmallcases } from '../seed/seed-smallcases.js';
+
+/**
+ * Has cleanup already run for this business date?
+ *
+ * `persistRecommendation` is a bare INSERT into an append-only table, so a second run on
+ * one day writes duplicate advisory rows that nothing can delete. Same guard, same
+ * audit_log mechanism and same reason as the weekly report's.
+ */
+export async function alreadyCleanedUpFor(db: Db, asOf: string): Promise<boolean> {
+  const rows = await db.query<{ one: number }>(
+    `select 1 as one from audit_log
+      where entity = 'cleanup' and entity_id = $1 and action = 'CLEANUP_RUN' limit 1`,
+    [asOf],
+  );
+  return rows.length > 0;
+}
+
+export async function recordCleanupRun(db: Db, asOf: string, persisted: number): Promise<void> {
+  await db.query(
+    `insert into audit_log (entity, entity_id, action, actor, payload)
+     values ('cleanup', $1, 'CLEANUP_RUN', 'agent', $2::jsonb)`,
+    [asOf, JSON.stringify({ asOf, persisted })],
+  );
+}
 
 /** This job generates cleanup recommendations; it needs DATABASE_URL only. */
 export const ENV_PURPOSES: Purpose[] = [];
@@ -19,6 +44,21 @@ if (isMainModule(import.meta.url)) {
   const now = new Date().toISOString();
   const businessDate = now.slice(0, 10);
   const createdOn = businessDate;
+
+  if (await alreadyCleanedUpFor(db, businessDate)) {
+    console.log(`cleanup already ran for ${businessDate} — nothing to do`);
+    await db.close();
+    process.exit(0);
+  }
+
+  // The decomposition references IND:* instruments that the live sync creates, so this
+  // is a no-op until a sync has run. Idempotent; reports anything it had to skip rather
+  // than leaving a smallcase silently undecomposed.
+  const seeded = await seedSmallcases(db);
+  if (seeded.inserted > 0) console.log(`smallcase positions recorded: ${seeded.inserted}`);
+  if (seeded.skipped.length > 0) {
+    console.error(`smallcase constituents skipped (instrument unknown — run sync first): ${seeded.skipped.join(', ')}`);
+  }
 
   // Build cleanup input from current positions
   const positions = await loadPositions(db);
@@ -88,12 +128,13 @@ if (isMainModule(import.meta.url)) {
   console.log(`Thesis-less consolidation: ${cleanup.thesisLess.length}`);
   console.log(`LTCG harvest plans: ${cleanup.ltcgHarvest.length}`);
   console.log(`Legacy notes (Groww RPOWER): ${cleanup.legacyNotes.length}`);
-  console.log(`Smallcase termination: ${cleanup.cleanupRecs.filter(r => r.instrumentId === 'NSE:SMALLCASE-RESIDUE').length}`);
+  console.log(`Smallcase subscription notes: ${cleanup.cleanupRecs.filter(r => r.reason.includes('subscription')).length}`);
   console.log(`Bond credit reviews: ${cleanup.cleanupRecs.filter(r => r.instrumentId.startsWith('BOND:')).length}`);
   console.log(`Sammaan maturity routing: ${cleanup.sammaanRouting ? 'yes' : 'no'}`);
   console.log(`Total cleanup recommendations: ${cleanup.cleanupRecs.length}`);
   console.log(`Persisted: ${results.filter(r => !r.result.suppressed && r.result.id).length}`);
   console.log(`Suppressed: ${results.filter(r => r.result.suppressed).length}`);
 
+  await recordCleanupRun(db, businessDate, results.filter(r => !r.result.suppressed && r.result.id).length);
   await db.close();
 }

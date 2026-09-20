@@ -2,6 +2,7 @@ import type { Db } from '../db/client.js';
 import { rupees, type Paise, formatInr } from '../money/paise.js';
 import { buildRecommendation, type RecKind, type RecLeg, type OverrideEvent, type RecommendationInput, MAX_THESIS_WORDS } from './recommendations.js';
 import { listRedemptionsUntil, type Redemption } from './redemptions.js';
+import { loadSmallcasePositions } from '../seed/seed-smallcases.js';
 
 export const MICRO_ORPHAN_THRESHOLD = rupees('5000');
 export const LTCG_EXEMPTION_PER_FY = rupees('125000');
@@ -128,21 +129,46 @@ function buildMicroOrphanRec(instrumentId: string, name: string, valuePaise: Pai
   };
 }
 
-function buildSmallcaseTerminationRec(): CleanupRec {
+/**
+ * One note per smallcase, from the real decomposition rather than a phantom position.
+ *
+ * The old version keyed off `NSE:SMALLCASE-RESIDUE`, a seeded ₹6,55,400 line that
+ * modelled all four smallcases as one opaque blob. It has been retired: the live sync
+ * carries every constituent individually and `smallcase_positions` records which shares
+ * sit in which smallcase.
+ *
+ * The action is **HOLD, not SELL**. IPS §3.9 terminates the *subscription* — the
+ * rebalancing mandate and its fee — and retains the shares as direct holdings. The
+ * owner confirmed on 2026-09-20 that all smallcase transactions have stopped and that
+ * the 17-Sep rebalance will not be applied, so these are in run-off. Recommending a
+ * liquidation would be churn, which the long-term mandate forbids: nothing here has
+ * been falsified, it has merely stopped being managed by someone else.
+ */
+function buildSmallcaseTerminationRec(
+  smallcase: string,
+  positions: readonly { instrumentId: string; units: number }[],
+): CleanupRec {
+  const shares = positions
+    .map((p) => `${p.instrumentId} x${p.units}`)
+    .join(', ');
   return {
-    recommendation: 'sell',
-    instrumentId: 'NSE:SMALLCASE-RESIDUE',
-    action: 'SELL',
-    reason: 'Terminate smallcase subscriptions; retain constituent ETFs',
+    recommendation: 'legacy_note',
+    instrumentId: positions[0]?.instrumentId ?? 'PORTFOLIO',
+    // CLOSE_MANUALLY, because ending a subscription happens in the smallcase app and
+    // never as a broker order. It already maps to HOLD downstream, which is the right
+    // primary action: the shares are retained.
+    action: 'CLOSE_MANUALLY',
+    reason: `Terminate the ${smallcase} subscription; retain its shares`,
     thesis:
-      `All four smallcase subscriptions (Equity & Gold Asset Allocation, Dividend Aristocrats, ` +
-      `Timeless Asset Allocation, House of Mahindra tracker) are terminated per IPS §3.9. ` +
-      `The constituent ETFs — Nifty BeES, Junior BeES, Gold BeES, Liquid BeES — remain as direct ` +
-      `holdings under agent management. The smallcase residue position (unallocated cash/stocks) ` +
-      `is liquidated; its constituents are already represented individually in the portfolio. ` +
-      `This is a one-time structural cleanup, not a thesis-driven exit.`,
+      `IPS §3.9 ends the smallcase subscription, not the position. The ${smallcase} ` +
+      `rebalancing mandate stops and its shares stay as direct holdings under agent ` +
+      `management: ${shares}. Owner has already halted all smallcase transactions, so ` +
+      `this records a structural change, not a thesis-driven exit — no constituent has ` +
+      `been falsified and selling would realise tax for no reason.`,
     ipsClauseRefs: ['3.9'],
-    falsification: { metric: 'price_paise', op: 'lt', value: '1' },
+    // No price-based kill condition: this is a change of custodianship, not a call on
+    // any holding, so there is no price at which it becomes wrong.
+    falsification: null,
     unknownPrerequisites: undefined,
   };
 }
@@ -328,17 +354,19 @@ export async function generateCleanupRecommendations(
     sammaanRouting: null,
   };
 
-  // 1. Smallcase termination
-  const smallcaseResidue = input.positions.find((p) => p.instrumentId === 'NSE:SMALLCASE-RESIDUE');
-  if (smallcaseResidue) {
-    const rec = buildSmallcaseTerminationRec();
-    output.cleanupRecs.push(rec);
+  // 1. Smallcase subscriptions — one note each, from the real decomposition.
+  for (const [smallcase, positions] of await loadSmallcasePositions(db)) {
+    output.cleanupRecs.push(buildSmallcaseTerminationRec(smallcase, positions));
   }
 
   // 2. Micro-orphans <₹5k (excluding RPOWER which is a legacy note)
   for (const pos of input.positions) {
     if (
       pos.valuePaise < MICRO_ORPHAN_THRESHOLD &&
+      // Still excluded: NSE:SMALLCASE-RESIDUE remains in SEED_HOLDINGS. Dropping the
+      // guard let the ₹6,55,400 phantom fall into the thesis-less scan and earn a SELL
+      // recommendation — worse than the blob it replaced. The guard goes when the seed
+      // row does, and the two must move together.
       pos.instrumentId !== 'NSE:SMALLCASE-RESIDUE' &&
       pos.instrumentId !== 'NSE:RPOWER'
     ) {

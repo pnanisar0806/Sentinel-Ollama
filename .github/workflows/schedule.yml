@@ -26,3 +26,11 @@ jobs:
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec tsx --env-file-if-exists=.env src/jobs/schedule.ts
+      # Cleanup rides this daily slot rather than taking its own: it needs only
+      # DATABASE_URL and is a no-op once it has run for the business date. It had no
+      # caller at all until 2026-09-20 — no script, no workflow — which left eight
+      # written recommendation builders, including the smallcase and bond-credit ones,
+      # as dead code. continue-on-error so a cleanup fault never fails order expiry,
+      # which is the job this workflow exists for.
+      - run: pnpm cleanup
+        continue-on-error: true

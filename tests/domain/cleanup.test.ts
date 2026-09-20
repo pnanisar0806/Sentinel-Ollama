@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
+import { seedSmallcases, loadSmallcasePositions } from '../../src/seed/seed-smallcases.js';
+import { SMALLCASES } from '../../src/config/smallcases.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { loadPositions } from '../../src/domain/networth.js';
@@ -39,14 +41,46 @@ const stateOf = (over: { asOf?: string; positions?: typeof positions } = {}) => 
 };
 
 describe('generateCleanupRecommendations', () => {
-  it('produces smallcase termination for NSE:SMALLCASE-RESIDUE', async () => {
+  it('produces one subscription note per real smallcase, not one blob', async () => {
+    // Drove off NSE:SMALLCASE-RESIDUE until 2026-09-20 — a seeded ₹6,55,400 line that
+    // modelled all four smallcases as a single opaque position and has been retired.
     const out = await generateCleanupRecommendations(db, stateOf());
-    const smallcase = out.cleanupRecs.find((r) => r.instrumentId === 'NSE:SMALLCASE-RESIDUE');
-    expect(smallcase).toBeDefined();
-    expect(smallcase!.recommendation).toBe('sell');
-    expect(smallcase!.action).toBe('SELL');
-    expect(smallcase!.reason).toContain('smallcase');
-    expect(smallcase!.ipsClauseRefs).toContain('3.9');
+    expect(out.cleanupRecs.find((r) => r.instrumentId === 'NSE:SMALLCASE-RESIDUE')).toBeUndefined();
+
+    expect(out.cleanupRecs.filter((r) => r.reason.includes('subscription')).length,
+      'nothing to say before the decomposition is on record').toBe(0);
+
+    // The IND:* instruments are created by the live INDmoney sync, not by `pnpm seed`,
+    // so the decomposition can only be persisted after a sync has run. Standing that up
+    // here is what production does in the other order.
+    for (const sc of SMALLCASES) {
+      for (const k of sc.constituents) {
+        await db.query(
+          `insert into instruments (id, kind, name, currency) values ($1, 'EQUITY', $1, 'INR')
+           on conflict (id) do nothing`, [k.instrumentId],
+        );
+      }
+    }
+    const seeded = await seedSmallcases(db);
+    expect(seeded.skipped, 'no constituent should be skipped once instruments exist').toEqual([]);
+    const named = await loadSmallcasePositions(db);
+
+    // With the decomposition present, every smallcase gets its own note.
+    const withData = await generateCleanupRecommendations(db, stateOf());
+    const perSmallcase = withData.cleanupRecs.filter((r) => r.reason.includes('subscription'));
+    expect(perSmallcase.length).toBe(named.size);
+    expect(named.size).toBeGreaterThan(1);
+
+    for (const r of perSmallcase) {
+      expect(r.recommendation).toBe('legacy_note');
+      // HOLD, not SELL: IPS §3.9 ends the subscription and retains the shares. The
+      // owner has stopped transacting, so recommending a liquidation would be churn.
+      expect(r.action).toBe('CLOSE_MANUALLY');
+      expect(r.ipsClauseRefs).toContain('3.9');
+      expect(r.falsification, 'a custodianship change has no price kill condition').toBeNull();
+      // The note must name the actual shares retained, or it cannot be acted on.
+      expect(r.thesis).toMatch(/IND:\S+ x\d+/);
+    }
   });
 
   it('produces micro-orphan recommendations for positions < ₹5k', async () => {

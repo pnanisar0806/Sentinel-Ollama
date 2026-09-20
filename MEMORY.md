@@ -2144,3 +2144,44 @@ with the weakest XIRR of the four (4.17%).
 `cleanup.ts` references that instrument id in `buildSmallcaseTerminationRec` and its
 position scan, and that module is itself still unwired, so removing the row would change
 cleanup behaviour blind. Do both in one piece of work, not separately.
+
+### Cleanup wired; smallcase recs driven by real data (2026-09-20)
+
+`src/jobs/cleanup.ts` had **no caller at all** — no npm script, no workflow — which left
+eight written recommendation builders as dead code. Now `pnpm cleanup`, running daily on
+the back of `schedule.yml` (it needs only `DATABASE_URL`), `continue-on-error` so a
+cleanup fault never fails order expiry.
+
+- **Per-day idempotence**, same guard and same `audit_log` mechanism as the weekly
+  report: `alreadyCleanedUpFor` / `recordCleanupRun` on `entity='cleanup'`.
+  `persistRecommendation` is a bare INSERT into an append-only table, so a second run on
+  one date writes duplicates nothing can delete.
+- **The smallcase recommendation no longer keys off the phantom.** It reads
+  `smallcase_positions` and emits **one note per smallcase**, naming the exact shares.
+  Action is `CLOSE_MANUALLY` (which already maps to `HOLD` downstream), not `SELL`: IPS
+  §3.9 ends the *subscription*, not the position, the owner has already stopped
+  transacting, and liquidating would realise tax for nothing — churn the long-term
+  mandate forbids. `falsification` is null because a change of custodianship has no
+  price at which it becomes wrong.
+- **Ordering constraint:** the decomposition references `IND:*` instruments that only the
+  live sync creates, so `seedSmallcases` is a no-op until a sync has run. It reports what
+  it skipped rather than leaving a smallcase silently undecomposed.
+
+### Retiring the seed rows is NOT a free deletion — attempted and reverted
+
+Removing `NSE:SMALLCASE-RESIDUE` (₹6,55,400) and `CASH:SAVINGS` (₹1,63,000) from
+`SEED_HOLDINGS` **broke nine tests** in `tests/domain/allocation.test.ts`: the seeded
+portfolio's employer cap, its exact breach set and its IPS band positions are all
+calibrated to those totals against a ±1% reconciliation. Reverted rather than rewriting
+nine portfolio-shape assertions.
+
+A second trap found the same way: the residue's id is an **exclusion guard** in the
+micro-orphan and thesis-less scans. Removing the guards while the row still exists let
+the ₹6,55,400 phantom fall into thesis-less and earn a **SELL recommendation** — strictly
+worse than the blob. The guards and the seed row must move together, in one change.
+
+**What retiring them actually requires:** re-derive the seeded portfolio so it still
+reconciles to the owner's real net worth without those two lines, update the allocation
+assertions to the new shape with the arithmetic shown, and drop the guards in the same
+commit. Neither row causes harm in production today — both are absent from every live
+snapshot — so this is hygiene, not urgency.
