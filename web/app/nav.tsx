@@ -37,12 +37,15 @@ const GROUPS: {
   {
     label: 'Phase 1',
     items: [
-      { href: '/watchlist', label: 'Watchlist', stage: 'soon' },
-      { href: '/signals', label: 'Signal review', stage: 'soon' },
-      { href: '/recommendations', label: 'Recommendations', stage: 'soon' },
-      { href: '/maturity', label: 'Maturity', stage: 'soon' },
+      { href: '/watchlist', label: 'Watchlist', stage: 'live' },
+      { href: '/signals', label: 'Signal review', stage: 'live' },
+      { href: '/recommendations', label: 'Recommendations', stage: 'live' },
+      { href: '/maturity', label: 'Maturity', stage: 'live' },
+      // Still 'soon' on purpose: the weekly report and its narration ship to Telegram
+      // but are never persisted, so this page has no row to read. Engine built, table
+      // not. Flipping this to 'live' would promise a surface that renders nothing.
       { href: '/narrative', label: 'Narrative', stage: 'soon' },
-      { href: '/scoring', label: 'Scoring', stage: 'soon' },
+      { href: '/scoring', label: 'Scoring', stage: 'live' },
     ],
   },
   {

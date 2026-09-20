@@ -20,6 +20,7 @@ import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { concentration } from '../../src/domain/allocation.js';
+import { calibration, type Calibration } from '../../src/domain/scoring.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -358,5 +359,241 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
     railCoolingUntil,
     exitCandidates,
     drawdownPct: drawdown?.current_pct ?? null,
+  };
+}
+// ── Phase 1 surfaces ────────────────────────────────────────────────────────
+// postgres-js hands back a Date for date/timestamptz columns where PGlite hands back
+// a string. Everything below renders dates as ISO strings, so normalise once here
+// rather than repeating the check per field — the same driver divergence that the
+// IPS shim had been hiding before `currentIps` started normalising `effective_at`.
+function isoDate(v: unknown): string {
+  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v);
+}
+
+/** `text` columns holding JSON. A malformed row must not take the page down, so the
+ *  raw string is surfaced instead of thrown — an unreadable value is still evidence. */
+function parseJsonColumn<T>(raw: string | null, fallback: T): T | string {
+  if (raw === null || raw === '') return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return raw;
+  }
+}
+
+export interface WatchlistRow {
+  key: string;
+  instrumentId: string;
+  name: string;
+  addedOn: string;
+  removedOn: string | null;
+  source: string;
+  reason: string;
+}
+
+export async function getWatchlist(): Promise<{ active: WatchlistRow[]; removed: WatchlistRow[] }> {
+  const rows = await (await db()).query<{
+    instrument_id: string; name: string | null; added_on: unknown;
+    removed_on: unknown; source: string; reason: string;
+  }>(
+    `select w.instrument_id, i.name, w.added_on, w.removed_on, w.source, w.reason
+       from watchlist w left join instruments i on i.id = w.instrument_id
+      order by w.added_on desc, w.instrument_id`,
+  );
+  const mapped: WatchlistRow[] = rows.map((r) => ({
+    key: `${r.instrument_id}:${isoDate(r.added_on)}`,
+    instrumentId: r.instrument_id,
+    name: r.name ?? r.instrument_id,
+    addedOn: isoDate(r.added_on),
+    removedOn: r.removed_on === null ? null : isoDate(r.removed_on),
+    source: r.source,
+    reason: r.reason,
+  }));
+  return {
+    active: mapped.filter((r) => r.removedOn === null),
+    removed: mapped.filter((r) => r.removedOn !== null),
+  };
+}
+
+export interface SignalRow {
+  key: string;
+  instrumentId: string;
+  name: string;
+  composite: number;
+  qualityPassed: boolean;
+  valuation: number | null;
+  trend: number | null;
+  earnings: number | null;
+  fit: number | null;
+  rank: number | null;
+  rocePct: number | null;
+  deRatio: number | null;
+  fcfPositive5y: boolean | null;
+  redFlags: number | null;
+}
+
+/** The most recent scoring run only. Older runs are history, not the current view. */
+export async function getSignals(): Promise<{ scoreDate: string | null; rows: SignalRow[] }> {
+  const d = await db();
+  const [latest] = await d.query<{ score_date: unknown }>(
+    'select max(score_date) as score_date from signal_scores',
+  );
+  if (!latest?.score_date) return { scoreDate: null, rows: [] };
+  const scoreDate = isoDate(latest.score_date);
+
+  const rows = await d.query<{
+    instrument_id: string; name: string | null; composite: string; quality_passed: boolean;
+    reg_valuation: string | null; reg_trend: string | null; reg_earnings: string | null;
+    reg_fit: string | null; rank: number | null; roce_pct: string | null;
+    de_ratio: string | null; fcf_pos_5y: boolean | null; red_flags: number | null;
+  }>(
+    `select s.instrument_id, i.name, s.composite, s.quality_passed,
+            s.reg_valuation, s.reg_trend, s.reg_earnings, s.reg_fit, s.rank,
+            f.roce_pct, f.de_ratio, f.fcf_pos_5y, f.red_flags
+       from signal_scores s
+       left join instruments i on i.id = s.instrument_id
+       left join lateral (
+         select roce_pct, de_ratio, fcf_pos_5y, red_flags
+           from fundamentals ff
+          where ff.instrument_id = s.instrument_id
+          order by ff.upload_id desc limit 1
+       ) f on true
+      where s.score_date = $1
+      order by s.rank nulls last, s.composite desc`,
+    [scoreDate],
+  );
+  const num = (v: string | null): number | null => (v === null ? null : Number(v));
+  return {
+    scoreDate,
+    rows: rows.map((r) => ({
+      key: r.instrument_id,
+      instrumentId: r.instrument_id,
+      name: r.name ?? r.instrument_id,
+      composite: Number(r.composite),
+      qualityPassed: r.quality_passed,
+      valuation: num(r.reg_valuation),
+      trend: num(r.reg_trend),
+      earnings: num(r.reg_earnings),
+      fit: num(r.reg_fit),
+      rank: r.rank,
+      rocePct: num(r.roce_pct),
+      deRatio: num(r.de_ratio),
+      fcfPositive5y: r.fcf_pos_5y,
+      redFlags: r.red_flags,
+    })),
+  };
+}
+
+export interface RecommendationRow {
+  key: string;
+  id: string;
+  createdOn: string;
+  kind: string;
+  intent: string;
+  primary: string;
+  alternates: string[] | string;
+  ipsClauses: string[] | string;
+  evidence: unknown;
+  source: string;
+  suppressed: boolean;
+  suppressedReason: string | null;
+}
+
+export async function getRecommendations(limit = 50): Promise<RecommendationRow[]> {
+  const rows = await (await db()).query<{
+    id: string; created_on: unknown; kind: string; intent: string; primary_rec: string;
+    alternates: string; ips_clause_refs: string; engine_evidence: string; source: string;
+    suppressed: boolean; suppressed_reason: string | null;
+  }>(
+    `select id, created_on, kind, intent, primary_rec, alternates, ips_clause_refs,
+            engine_evidence, source, suppressed, suppressed_reason
+       from recommendations order by created_on desc, id desc limit $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    key: String(r.id),
+    id: String(r.id),
+    createdOn: isoDate(r.created_on),
+    kind: r.kind,
+    intent: r.intent,
+    primary: r.primary_rec,
+    alternates: parseJsonColumn<string[]>(r.alternates, []),
+    ipsClauses: parseJsonColumn<string[]>(r.ips_clause_refs, []),
+    evidence: parseJsonColumn<unknown>(r.engine_evidence, null),
+    source: r.source,
+    suppressed: r.suppressed,
+    suppressedReason: r.suppressed_reason,
+  }));
+}
+
+export interface MaturityInstrument {
+  key: string;
+  instrumentId: string;
+  name: string;
+  maturityDate: string;
+  facePaise: Paise | null;
+  couponRateBps: number | null;
+}
+
+export async function getMaturity(horizonDays = 365) {
+  const d = await db();
+  const redemptions = await listRedemptionsUntil(d, horizonDays);
+  const rows = await d.query<{
+    id: string; name: string | null; maturity_date: unknown;
+    face_value_paise: string | null; coupon_rate_bps: number | null;
+  }>(
+    `select id, name, maturity_date, face_value_paise, coupon_rate_bps
+       from instruments where maturity_date is not null order by maturity_date`,
+  );
+  const dated: MaturityInstrument[] = rows.map((r) => ({
+    key: r.id,
+    instrumentId: r.id,
+    name: r.name ?? r.id,
+    maturityDate: isoDate(r.maturity_date),
+    // Unknown face value stays null — never rendered as zero.
+    facePaise: r.face_value_paise === null ? null : (BigInt(r.face_value_paise) as Paise),
+    couponRateBps: r.coupon_rate_bps,
+  }));
+  return { redemptions, dated, horizonDays };
+}
+
+export interface ScoredRec {
+  key: string;
+  id: string;
+  createdOn: string;
+  kind: string;
+  intent: string;
+  benchmarkAsOf: string;
+  eval3m: unknown;
+  eval6m: unknown;
+  eval12m: unknown;
+}
+
+export async function getScoring(): Promise<{ calibration: Calibration; evaluated: ScoredRec[] }> {
+  const d = await db();
+  const cal = await calibration(d);
+  const rows = await d.query<{
+    id: string; created_on: unknown; kind: string; intent: string;
+    benchmark_as_of: unknown; eval_3m_jsonb: string | null;
+    eval_6m_jsonb: string | null; eval_12m_jsonb: string | null;
+  }>(
+    `select r.id, r.created_on, r.kind, r.intent, b.benchmark_as_of,
+            b.eval_3m_jsonb, b.eval_6m_jsonb, b.eval_12m_jsonb
+       from benchmarks b join recommendations r on r.id = b.recommendation_id
+      order by b.benchmark_as_of desc, r.id desc limit 50`,
+  );
+  return {
+    calibration: cal,
+    evaluated: rows.map((r) => ({
+      key: String(r.id),
+      id: String(r.id),
+      createdOn: isoDate(r.created_on),
+      kind: r.kind,
+      intent: r.intent,
+      benchmarkAsOf: isoDate(r.benchmark_as_of),
+      eval3m: parseJsonColumn<unknown>(r.eval_3m_jsonb, null),
+      eval6m: parseJsonColumn<unknown>(r.eval_6m_jsonb, null),
+      eval12m: parseJsonColumn<unknown>(r.eval_12m_jsonb, null),
+    })),
   };
 }

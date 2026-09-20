@@ -86,6 +86,38 @@ line items, or a test goes red against real data, the resolution is the owner's 
 statement — not a widened band, a tuned constant, or an invented value. Record it under
 owner true-up items in `MEMORY.md` and surface it.
 
+## Backend and UI ship together
+
+**A backend capability is not done until its web surface exists.** Phase 1 shipped six
+engines — signal, recommendations, sell triggers, scoring, maturity routing, weekly
+narration — and every one of their pages stayed a `NotYetBuild` shell for months. The
+nav honestly said "soon" while the work was in fact finished, so the product looked
+less built than it was and nobody could see the output.
+
+When a task adds a table, an engine or a job that produces something a human would want
+to look at, the same task adds:
+
+- the getter in `web/lib/data.ts`, and
+- the page under `web/app/<area>/`, and
+- the `web/lib/product.ts` row moved off `p1`/`p2` onto `live` with honest
+  `works` / `missing` lists, and
+- the `web/app/nav.tsx` entry flipped from `stage: 'soon'` to `stage: 'live'`.
+
+Design the page with the **`ui-ux-pro-max` skill**, against
+`design-system/sentinel/MASTER.md`. Reuse the primitives in `web/lib/ui.tsx`
+(`PageHead`, `Card`, `DataTable`, `Badge`, `Stat`, `Notice`, `Money`) — do not invent a
+second visual language, and do not restyle the existing pages to suit a new one.
+
+**The honesty rules apply to the UI too.** An empty table says *why* it is empty and
+names the job that fills it. A null renders as `unknown` or `—`, never as `0` or `₹0`.
+A withheld statistic (an uncalibrated hit-rate) says it is withheld and why, rather than
+showing a number computed from too little evidence. If a page would have to invent,
+re-derive or re-run something to display it, leave the shell up and say so in the shell.
+
+**The inverse also holds: do not build a page with no backing data.** `/narrative` stays
+a shell because the weekly narration is never persisted — there is no row to read. A
+page that renders nothing real is worse than an honest "not yet".
+
 ## Execution model
 
 Work runs subagent-driven: implementer → task reviewer → fix loop (≤5 rounds) → scoped
