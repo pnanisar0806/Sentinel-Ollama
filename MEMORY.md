@@ -1995,38 +1995,49 @@ This is also why capture must always be wider than derivation. Balances cannot b
 backfilled, so an account excluded at capture is lost, while an account excluded at
 derivation is one query away from being reconsidered.
 
-### Smallcase provenance, from the owner's export (2026-09-20)
+### Smallcase: the owner's order export is PARTIAL — do not read it as complete (2026-09-20)
 
-`data/docs/Smallcase/smallcase_orders.xlsx` (gitignored — real holdings). Four smallcases,
-132 orders. Parsing reconciles to the workbook's own Summary sheet within ₹1.07 of
-₹3,07,943.59 bought and ₹1,68,523.90 sold, **once `Repaired` orders are included**. They
-executed: excluding the seven of them leaves exactly the gap to the Summary total, and
-MAHLOG — whose only exit is a `Repaired` SELL of 12 — is absent from current holdings.
-Treat `Repaired` as filled.
+`data/docs/Smallcase/smallcase_orders.xlsx` (gitignored). **An earlier entry here drew
+wrong conclusions from this file and has been replaced.** The export does not contain the
+full order history for every smallcase:
 
-| smallcase | started | net invested |
-|---|---|---|
-| Equity & Gold Asset Allocation | 2021-11-04 | ₹81,431.82 |
-| House of Mahindra Tracker | 2023-06-07 | ₹58,603.99 |
-| Timeless Asset Allocation | 2021-11-04 | ₹165.17 (all but exited) |
-| Dividend Aristocrats Model | 2021-11-30 | −₹781.29 (fully exited) |
+| smallcase | orders in file | span | batch types present |
+|---|---|---|---|
+| Equity & Gold Asset Allocation | 40 | 2021-11-04 → 2026-08-12 | Invest, Invest More, SIP, Rebalance |
+| House of Mahindra Tracker | 73 | 2023-06-07 → 2025-12-24 | Invest, SIP, Rebalance |
+| Timeless Asset Allocation | **4** | 2026-07-15 only | **Rebalance only** |
+| Dividend Aristocrats Model | **13** | 2026-07-15 only | **Rebalance only** |
 
-**Provenance of current holdings** (`GOLDCASE`→`GOLDBEES`, `LIQUIDCASE`→`LIQUIDBEES`):
+Two carry a single rebalance batch and **no original `Invest`**, so their opening
+positions are absent.
 
-- **100% smallcase** — M&MFIN 43, MAHLIFE 43, TECHM 14, ZFCVINDIA 14, M&M 5.
-- **Mixed** — GOLDBEES 2616 (2062 sc), NIFTYBEES 343 (300), ITC 113 (48), BERGEPAINT 63
-  (14), JUNIORBEES 34 (10), RELIANCE 23 (3), PIDILITIND 21 (3), CRISIL 7 (2),
-  SUNDARMFIN 7 (1).
-- **Direct, and the smallcase sold the owner's OWN shares** — LIQUIDBEES, KIRLPNU, KWIL,
-  HINDUNILVR, KEI, PERSISTENT, INFY all show negative smallcase net quantity: zero
-  smallcase buys, non-zero smallcase sells. **The two books are commingled**, so
-  "terminate the smallcase" is not a clean partition of the portfolio, and a termination
-  recommendation must not assume it is.
+**The wrong conclusion and why it was wrong.** Seven holdings showed negative net
+quantity (INFY, HINDUNILVR, PERSISTENT, KEI, KIRLPNU, KWIL — all Dividend Aristocrats;
+LIQUIDCASE — Timeless) and that was read as "the smallcase sold shares the owner bought
+directly, so the books are commingled". **It is not true.** Every negative sits in a
+smallcase whose export holds only a rebalance: the sells are present, the matching buys
+predate the file. Owner corrected this directly. A rebalance sells some names and buys
+others, and only half of it was visible.
 
-**The `NSE:SMALLCASE-RESIDUE` line is wrong by ~4.7x.** It carries ₹6,55,400 against a
-real smallcase net investment of ₹1,39,419. It is not the smallcase — it is a lumped
-placeholder for the 25 individual stocks. Fix it with the real per-stock rows rather than
-trusting the residue figure.
+**Ground truth is the app, not this file.** Owner's smallcase screen, 2026-09-20:
+4 smallcases, **₹5,61,275** current value, +21.01% overall — Dividend Aristocrats
+₹2,96,363 (+13.61%, 523 days since last investment), Equity & Gold ₹1,08,269 (+32.96%),
+Timeless ₹88,915 (+38.37%), House of Mahindra ₹67,726 (+19.59%). Dividend Aristocrats is
+the LARGEST of the four, and the export made it look fully exited.
+
+- The earlier claim that `NSE:SMALLCASE-RESIDUE` is "wrong by 4.7x" is also withdrawn: it
+  compared a DB market value against net *invested* from a partial file. Residue carries
+  ₹6,55,400 against ₹5,61,275 actual — a ~₹94k gap worth reconciling, not a 4.7x error.
+- Still usable from the export: `Repaired` orders did execute (they reconcile the Summary
+  sheet to within ₹1.07, and MAHLOG is absent from holdings after a Repaired sell), and
+  the two complete smallcases give real BUY dates for their own holdings.
+- **Still needed for provenance:** a complete order history for Timeless and Dividend
+  Aristocrats, or the Zerodha tradebook. Until then, which shares are smallcase-originated
+  is UNKNOWN for those two, and must not be inferred from this file.
+
+**Standing lesson: check an export's coverage before trusting its totals.** Date span and
+batch types per group would have caught this immediately — a group with only `Rebalance`
+rows has no opening position in it.
 
 ### The Kite tax P&L does NOT carry acquisition dates for current holdings
 
