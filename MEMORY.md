@@ -1971,12 +1971,25 @@ correctly on its own: the principal lands in the loan-repaid term and only the i
 survives as real cost. `OPERATING_SAVINGS_BANK` is kept only for diagnosis, because a
 salary credit is a jump in *that* balance rather than in the total.
 
-**Known distortion, not to be netted out:** the annual ~₹1L LIC premium. INDmoney does not
-serve `INSURANCE`, so the policy has no tracked value — the premium leaves savings and
-reappears in no asset, and one month a year will read ₹1L lighter than it was.
-`LIC_PREMIUM_FLAG` rides on the derived row. Do not invent an adjustment for it; the
-honest move is a flagged month. The same hole applies to any other untracked asset class
-(`RD` is likewise unserved).
+**The annual ~₹1L LIC premium (owner decision 2026-09-20).** INDmoney does not serve
+`INSURANCE`, so the policy has no tracked value: the premium leaves savings and reappears
+in no asset. Owner funds it from an August bonus (>₹1L) and moves it in September, and
+those are two separate events — the bonus correctly raises August, the premium wrongly
+depresses September, and they do NOT cancel. Over a year the series still understates by
+the premium.
+
+Owner asked to "not consider the 1L". Implemented as an **add-back in the month it
+leaves**, not as an exclusion from both sides: both keep the monthly trend clean, but the
+add-back also keeps the cumulative true, because the ₹1L really was saved — into the
+policy. Excluding both sides would drop it from the running total forever.
+
+- Must be an owner-supplied amount with its own `as_of`, never a pinned ₹1L — the premium
+  can change, and a stale constant would silently mis-add every year after it does.
+- The affected month carries `LIC_PREMIUM_FLAG` regardless, so the adjustment is visible
+  rather than smuggled into the number.
+- Net worth remains understated by the policy's actual value until the owner supplies a
+  surrender or paid-up figure. Separate true-up from the premium flow.
+- Same hole applies to any untracked class; `RD` is likewise unserved.
 
 This is also why capture must always be wider than derivation. Balances cannot be
 backfilled, so an account excluded at capture is lost, while an account excluded at
