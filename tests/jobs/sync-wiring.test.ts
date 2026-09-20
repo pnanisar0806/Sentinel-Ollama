@@ -87,9 +87,31 @@ describe('the OAuth INDmoney path is reachable from the entrypoint', () => {
     expect(source).toMatch(/fetchUsdInr/);
   });
 
-  it('constrains the MCP client to the one tool it needs', () => {
-    // The allowlist is required by McpClient, but pinning the VALUE here stops a future
-    // edit widening it to something that can place an order.
-    expect(source).toMatch(/allowedTools:\s*\[\s*'networth_holdings'\s*\]/);
+  it('constrains the MCP client to named read-only tools', () => {
+    // The allowlist is required by McpClient, but pinning the VALUE here is what stops a
+    // future edit widening it to something that can place an order.
+    //
+    // Widened once, deliberately, on 2026-09-20: `networth_snapshot` carries the balances
+    // and liabilities the daily surplus capture needs, and rides this client rather than
+    // a second OAuth path. It is read-only and names no order surface. The guard is now
+    // an exhaustive allowlist rather than a single literal, so it still fails on any
+    // addition — including a future read-only one, which should be a conscious edit too.
+    const ALLOWED = ['networth_holdings', 'networth_snapshot'];
+
+    const match = source.match(/allowedTools:\s*\[([^\]]*)\]/);
+    expect(match, 'allowedTools literal not found in sync.ts').not.toBeNull();
+    const listed = [...match![1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+    expect(listed).toEqual(ALLOWED);
+  });
+
+  it('names no order-shaped tool anywhere in the entrypoint', () => {
+    // CLAUDE.md: trading paths are ABSENT code paths, not disabled features. A client
+    // that could name an order tool is a trading path, so the literal must never appear.
+    for (const forbidden of [
+      'place_order', 'modify_order', 'cancel_order',
+      'place_gtt_order', 'modify_gtt_order', 'delete_gtt_order',
+    ]) {
+      expect(source, `sync.ts names ${forbidden}`).not.toContain(forbidden);
+    }
   });
 });

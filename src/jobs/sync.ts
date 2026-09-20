@@ -7,6 +7,8 @@ import { installIps } from '../domain/ips.js';
 import { persistVests, projectVests } from '../domain/rsu.js';
 import { FileIndmoneySource, RemoteIndmoneySource } from '../sources/indmoney.js';
 import { McpClient } from '../sources/mcp-client.js';
+import { fetchBalanceSnapshot } from '../sources/balances.js';
+import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { ensureAccessToken, discoverMetadata, loadClientSecret, ReauthRequired } from '../sources/oauth.js';
 import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
@@ -197,9 +199,15 @@ export async function indmoneySource(
 
     const client = new McpClient({
       url: INDMONEY_MCP_URL,
-      // Exactly the tool this source calls. McpClient requires a non-empty list, and
+      // Exactly the tools this source calls. McpClient requires a non-empty list, and
       // widening it here is what would make an order tool reachable.
-      allowedTools: ['networth_holdings'],
+      //
+      // `networth_snapshot` was added for the daily balance capture. It is read-only —
+      // it returns balances and liabilities and names no order surface — and it rides
+      // this client rather than a second OAuth path. Every addition to this list is a
+      // deliberate widening of what the process can invoke: read-only tools only, and
+      // never anything that could place, modify or cancel an order.
+      allowedTools: ['networth_holdings', 'networth_snapshot'],
       getToken: () => ensureAccessToken(db, 'indmoney', {
         md, clientId: registration.client_id, key, allowedScopes: INDMONEY_SCOPES,
         ...(clientSecret ? { clientSecret } : {}),
@@ -239,6 +247,27 @@ if (isMainModule(import.meta.url)) {
   if (result.failed.length) {
     console.error(`failed: ${result.failed.map((f) => `${f.source} (${f.error})`).join('; ')}`);
   }
+
+  // Daily balance capture for the realised-surplus series. It rides the sync because the
+  // OAuth path is already open here and sync already runs every day.
+  //
+  // Isolated in its own try/catch on purpose, in both directions: a failed capture must
+  // not fail the portfolio sync, and the capture is what the surplus trend is made of, so
+  // a silent skip would be worse than a loud one. None of it can be backfilled.
+  const indmoney = sources.find((s): s is RemoteIndmoneySource => s instanceof RemoteIndmoneySource);
+  if (!indmoney) {
+    console.error('balance capture skipped: INDmoney is on the file fallback, which carries no balances');
+  } else {
+    try {
+      const rows = await fetchBalanceSnapshot(indmoney.client);
+      const asOf = new Date().toISOString().slice(0, 10);
+      const inserted = await persistBalanceSnapshot(db, asOf, rows, 'indmoney');
+      console.log(`balances ${asOf}: ${inserted} new of ${rows.length} (0 new = already captured today)`);
+    } catch (error) {
+      console.error(`balance capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   await db.close();
   if (result.synced.length === 0) process.exitCode = 1;
 }

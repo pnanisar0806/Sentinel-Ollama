@@ -198,6 +198,10 @@ function brokerAccountFor(h: RemoteHolding): Account {
 export class RemoteIndmoneySource implements Source {
   readonly name = 'indmoney';
 
+  /** The authenticated client, so the daily balance capture can reuse this OAuth path
+   *  instead of standing up a second one. Read-only tools only — see `allowedTools`. */
+  get client(): McpClient { return this.opts.client; }
+
   constructor(
     private readonly opts: {
       client: McpClient;
