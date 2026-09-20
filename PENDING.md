@@ -656,13 +656,22 @@ items below either point at them or name a gap that plan does not cover.
 
 ### Blocker — owner input, gates almost everything below
 
-- [ ] **Satellite per-action sizing budget / policy.** Phase 2.5 Task 4 is explicit: *"Do
+- [x] **Monthly deployment budget — supplied 2026-09-20: ₹50,000/month.** Of which MF
+      SIPs take **₹30,254** (live INDmoney figure, not the ₹28,000 the owner quoted — the
+      gap is exactly one step-up cycle; see MEMORY). Leaves **₹19,746/month** free, and
+      that free amount shrinks by ~₹2,250 every August as three of the four SIPs step up.
+      The sizer must read the live SIP total, never pin a constant.
+- [ ] **Still needed: the per-action policy, not just the pot.** ₹19,746/month is a
+      monthly flow. Task 4 needs a rule for how much of it any single action may consume —
+      one name per month, a cap per action, a minimum ticket. Phase 2.5 is explicit: *"Do
       not invent the satellite allocation budget/rule if no existing IPS/owner input
-      supplies one; record it as a prerequisite and withhold that candidate until
-      supplied. Score ≠ budget."* The IPS fixes bands and caps, not a per-action rupee
-      budget. Until the owner supplies one, **no BUY can be sized**, so "what do I put the
-      proceeds into" stays unanswerable no matter what else ships. First item on the
-      plan's own owner-input list.
+      supplies one... Score ≠ budget."* A pot without a per-action rule still cannot size
+      a BUY.
+- [ ] **Reconcile the ₹50,000 against the modelled surplus.** `surplus.ts` derives
+      investable from take-home ₹2,15,000 minus loan/fixed/child outflows — a materially
+      larger number than ₹50,000. The difference accumulates as cash and runs straight at
+      the 10% cash ceiling rail. Decide which figure is authoritative before the sizer
+      reads either.
 
 ### Already planned in Phase 2.5 — do not duplicate
 
@@ -700,9 +709,16 @@ items below either point at them or name a gap that plan does not cover.
       ranks funds (consistency 40 / expense 20) but nothing turns a ranking into a switch.
       This is the entire mutual-fund answer and it does not exist.
 - [ ] **`sell` kind likewise never built.** Declared, unused.
-- [ ] **Smallcase is one opaque `NSE:SMALLCASE-RESIDUE` position.** `SMALLCASE_CONSTITUENTS`
-      exists in `cleanup.ts` but the holding is not decomposed, so per-constituent advice is
-      impossible. Decide: decompose, or keep it a single terminate/keep decision.
+- [ ] **Smallcase units are placeholders — blocks any exit sizing.** `NSE:SMALLCASE-RESIDUE`
+      (₹6,55,400), `NSE:NIFTYBEES` (₹95,000) and `NSE:LIQUIDBEES` (₹16,000) all carry
+      `quantity = 1` against five- and six-figure values; only `NSE:GOLDBEES` (2,616 units)
+      looks real. Task 4 sizes a SELL by actually owned units, so **no smallcase exit can be
+      sized until real units are ingested.** Prerequisite to the decompose question below.
+- [ ] **Smallcase: decompose or single decision (owner call).** Single = treat the residue
+      as one line and make one sell-all/keep-all call, which is what the already-written
+      `buildSmallcaseTerminationRec` does (sell the residue, retain the constituent ETFs).
+      Decompose = break the residue into its underlying holdings so the engine can advise
+      per constituent. Owner has stopped all smallcase SIPs, so nothing is still flowing in.
 
 ### Ordering
 

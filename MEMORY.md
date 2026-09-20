@@ -1850,3 +1850,50 @@ version of the page rendered them as React children and crashed in production. V
 against the real rows: primary is an object, alternates a 2-element array, `amountPaise`
 a decimal string (`BigInt()` it), `instrumentId` null for portfolio-level legs. Guarded
 by `tests/web/recommendations-shape.test.ts`, mutation-checked.
+
+### Owner deployment budget and the MF SIP true-up (owner input 2026-09-20)
+
+Owner states a **₹50,000/month total deployment budget**, and believed ₹28,000 of it was
+committed to MF SIPs. INDmoney's live active-SIP view says **₹30,254/month** across four
+funds:
+
+| fund | monthly | step-up | started |
+|---|---|---|---|
+| ICICI Prudential Nifty 50 Index Direct Growth | ₹14,001 | ₹1,000/yr | 12-08-2023 |
+| Parag Parikh Flexi Cap Direct Growth | ₹11,001 | ₹1,000/yr | 12-08-2025 |
+| HDFC Mid Cap Direct Growth | ₹3,001 | none | 12-02-2026 |
+| Bandhan Small Cap Direct Growth | ₹2,251 | ₹250/yr | 12-08-2025 |
+
+**The ₹2,254 gap is exactly one step-up cycle.** Subtract each fund's `step_up_by`
+(1000 + 1000 + 250) and the total is ₹28,004 — the owner's figure is one year stale, not
+wrong. Three of the four step up every August, so the SIP commitment rises ~₹2,250 each
+August and the free budget shrinks by the same amount unless the ₹50,000 moves with it.
+Any sizing policy must read the live SIP total, never a pinned constant.
+
+- Free for non-SIP deployment today: **₹50,000 − ₹30,254 = ₹19,746/month.**
+- No Indian stock SIPs and no US stock SIPs exist (both INDmoney endpoints return empty).
+  Owner has stopped all smallcase SIPs. MF SIPs are the only recurring commitment.
+- **Owner true-up still open:** this ₹50,000 is a *deployment* budget, not the modelled
+  investable surplus. `surplus.ts` derives investable as take-home (`BASE_TAKE_HOME`
+  ₹2,15,000) minus loan outflow, fixed outflows and the child dent — a materially larger
+  number. Whatever the model says is investable but is not deployed accumulates as cash
+  and runs at the 10% cash ceiling rail. The two figures need reconciling before the
+  sizer treats either as authoritative.
+
+### The smallcase is not sizeable yet — units are placeholders (2026-09-20)
+
+Live holdings as of 2026-09-16, account `zerodha`:
+
+| instrument | value | quantity | real? |
+|---|---|---|---|
+| `NSE:SMALLCASE-RESIDUE` | ₹6,55,400 | 1 | placeholder by construction |
+| `NSE:NIFTYBEES` | ₹95,000 | 1 | **placeholder** — NIFTYBEES trades ~₹250-290 |
+| `NSE:GOLDBEES` | ₹63,000 | 2,616 | plausible (~₹24/unit) |
+| `NSE:LIQUIDBEES` | ₹16,000 | 1 | **placeholder** — LIQUIDBEES trades ~₹1,000 |
+
+Three of four carry `quantity = 1` against five- and six-figure values, so the unit counts
+are placeholders, not holdings. Phase 2.5 Task 4 sizes a SELL "by actually owned units" —
+**that is impossible for these until real units are ingested.** The residue alone is
+₹6,55,400, 79% of the ₹8,29,400 smallcase-related total, so this is not a rounding
+concern. Fixing the units is a prerequisite to any smallcase exit advice, ahead of the
+decompose-vs-single question.
