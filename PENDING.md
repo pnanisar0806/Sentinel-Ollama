@@ -639,3 +639,77 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
 
 - [ ] **`index_prices_eod` has never been populated.** Zero rows. The benchmark leg of
       the trend score and the scoring harness's excess-return comparison both read it.
+
+---
+
+## ACTIONABILITY PACKAGE — "tell me what to do with everything, and how much"
+
+Scoped 2026-09-20 from the owner's question: *does the engine say what to do with the
+smallcase, the mutual funds, the bonds and the ServiceNow RSU — how much to take out and
+what to put it into?* Audited answer: **only two paths are complete today.** Bond maturity
+routing and asset-class drift produce a sized recommendation with alternates. Everything
+else either detects without sizing, is built but never invoked, or does not exist.
+
+Most of this is already planned as **Phase 2.5 Tasks 4, 6 and 10**
+(`docs/superpowers/plans/2026-09-17-sentinel-phase-2.5.md`). Do not re-plan those; the
+items below either point at them or name a gap that plan does not cover.
+
+### Blocker — owner input, gates almost everything below
+
+- [ ] **Satellite per-action sizing budget / policy.** Phase 2.5 Task 4 is explicit: *"Do
+      not invent the satellite allocation budget/rule if no existing IPS/owner input
+      supplies one; record it as a prerequisite and withhold that candidate until
+      supplied. Score ≠ budget."* The IPS fixes bands and caps, not a per-action rupee
+      budget. Until the owner supplies one, **no BUY can be sized**, so "what do I put the
+      proceeds into" stays unanswerable no matter what else ships. First item on the
+      plan's own owner-input list.
+
+### Already planned in Phase 2.5 — do not duplicate
+
+- [ ] **Task 4 — deterministic sizing.** The missing "how much". The plan names the exact
+      gap found here: *"allocation drift paise is not a general satellite/exit unit sizer.
+      Signal score and sell-trigger objects alone do not establish an affordable BUY or
+      sellable SELL."* Sizes from real cash, holdings, paper reservations, **concentration
+      and liquidity headroom** — which is what makes the ServiceNow employer-cap trim
+      sizeable. Also requires the combined batch to be validated so two candidates cannot
+      spend the same rupee.
+- [ ] **Task 6 — ADVISE.** The "what to put it into": BUY/SELL/HOLD/WAIT chosen among
+      *eligible sized* candidates, assembled as FR-11 primary + exactly two alternates.
+- [ ] **Task 10 — `/advisor` surface.** Renders size provenance, the full FR-11 choice set
+      and coverage/failure state, with sign-off handing to the Phase 2 approval flow.
+
+### Gaps Phase 2.5 does NOT cover — new work
+
+- [ ] **`src/jobs/cleanup.ts` is never invoked.** No `package.json` script, no workflow,
+      no caller anywhere in `src/`. Eight built recommendation builders are dead code as a
+      result: `buildSmallcaseTerminationRec`, `buildBondCreditReviewRec`,
+      `buildLtcgHarvestRec`, `buildFyHarvestPlan`, `buildThesisLessRec`,
+      `buildMicroOrphanRec`, `buildGrowwRPowerRec`, `buildSammaanMaturityRoutingRec`.
+      **This is the smallcase and bond-credit answer, already written, simply unwired.**
+      Needs a `pnpm cleanup` script plus a schedule, and per-run idempotence like the one
+      `pnpm report` just gained — `persistRecommendation` is a bare INSERT into an
+      append-only table.
+- [ ] **Exit candidates are narrated, never persisted.** `evaluateExits` output is rendered
+      into the Telegram report text (`src/notify/report.ts:515`) and nothing writes it to
+      `recommendations`, so no exit trigger — employer cap, underperformance,
+      falsification, better-alternative, credit-maturity — can ever reach
+      `/recommendations`. `ExitCandidate` also carries **no `amountPaise` field**; Task 4
+      supplies the number, this item supplies the row.
+- [ ] **`mf_switch` is declared and never built.** It is in the `recommendations.kind`
+      CHECK constraint and in the `RecKind` union, and no code constructs one. The engine
+      ranks funds (consistency 40 / expense 20) but nothing turns a ranking into a switch.
+      This is the entire mutual-fund answer and it does not exist.
+- [ ] **`sell` kind likewise never built.** Declared, unused.
+- [ ] **Smallcase is one opaque `NSE:SMALLCASE-RESIDUE` position.** `SMALLCASE_CONSTITUENTS`
+      exists in `cleanup.ts` but the holding is not decomposed, so per-constituent advice is
+      impossible. Decide: decompose, or keep it a single terminate/keep decision.
+
+### Ordering
+
+Owner budget input → Task 4 sizing → exit persistence + cleanup wiring (both consume the
+sizer) → `mf_switch` → Task 6 ADVISE → Task 10 surface. The `prices_eod` backfill and empty
+`index_prices_eod` above are a parallel track: they gate satellite BUY candidates existing
+at all, and nothing in this package substitutes for them.
+
+Every engine item here ships with its page in the same task — see CLAUDE.md
+"Backend and UI ship together".
