@@ -71,13 +71,33 @@ export function screenshotsDir(): string {
 
 /** Applies the web-ingest migration idempotently on first use. The schema still lives
  *  ONLY in migrations/0009_web_uploads.sql — this just executes that file, so the
- *  CLI `pnpm migrate` path and the web path can never drift. */
+ *  CLI `pnpm migrate` path and the web path can never drift.
+ *
+ *  The file read is gated on the table being absent, and that gate is load-bearing in
+ *  production, not an optimisation. `migrations/` is never bundled into the Vercel
+ *  serverless output: Next traces only statically-visible paths, and this one is built
+ *  at runtime from `process.cwd()`. An unconditional read therefore throws ENOENT on
+ *  every /import render once deployed. On a deployed database `pnpm migrate` has
+ *  already created the table, so the read is skipped; the only caller that reaches it
+ *  is a fresh local PGlite, where the file is present. Same class of bug as
+ *  src/config/ips-v1.md, which became a .ts template literal for this reason. */
 let ensured = false;
 export async function ensureWebIngestion(db: Db): Promise<void> {
   if (ensured) return;
-  const sql = await readFile(join(repoRoot(), 'migrations', '0009_web_uploads.sql'), 'utf8');
-  await db.exec(sql);
+  const [present] = await db.query<{ present: boolean }>(
+    "select to_regclass('public.web_uploads') is not null as present",
+  );
+  if (!present?.present) {
+    const sql = await readFile(join(repoRoot(), 'migrations', '0009_web_uploads.sql'), 'utf8');
+    await db.exec(sql);
+  }
   ensured = true;
+}
+
+/** Test seam: `ensured` is module-level, so a second test would otherwise inherit the
+ *  first one's short-circuit and assert nothing. */
+export function resetWebIngestionCacheForTests(): void {
+  ensured = false;
 }
 
 /** Guesses a sane image mime type from the filename when the browser sent none. */

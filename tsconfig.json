@@ -11,5 +11,10 @@
     "outDir": "dist",
     "types": ["node"]
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests"],
+  // tests/web reaches across into web/, which is a separate TypeScript project
+  // (bundler resolution, no "type":"module"). Pulling it into this program makes
+  // every ESM import in web/lib read as CommonJS under verbatimModuleSyntax.
+  // web/ is typechecked by its own `pnpm --dir web typecheck`.
+  "exclude": ["tests/web"]
 }
