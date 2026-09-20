@@ -1955,3 +1955,29 @@ Zerodha average-price upload landed. But `acquired_on` is `2026-08-25` on all 95
 upload date, not the purchase date. Cost basis is therefore usable for P&L and useless for
 holding period, so **no LTCG/STCG split can be computed** and a tax-aware sell is blocked
 on real acquisition dates, not on cost. Zerodha's tax P&L report carries them.
+
+### The savings term sums every account — SBI is not idle (owner 2026-09-20)
+
+Owner first said to derive surplus from HDFC alone, "because that's where the investments
+happen from, and the bills paid", then added that **the housing-loan EMI debits from SBI**
+and **₹1L moves HDFC→SBI once a year for an LIC premium**. The second fact overturns the
+first: SBI is part of the operating flow, not a parked balance.
+
+**Derive from the sum of all accounts, not from HDFC.** Watching HDFC alone reads every
+HDFC→SBI transfer as spending — money gone from the only watched balance, reappearing
+nowhere — and double counts the housing EMI, once as that phantom spend and again in the
+loan term. Summing both banks makes a transfer net to zero, and the EMI then resolves
+correctly on its own: the principal lands in the loan-repaid term and only the interest
+survives as real cost. `OPERATING_SAVINGS_BANK` is kept only for diagnosis, because a
+salary credit is a jump in *that* balance rather than in the total.
+
+**Known distortion, not to be netted out:** the annual ~₹1L LIC premium. INDmoney does not
+serve `INSURANCE`, so the policy has no tracked value — the premium leaves savings and
+reappears in no asset, and one month a year will read ₹1L lighter than it was.
+`LIC_PREMIUM_FLAG` rides on the derived row. Do not invent an adjustment for it; the
+honest move is a flagged month. The same hole applies to any other untracked asset class
+(`RD` is likewise unserved).
+
+This is also why capture must always be wider than derivation. Balances cannot be
+backfilled, so an account excluded at capture is lost, while an account excluded at
+derivation is one query away from being reconsidered.

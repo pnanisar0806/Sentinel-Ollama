@@ -50,16 +50,32 @@ interface SavingsPayload {
 }
 
 /**
- * The operating account: salary lands here, investments are funded from here and card
- * bills are paid from here, so it is the balance the surplus derivation reads.
+ * HDFC is where salary lands, investments are funded and card bills are paid. SBI is not
+ * idle: the housing-loan EMI is debited from it, and ₹1L moves HDFC->SBI once a year for
+ * an LIC premium.
  *
- * Every bank is still CAPTURED. Deriving from HDFC alone while recording only HDFC would
- * book an HDFC->SBI transfer as spending, because the money would leave the only balance
- * being watched and reappear nowhere. Recording both keeps a transfer identifiable as a
- * transfer; which accounts count is a decision for the derivation, not the capture.
- * Nothing here can be backfilled, so capture is always the wider of the two.
+ * **The savings term therefore sums EVERY account, not just the operating one.** Watching
+ * HDFC alone would read each HDFC->SBI transfer as spending — money gone from the only
+ * balance being watched, reappearing nowhere — and the housing EMI would be double
+ * counted, once as the phantom spend of the transfer and again in the loan term. Summing
+ * both makes a transfer net to zero and lets the EMI resolve correctly: its principal
+ * lands in the loan term and only its interest survives as real cost.
+ *
+ * Kept as a named constant because which account is operating still matters for
+ * diagnosis — a salary credit is a jump in THIS balance, not in the total.
  */
 export const OPERATING_SAVINGS_BANK = 'HDFC Bank';
+
+/**
+ * The annual ₹1L LIC premium is a known distortion, not a bug to be quietly netted out.
+ * INDmoney does not serve INSURANCE, so the policy's value is invisible: the premium
+ * leaves savings and reappears in no tracked asset, and one month a year will therefore
+ * read ₹1L lighter than it really was. Surfaced on the derived row rather than corrected
+ * by an invented adjustment.
+ */
+export const LIC_PREMIUM_FLAG =
+  'an annual ~₹1L LIC premium leaves savings for an asset INDmoney does not track ' +
+  '(INSURANCE is unserved), so the month it falls in understates realised surplus';
 
 /** INDmoney sends rupees as JS floats. Money never crosses a float boundary here: the
  *  value goes through a fixed-2 string exactly as the holdings path already does. */

@@ -62,13 +62,18 @@ describe('parseBalanceSnapshot', () => {
     expect(find(rows, 'invested_cost', 'SA')).toBeUndefined();
   });
 
-  it('still captures the non-operating bank, so a transfer is not read as spend', () => {
+  it('captures every account, so an inter-bank transfer nets to zero', () => {
     const rows = parseBalanceSnapshot(REAL, SAVINGS);
-    const banks = rows.filter((r) => r.kind === 'savings').map((r) => r.label);
-    // Capturing only HDFC would make an HDFC->SBI transfer look like money spent: gone
-    // from the watched balance, reappearing nowhere. None of this is backfillable.
+    const banks = rows.filter((r) => r.kind === 'savings');
+    // SBI is not idle — the housing-loan EMI debits from it and ₹1L/yr moves HDFC->SBI
+    // for an LIC premium. Watching HDFC alone would read every such transfer as spend,
+    // and would double count the housing EMI: once as phantom spend, once in the loan
+    // term. The savings term sums all accounts, so the transfer cancels.
     expect(banks).toHaveLength(2);
-    expect(banks).toContain('State Bank Of India');
+    expect(banks.map((b) => b.label)).toContain('State Bank Of India');
+
+    const total = banks.reduce((a, b) => a + b.amountPaise, 0n);
+    expect(total).toBe(rupees('246348.75'));
   });
 
   it("refuses a refused savings call rather than recording zero cash", () => {
