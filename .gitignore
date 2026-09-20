@@ -15,6 +15,11 @@ data/*backup*.json
 
 data/screenshots/
 
+# Owner-supplied statements and broker exports: Kite tax P&L, smallcase order history.
+# Real holdings, real trade dates, real amounts — the same class of secret as the
+# snapshot above, and NOT covered by the *.snapshot.json rules because these are xlsx.
+data/docs/
+
 # Local agent tooling state / scratch files — never tracked.
 .claude/
 .codex/

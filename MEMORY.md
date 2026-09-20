@@ -1994,3 +1994,53 @@ policy. Excluding both sides would drop it from the running total forever.
 This is also why capture must always be wider than derivation. Balances cannot be
 backfilled, so an account excluded at capture is lost, while an account excluded at
 derivation is one query away from being reconsidered.
+
+### Smallcase provenance, from the owner's export (2026-09-20)
+
+`data/docs/Smallcase/smallcase_orders.xlsx` (gitignored — real holdings). Four smallcases,
+132 orders. Parsing reconciles to the workbook's own Summary sheet within ₹1.07 of
+₹3,07,943.59 bought and ₹1,68,523.90 sold, **once `Repaired` orders are included**. They
+executed: excluding the seven of them leaves exactly the gap to the Summary total, and
+MAHLOG — whose only exit is a `Repaired` SELL of 12 — is absent from current holdings.
+Treat `Repaired` as filled.
+
+| smallcase | started | net invested |
+|---|---|---|
+| Equity & Gold Asset Allocation | 2021-11-04 | ₹81,431.82 |
+| House of Mahindra Tracker | 2023-06-07 | ₹58,603.99 |
+| Timeless Asset Allocation | 2021-11-04 | ₹165.17 (all but exited) |
+| Dividend Aristocrats Model | 2021-11-30 | −₹781.29 (fully exited) |
+
+**Provenance of current holdings** (`GOLDCASE`→`GOLDBEES`, `LIQUIDCASE`→`LIQUIDBEES`):
+
+- **100% smallcase** — M&MFIN 43, MAHLIFE 43, TECHM 14, ZFCVINDIA 14, M&M 5.
+- **Mixed** — GOLDBEES 2616 (2062 sc), NIFTYBEES 343 (300), ITC 113 (48), BERGEPAINT 63
+  (14), JUNIORBEES 34 (10), RELIANCE 23 (3), PIDILITIND 21 (3), CRISIL 7 (2),
+  SUNDARMFIN 7 (1).
+- **Direct, and the smallcase sold the owner's OWN shares** — LIQUIDBEES, KIRLPNU, KWIL,
+  HINDUNILVR, KEI, PERSISTENT, INFY all show negative smallcase net quantity: zero
+  smallcase buys, non-zero smallcase sells. **The two books are commingled**, so
+  "terminate the smallcase" is not a clean partition of the portfolio, and a termination
+  recommendation must not assume it is.
+
+**The `NSE:SMALLCASE-RESIDUE` line is wrong by ~4.7x.** It carries ₹6,55,400 against a
+real smallcase net investment of ₹1,39,419. It is not the smallcase — it is a lumped
+placeholder for the 25 individual stocks. Fix it with the real per-stock rows rather than
+trusting the residue figure.
+
+### The Kite tax P&L does NOT carry acquisition dates for current holdings
+
+Six files, FY2020-21 to FY2025-26, in `data/docs/Kite/` (gitignored). They give **308
+tradewise exits** with `Entry Date`, `Exit Date`, `Period of Holding` and per-trade
+charges — but only for positions that were **sold**. The `Open Positions` sheets cover
+F&O, Currency and Commodity only, and all three are empty (consistent with no trading
+paths). **There is no equity open-position sheet**, so nothing here dates the shares still
+held, and exits cannot be back-solved into open lots because only matched buys appear.
+
+- What would supply it: Zerodha Console **Tradebook** (every trade including unmatched
+  buys), or the Holdings report with its FIFO breakdown. Ask for the tradebook.
+- Partial recovery is possible now: the smallcase Order Details carry `Placed On` per BUY,
+  which dates the smallcase-originated portion of the five 100%-smallcase holdings and
+  part of each mixed one.
+- The 308 exits are separately valuable — they are realised P&L history with holding
+  periods, which the scoring and tax work both want.
