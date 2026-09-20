@@ -2111,3 +2111,36 @@ placeholder ETF rows (₹1,74,000) total ₹8,29,400 against a real ₹7,91,280 
 model is wrong, not merely stale. Replace it with four smallcase groupings carrying these
 exact constituents and share counts, plus 12 direct lines. Terminating a smallcase is then
 a clean, sizeable instruction, because the shares are known per smallcase.
+
+### Smallcase model fixed; all smallcase transactions stopped (2026-09-20)
+
+**`holdings` was already correct.** The live INDmoney sync writes 47 rows into the latest
+snapshot (2026-09-19), all under `IND:INDS*` ids with real units, and **zero** `NSE:%`
+seed rows. The `NSE:SMALLCASE-RESIDUE` ₹6,55,400 line only ever existed in
+`SEED_HOLDINGS`; it is absent from every live snapshot and was never the problem it
+appeared to be. Nothing about the holdings needed correcting.
+
+What was genuinely missing is the **grouping**, now `migrations/0020_smallcase_positions.sql`
+plus `src/config/smallcases.ts`. The relationship is many-to-many with quantities — GOLDBEES
+is 1,453 in Equity & Gold and 1,163 in Timeless, NIFTYBEES 275 and 68 — so a flat
+instrument-to-smallcase column could not express it, and "exit Timeless" would have no
+defined share count. `avg_buy_price_paise` is cost basis BY SOURCE, which `lots` cannot
+carry: a split holding has a different average per source.
+
+- Tests derive live units **independently** of `SMALLCASES`; agreement is the evidence
+  that a holding is wholly smallcase-owned, so the fixture must never be generated from
+  the config.
+- **₹2 discrepancy, documented not tuned:** the app's four line items sum to ₹5,61,273
+  against its own ₹5,61,275 header — each line is rounded to the rupee. The line items
+  are recorded and the gap is asserted explicitly.
+
+**Owner has stopped all smallcase transactions** (no SIPs, no invest-more). The positions
+are static, so this snapshot stays valid until a rebalance is applied. Two live items from
+the app: House of Mahindra has an **unapplied rebalance** dated 17 Sep 2026, and Dividend
+Aristocrats has had **no investment for 523 days** while being the largest at ₹2,96,363
+with the weakest XIRR of the four (4.17%).
+
+**Deferred, deliberately:** retiring `NSE:SMALLCASE-RESIDUE` from `SEED_HOLDINGS`.
+`cleanup.ts` references that instrument id in `buildSmallcaseTerminationRec` and its
+position scan, and that module is itself still unwired, so removing the row would change
+cleanup behaviour blind. Do both in one piece of work, not separately.

@@ -86,6 +86,39 @@ line items, or a test goes red against real data, the resolution is the owner's 
 statement — not a widened band, a tuned constant, or an invented value. Record it under
 owner true-up items in `MEMORY.md` and surface it.
 
+## The advisor invests for the long term. It does not trade.
+
+Owner instruction, 2026-09-20, and a standing constraint on every recommendation the
+system can produce — not a tone preference.
+
+This is distinct from the "no trading paths" boundary, which is about *mechanism* (no
+F&O, no intraday, no leverage). This one is about *intent*: the absent-code-path rule
+would still permit a system that churns long-only equity every few weeks, and that
+system is not the one being built.
+
+- **The default answer is hold.** A recommendation must clear a bar to exist at all, and
+  "no action this month" is a first-class, correct output. HOLD and WAIT are decisions,
+  not failures to decide.
+- **A thesis is measured in years.** IPS §3.7's twelve-month minimum hold is the floor,
+  not the target. A recommendation whose rationale would expire in a quarter is a trade.
+- **Never justify an action by short-term price movement alone.** Momentum, a dip, a
+  breakout or a week of news is not a thesis. The satellite composite's trend leg is an
+  input to selection, never a reason to act by itself.
+- **Turnover is a cost, not activity.** Every exit realises tax and pays brokerage, and
+  the LTCG exemption is an annual budget, not a target to consume. FR-12's action caps
+  are an upper bound on what is *permitted*, never a quota to fill — a month that uses
+  none of them is a good month.
+- **Prefer adding to conviction over rotating between names.** Deploying the monthly
+  surplus into an existing holding is usually better than funding a new position by
+  selling another, and materially cheaper after tax.
+- **An exit needs a reason that is not price.** The sell triggers are falsification, red
+  flag, hard-cap breach, sustained underperformance and a genuinely better alternative.
+  "It went up" and "it went down" are neither.
+
+When a recommendation is drafted, the question is not "is this a good trade" but "would
+I be content holding this for five years, and what would have to be true for that to be
+wrong". The second half is the falsification condition FR-11 already requires.
+
 ## Backend and UI ship together
 
 **A backend capability is not done until its web surface exists.** Phase 1 shipped six
