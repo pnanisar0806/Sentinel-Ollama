@@ -2055,3 +2055,59 @@ held, and exits cannot be back-solved into open lots because only matched buys a
   part of each mixed one.
 - The 308 exits are separately valuable — they are realised P&L history with holding
   periods, which the scoring and tax work both want.
+
+### Smallcase DECOMPOSED — authoritative, from the app (2026-09-20)
+
+Owner supplied per-smallcase constituent screens. This **supersedes every inference from
+`smallcase_orders.xlsx`**, which is partial. It reconciles to INDmoney to within ₹0.42:
+
+    smallcase 5,61,275 + direct 2,27,617 + Reliance Power (Groww) 2,387.69
+      = 7,91,279.69   vs INDmoney IND_STOCK 7,91,280.11
+
+**The four smallcases** (all Windmill Capital, current value / total return / XIRR):
+
+| smallcase | value | return | XIRR | next rebalance |
+|---|---|---|---|---|
+| Dividend Aristocrats Model | ₹2,96,363 | +13.61% | 4.17% | 8 Jul 2027 |
+| Equity & Gold Asset Allocation | ₹1,08,269 | +32.96% | 12.59% | 5 Oct 2026 |
+| Timeless Asset Allocation | ₹88,915 | +38.36% | 15.66% | 5 Oct 2026 |
+| House of Mahindra Tracker | ₹67,726 | +19.59% | 7.96% | rebalanced 17 Sep 2026, **not yet applied** |
+
+**Constituents, with the avg buy price the app reports** — this is cost basis for the
+smallcase portion, which `lots` does not otherwise have per source:
+
+- *Dividend Aristocrats* (10): Sundaram Finance 7 @3295.06, Schaeffler 7 @3292.91,
+  KEI 6 @3808.39, Pidilite 19 @1324.21, Kirloskar Pneumatic 34 @655.62,
+  ZF Commercial 14 @2349.94, Reliance 23 @1254.40, CRISIL 7 @5154.40,
+  Berger Paints 63 @546.78, ITC 113 @319.74.
+- *Equity & Gold*: Zerodha Gold ETF 1,453 @21.83, Nifty 50 BeES 275 @243.85.
+- *Timeless*: Zerodha Gold ETF 1,163 @21.91, Junior BeES 34 @722.18,
+  Nifty 1D Rate Liquid ETF 140 @111.96, Nifty 50 BeES 68 @275.85.
+- *House of Mahindra*: M&M 5 @2467.95, M&M Financial 43 @287.05,
+  Tech Mahindra 14 @1420.22, Mahindra Lifespace 43 @463.58.
+
+**Provenance is cleaner than feared: almost every holding is wholly one or the other.**
+Smallcase share counts match INDmoney totals exactly — GOLDBEES 1453+1163 = 2,616;
+NIFTYBEES 275+68 = 343; JUNIORBEES 34; LIQUIDBEES 140 — so all four ETFs are **100%
+smallcase, zero direct**, as are Sundaram Finance, Schaeffler, KEI, Kirloskar Pneumatic,
+ZF, Reliance, CRISIL, Berger, ITC, M&M, M&M Financial, Tech Mahindra and Mahindra
+Lifespace.
+
+**Pidilite is the only split holding:** 19 smallcase + 2 direct = 21, and the 2 direct
+shares are exactly the ₹3,144 direct line at ₹1,572.10.
+
+**Direct-only (11 lines, ₹2,27,617, +12.71%):** Tata Steel ₹46,385, Tata Motors ₹44,290
+(+135.71%), Tata Motors Passenger Vehicles ₹30,380 (−26.85%), Tata Power ₹28,110,
+LIC ₹20,385, HDFC Bank ₹17,544, Asian Paints ₹14,707, HUL ₹11,592, Persistent ₹10,832,
+Pidilite ₹3,144, Kwality Wall's ₹247 — plus Reliance Power ₹2,388 at **Groww**, the only
+non-Zerodha equity line.
+
+HUL and Persistent are direct, not smallcase: Dividend Aristocrats sold out of them in the
+July 2026 rebalance, which is precisely what made the partial export look like the
+smallcase was selling the owner's own shares.
+
+**What this means for the DB.** `NSE:SMALLCASE-RESIDUE` (₹6,55,400) plus the three
+placeholder ETF rows (₹1,74,000) total ₹8,29,400 against a real ₹7,91,280 — the whole
+model is wrong, not merely stale. Replace it with four smallcase groupings carrying these
+exact constituents and share counts, plus 12 direct lines. Terminating a smallcase is then
+a clean, sizeable instruction, because the shares are known per smallcase.
