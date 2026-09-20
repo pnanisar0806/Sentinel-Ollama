@@ -767,3 +767,46 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       report. Units themselves are NOT needed from the owner — INDmoney already returns real
       units for all 29 holdings; the DB's `quantity = 1` rows are a stale-ingestion bug on
       our side, not missing data upstream.
+
+- [ ] **FR-31 BLOCKS THE WHOLE PORTFOLIO EVERY WEEKEND — and the weekly report runs on
+      Sunday (found 2026-09-20).** `assess()` in `src/sources/staleness.ts` compares a
+      source's age in **wall-clock hours** against a fixed limit and has **no
+      trading-calendar awareness at all** — `isTradingDay` and the `holidays` table both
+      exist and neither is consulted.
+
+      Prices come from NSE, which publishes only on trading days. `prices` limit is 24h.
+      Last close was Friday 2026-09-18; at Sunday 2026-09-20 that is **58h old**, so
+      `bhavcopy` is stale and every equity/ETF/bond position is blocked. `fx` at 48h fails
+      the same way (frankfurter also Friday, 58h). This is not a data failure — it is
+      **unsatisfiable by construction from roughly Saturday morning until Monday's close
+      lands**, and a Friday holiday such as 2026-10-02 stretches it to four days.
+
+      The damage is not cosmetic: `weekly.yml` runs the deep report at **04:30 UTC on
+      Sunday**, the one moment when everything is guaranteed blocked. `report.ts` skips
+      any blocked instrument when building recommendations, so the satellite path is
+      hobbled on the exact day it runs. Today's digest: *39 instruments blocked, 0 newly
+      at MEDIUM or better*.
+
+      **Fix is a policy decision, not a constant to nudge.** Market-source freshness should
+      be measured against the **last trading day**, not the wall clock — "is there a close
+      for the most recent trading session" rather than "is the newest row under 24h old".
+      That changes when the system will and will not recommend, so it needs owner sign-off
+      rather than a quiet edit to `FRESHNESS_HOURS`. The existing "FX BLOCKs every weekend"
+      item is the same bug, narrower.
+
+- [ ] **`CASH:SAVINGS` is stale at 86.9h against a 36h limit** — it comes from
+      `manual-seed`, which nobody refreshes. The real balances are now captured daily in
+      `balance_snapshots` (HDFC + SBI), so the fix is to source CASH from there instead of
+      from the seed. Separate from the weekend bug.
+
+- [ ] **`composite` source has never produced a row** — open incident since 2026-08-24
+      reading "last updated never". Either wire it or drop it from
+      `KNOWN_PORTFOLIO_SOURCES`; an incident that can never clear is noise that trains the
+      owner to ignore incidents.
+
+- [x] **Smallcase: no further investment (owner 2026-09-20).** House of Mahindra's
+      unapplied 17-Sep-2026 rebalance will **not** be applied, and Dividend Aristocrats
+      gets no further investment. No more money or time into either. Positions stay
+      static; treat both as run-off, not as holdings to maintain. This is an owner
+      decision, not a signal the engine produced — do not let a rebalance prompt or a
+      weak XIRR generate a recommendation to re-engage.
