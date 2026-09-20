@@ -1769,3 +1769,38 @@ dependency; all four only need `instruments` from `0001`.
   cover for a fresh collision). File list is read from the real `migrations/` dir, not
   hard-coded. Both mutation-checked red: adding `0011_dupe_probe.sql` fails the first,
   adding a single-file prefix to the exemption set fails the second. 697 tests, tsc clean.
+
+### Vercel deploy — live, and why `web/package.json` deps were not enough (2026-09-20)
+
+`sentinel-web` (`prj_PVOn1yWBG5DRfHOBzuhOWstpAVzk`, team `echodigi`) is READY in
+production on `876641f`. A second project, `sentinel-web-app`
+(`prj_olpCUXfRgv6au8mBcuNxOncNvJSq`), points at the same repo and branch, last built
+`000a5ab`, and is a dead duplicate — delete it or it keeps producing red builds.
+
+**The resolution gotcha, which the old PENDING note got backwards.** Listing `postgres`
+and `@electric-sql/pglite` in `web/package.json` does *not* make them resolvable for the
+web build. The importer is `../../src/db/client.ts`, outside `web/`. Node and webpack
+resolve a bare specifier by walking up from the **importing file's** directory —
+`src/db/`, `src/`, repo root — so `web/node_modules` is never consulted for a file that
+lives outside `web/`. With Root Directory = `web` Vercel installs only under `web/`, the
+repo root has no `node_modules`, and the build fails:
+`Module not found: Can't resolve '@electric-sql/pglite'` and `'postgres'`.
+
+- **Fix (Vercel setting, no code change):** Install Command
+  `pnpm install && cd .. && pnpm install`. Root Directory `web` and
+  `sourceFilesOutsideRootDirectory` are still both required — the first is what makes the
+  build fail on `../../src/**` at all, the install command is what makes those imports
+  resolve. Build went 24s-to-error → 51s-to-READY.
+- **Reproduce any future variant the same way:** `git archive HEAD` into a scratch dir,
+  `pnpm install` in `web/` only, `pnpm run build`. That is exactly Vercel's environment;
+  a local build from the repo root always passes because the root `node_modules` is there
+  and hides the bug.
+- Env vars set Sensitive, production: `DATABASE_URL` (Supabase transaction pooler,
+  `ap-south-1:6543`, unquoted) and `LLM_API_KEY`. `LLM_MODEL` left unset on purpose so
+  extraction walks `VISION_MODEL_CHAIN`.
+- Vercel Authentication (SSO) is enabled for all `.vercel.app` URLs — owner-login-only,
+  which is the intended single-user posture.
+- **Agent-side blind spot:** the Vercel connector 403s on `list_deployment_events`,
+  `get_runtime_errors` and `get_runtime_logs` (`re-authenticate to this scope "echodigi"`)
+  while ordinary reads and writes succeed. Deploy failures surface an `errorCode` but no
+  log line until that scope is re-authed.

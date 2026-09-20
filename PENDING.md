@@ -19,15 +19,41 @@ MEMORY.md; the code map lives in index.md.
       Supabase — all 19 pages 200, zero server errors. 689 tests, both typechecks clean.
       Pushed to `main` (f30a99e). **Still not deployed** — see the Vercel item below.
 
-- [ ] **VERCEL DEPLOY — owner step, one setting left to get right.** `docs/SETUP.md`
-      step 7 still reads ⬜ Not deployed; the project has to be created from the owner's
-      Vercel account with `DATABASE_URL` pasted in as an env var. The dependency half is
-      fixed: `postgres` and `@electric-sql/pglite` are now direct deps of
-      `web/package.json`, so an install rooted at `web/` gets them (they used to resolve
-      only by walking up to the repo-root `node_modules`, which Vercel would not have).
-      Still required in the Vercel project settings: Root Directory = `web` **with
-      "Include source files outside of the Root Directory in the Build Step" enabled** —
-      the app imports `../../src/**` and the build fails without it.
+- [x] **VERCEL DEPLOY — live 2026-09-20.** Project `sentinel-web`
+      (`prj_PVOn1yWBG5DRfHOBzuhOWstpAVzk`, team `echodigi`), production READY on commit
+      `876641f`, aliases `sentinel-web-liart.vercel.app` /
+      `sentinel-web-echodigi.vercel.app`. Vercel Authentication (SSO) is on for every
+      `.vercel.app` URL, so the dashboard is owner-login-only — that is the intended
+      single-user posture, not a misconfiguration. Env: `DATABASE_URL` and `LLM_API_KEY`
+      set as Sensitive, production target. `LLM_MODEL` deliberately unset so extraction
+      walks `VISION_MODEL_CHAIN` in `src/config/models.ts`.
+
+      **The earlier diagnosis in this file was wrong and cost three failed builds.** It
+      claimed making `postgres` and `@electric-sql/pglite` direct deps of
+      `web/package.json` was enough for an install rooted at `web/`. It is not. The
+      importer is `../../src/db/client.ts`, which lives *outside* `web/`, so Node and
+      webpack resolve from the importer's own directory upward — `src/db/`, `src/`, repo
+      root — and never consult `web/node_modules`. With Root Directory = `web`, Vercel
+      installs only under `web/`, the repo root has no `node_modules`, and the build dies
+      with `Module not found: Can't resolve '@electric-sql/pglite'` / `'postgres'`.
+      Reproduced exactly from a clean `git archive HEAD` with an install rooted at `web/`.
+
+      Fix is a Vercel setting, no code change — **Install Command**:
+      `pnpm install && cd .. && pnpm install`. Root Directory = `web` and "Include source
+      files outside of the Root Directory" both still required. Verified in the repro
+      (`✓ Compiled successfully`) before applying, then green on Vercel in 51s.
+
+- [ ] **Vercel connector scope — log endpoints 403.** Reads like `get_project` and
+      `create_deployment` work, but `list_deployment_events`, `get_runtime_errors` and
+      `get_runtime_logs` all return `Not authorized: Trying to access resource under
+      scope "echodigi". You must re-authenticate to this scope`. Build and runtime logs
+      are therefore unreadable from the agent side; a failing deploy gives an error code
+      but no log line. Re-auth the connector to the `echodigi` team scope.
+
+- [ ] **`sentinel-web-app` is a dead duplicate Vercel project.**
+      `prj_olpCUXfRgv6au8mBcuNxOncNvJSq`, same repo and branch, last built commit
+      `000a5ab` and never rebuilt since. Delete it so pushes stop producing a second red
+      build. Owner action — not deleted without a say-so.
 
 - [x] **CASH CEILING SET TO 10% AND ENFORCED (owner decision 2026-09-19).** The PRD had
       no cash number at all — §3.3 said only “Debt/EPF/cash: remainder”, and the seeded
