@@ -13,9 +13,11 @@ import type { McpClient } from './mcp-client.js';
  * Card payments cancel out of that derivation, so the three different card billing dates
  * never have to be aligned and nothing can be counted twice.
  *
- * One `networth_snapshot` call carries every term. Savings is read from that same payload
- * rather than a second `networth_holdings('SA')` call, because `networth_holdings` costs 2
- * against a 15-per-minute budget and this job runs daily alongside the sync.
+ * Two calls: `networth_snapshot` for invested cost, card dues and loan balances, and
+ * `networth_holdings('SA')` for savings PER BANK. The snapshot's own `SA` row is an
+ * aggregate across banks, and an aggregate cannot distinguish the operating account from
+ * the rest — see `OPERATING_SAVINGS_BANK`. Two calls cost 3 against a 15-per-minute
+ * budget, which is affordable once a day.
  */
 
 export type BalanceKind = 'savings' | 'credit_card' | 'invested_cost' | 'loan';
@@ -39,6 +41,26 @@ interface SnapshotPayload {
   message?: string;
 }
 
+/** `networth_holdings('SA')` — one row per bank. */
+interface SavingsPayload {
+  holdings?: { investment?: string; market_value?: number }[];
+  error?: string;
+  message?: string;
+  holding_error?: boolean;
+}
+
+/**
+ * The operating account: salary lands here, investments are funded from here and card
+ * bills are paid from here, so it is the balance the surplus derivation reads.
+ *
+ * Every bank is still CAPTURED. Deriving from HDFC alone while recording only HDFC would
+ * book an HDFC->SBI transfer as spending, because the money would leave the only balance
+ * being watched and reappear nowhere. Recording both keeps a transfer identifiable as a
+ * transfer; which accounts count is a decision for the derivation, not the capture.
+ * Nothing here can be backfilled, so capture is always the wider of the two.
+ */
+export const OPERATING_SAVINGS_BANK = 'HDFC Bank';
+
 /** INDmoney sends rupees as JS floats. Money never crosses a float boundary here: the
  *  value goes through a fixed-2 string exactly as the holdings path already does. */
 function toPaise(rupeeValue: number): Paise {
@@ -55,7 +77,10 @@ const SAVINGS_ASSET_TYPES = new Set(['SA']);
 /** Carried at market value, not cost, so they cannot join the invested-cost delta. */
 const NOT_INVESTED_COST = new Set(['CRYPTO', 'US_STOCK_WALLET']);
 
-export function parseBalanceSnapshot(payload: SnapshotPayload): BalanceRow[] {
+export function parseBalanceSnapshot(
+  payload: SnapshotPayload,
+  savings: SavingsPayload,
+): BalanceRow[] {
   // A throttled or refused call answers successfully with an error body. Reading that as
   // "no balances" would record a day of zeros into an append-only table.
   if (payload.error) {
@@ -76,13 +101,9 @@ export function parseBalanceSnapshot(payload: SnapshotPayload): BalanceRow[] {
     const assetType = inv.asset_type;
     if (typeof assetType !== 'string' || assetType === '') continue;
 
-    if (SAVINGS_ASSET_TYPES.has(assetType)) {
-      // Cash is held at face value; `current_value` is the balance.
-      if (typeof inv.current_value === 'number') {
-        rows.push({ kind: 'savings', label: assetType, amountPaise: toPaise(inv.current_value) });
-      }
-      continue;
-    }
+    // Savings comes from networth_holdings('SA') below, per bank. The aggregate here
+    // would collapse the banks into one row and make the operating account unreadable.
+    if (SAVINGS_ASSET_TYPES.has(assetType)) continue;
     if (NOT_INVESTED_COST.has(assetType)) continue;
 
     // `invested_value` is CUMULATIVE COST, so its month-on-month delta is money actually
@@ -94,6 +115,25 @@ export function parseBalanceSnapshot(payload: SnapshotPayload): BalanceRow[] {
         amountPaise: toPaise(inv.invested_value),
       });
     }
+  }
+
+  if (savings.error) {
+    throw new Error(
+      `INDmoney refused networth_holdings('SA'): ${savings.error} — ${savings.message ?? '(no message)'}`,
+    );
+  }
+  if (savings.holding_error) {
+    throw new Error("INDmoney reported holding_error for SA; refusing to record a partial cash position");
+  }
+  if (!Array.isArray(savings.holdings)) {
+    throw new Error(
+      "could not parse INDmoney networth_holdings('SA') — the tool contract changed; " +
+      'recapture the fixture before trusting this snapshot',
+    );
+  }
+  for (const bank of savings.holdings) {
+    if (typeof bank.market_value !== 'number' || typeof bank.investment !== 'string') continue;
+    rows.push({ kind: 'savings', label: bank.investment, amountPaise: toPaise(bank.market_value) });
   }
 
   for (const card of payload.liabilities?.credit_cards ?? []) {
@@ -136,12 +176,24 @@ export function parseBalanceSnapshot(payload: SnapshotPayload): BalanceRow[] {
 }
 
 export async function fetchBalanceSnapshot(client: McpClient): Promise<BalanceRow[]> {
-  const envelope = await client.callTool<{ result?: string }>('networth_snapshot', {});
-  if (typeof envelope?.result !== 'string') {
+  const snapshot = await client.callTool<{ result?: string }>('networth_snapshot', {});
+  if (typeof snapshot?.result !== 'string') {
     throw new Error(
       'could not parse INDmoney networth_snapshot payload — the tool contract changed; ' +
       'recapture the fixture before trusting this snapshot',
     );
   }
-  return parseBalanceSnapshot(JSON.parse(envelope.result) as SnapshotPayload);
+  const savings = await client.callTool<{ result?: string }>(
+    'networth_holdings', { asset_type: 'SA' },
+  );
+  if (typeof savings?.result !== 'string') {
+    throw new Error(
+      "could not parse INDmoney networth_holdings('SA') payload — the tool contract " +
+      'changed; recapture the fixture before trusting this snapshot',
+    );
+  }
+  return parseBalanceSnapshot(
+    JSON.parse(snapshot.result) as SnapshotPayload,
+    JSON.parse(savings.result) as SavingsPayload,
+  );
 }

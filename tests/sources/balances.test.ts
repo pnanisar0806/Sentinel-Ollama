@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBalanceSnapshot } from '../../src/sources/balances.js';
+import { parseBalanceSnapshot, OPERATING_SAVINGS_BANK } from '../../src/sources/balances.js';
 import { rupees } from '../../src/money/paise.js';
 
 /**
@@ -37,20 +37,49 @@ const REAL = {
   },
 };
 
+/** `networth_holdings('SA')`, same capture. Two banks; HDFC is the operating account. */
+const SAVINGS = {
+  holdings: [
+    { investment: 'HDFC Bank', market_value: 126471.72 },
+    { investment: 'State Bank Of India', market_value: 119877.03 },
+  ],
+};
+
 const find = (rows: ReturnType<typeof parseBalanceSnapshot>, kind: string, label: string) =>
   rows.find((r) => r.kind === kind && r.label === label);
 
 describe('parseBalanceSnapshot', () => {
-  it('records savings as savings, not as invested cost', () => {
-    const rows = parseBalanceSnapshot(REAL);
-    expect(find(rows, 'savings', 'SA')?.amountPaise).toBe(rupees('246348.75'));
-    // Counting the cash balance as deployed capital would inflate realised surplus by
-    // the entire balance every single month.
+  it('records savings PER BANK, not as one aggregate', () => {
+    const rows = parseBalanceSnapshot(REAL, SAVINGS);
+    // The derivation reads the operating account only, so the banks cannot be collapsed.
+    expect(find(rows, 'savings', OPERATING_SAVINGS_BANK)?.amountPaise).toBe(rupees('126471.72'));
+    expect(find(rows, 'savings', 'State Bank Of India')?.amountPaise).toBe(rupees('119877.03'));
+    // The snapshot's own aggregate SA row must not also appear, or the cash would be
+    // counted twice — once per bank and once in total.
+    expect(find(rows, 'savings', 'SA')).toBeUndefined();
+    // Cash is never invested cost; counting it as deployed capital would inflate
+    // realised surplus by the whole balance every month.
     expect(find(rows, 'invested_cost', 'SA')).toBeUndefined();
   });
 
+  it('still captures the non-operating bank, so a transfer is not read as spend', () => {
+    const rows = parseBalanceSnapshot(REAL, SAVINGS);
+    const banks = rows.filter((r) => r.kind === 'savings').map((r) => r.label);
+    // Capturing only HDFC would make an HDFC->SBI transfer look like money spent: gone
+    // from the watched balance, reappearing nowhere. None of this is backfillable.
+    expect(banks).toHaveLength(2);
+    expect(banks).toContain('State Bank Of India');
+  });
+
+  it("refuses a refused savings call rather than recording zero cash", () => {
+    expect(() => parseBalanceSnapshot(REAL, { error: 'RATE_LIMIT' }))
+      .toThrow(/refused networth_holdings/);
+    expect(() => parseBalanceSnapshot(REAL, { holding_error: true }))
+      .toThrow(/partial cash position/);
+  });
+
   it('takes invested COST, never current value', () => {
-    const rows = parseBalanceSnapshot(REAL);
+    const rows = parseBalanceSnapshot(REAL, SAVINGS);
     // US_STOCK is the decisive row: cost 61,839.12 against a market value of 139,763.68.
     // Reading current_value would book a 126% rally as if it were money saved.
     expect(find(rows, 'invested_cost', 'US_STOCK')?.amountPaise).toBe(rupees('61839.12'));
@@ -58,7 +87,7 @@ describe('parseBalanceSnapshot', () => {
   });
 
   it('gives two same-lender loans distinct labels', () => {
-    const loans = parseBalanceSnapshot(REAL).filter((r) => r.kind === 'loan');
+    const loans = parseBalanceSnapshot(REAL, SAVINGS).filter((r) => r.kind === 'loan');
     expect(loans).toHaveLength(5);
 
     // The label is the snapshot table's uniqueness key within a day. Both SBI rows are
@@ -78,7 +107,7 @@ describe('parseBalanceSnapshot', () => {
   });
 
   it('records card dues as positive amounts owed, including zeros', () => {
-    const cards = parseBalanceSnapshot(REAL).filter((r) => r.kind === 'credit_card');
+    const cards = parseBalanceSnapshot(REAL, SAVINGS).filter((r) => r.kind === 'credit_card');
     expect(cards).toHaveLength(6);
     expect(find(cards, 'credit_card', 'YES_BANK_Klick •• 4282')?.amountPaise).toBe(rupees('43242.57'));
     // A paid-off card at zero must still be recorded: a missing row and a zero row differ,
@@ -88,22 +117,22 @@ describe('parseBalanceSnapshot', () => {
   });
 
   it('converts rupee floats without float drift', () => {
-    const rows = parseBalanceSnapshot(REAL);
+    const rows = parseBalanceSnapshot(REAL, SAVINGS);
     // 43242.57 * 100 is 4324256.9999999995 in IEEE754; the fixed-2 string path avoids it.
     expect(find(rows, 'credit_card', 'YES_BANK_Klick •• 4282')?.amountPaise).toBe(4324257n);
   });
 
   it('refuses an error body instead of recording a day of zeros', () => {
-    expect(() => parseBalanceSnapshot({ error: 'RATE_LIMIT', message: 'slow down' }))
+    expect(() => parseBalanceSnapshot({ error: 'RATE_LIMIT', message: 'slow down' }, SAVINGS))
       .toThrow(/refused networth_snapshot/);
   });
 
   it('refuses a payload with no investments array', () => {
-    expect(() => parseBalanceSnapshot({})).toThrow(/no investments array/);
+    expect(() => parseBalanceSnapshot({}, SAVINGS)).toThrow(/no investments array/);
   });
 
   it('refuses a snapshot that yields nothing at all', () => {
-    expect(() => parseBalanceSnapshot({ investments: [], liabilities: {} }))
+    expect(() => parseBalanceSnapshot({ investments: [], liabilities: {} }, { holdings: [] }))
       .toThrow(/no balances at all/);
   });
 });
