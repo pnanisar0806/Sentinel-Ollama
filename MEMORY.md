@@ -1804,3 +1804,49 @@ repo root has no `node_modules`, and the build fails:
   `get_runtime_errors` and `get_runtime_logs` (`re-authenticate to this scope "echodigi"`)
   while ordinary reads and writes succeed. Deploy failures surface an `errorCode` but no
   log line until that scope is re-authed.
+
+### The weekly report: idempotence, a dropped cron, and the dead trend leg (2026-09-20)
+
+**Three empty Phase 1 pages had one cause.** `runSignalReview` (`src/notify/report.ts`
+line ~177) returns early when `GSEC_YIELD_PCT` is unset — "the engine will not invent the
+risk-free rate" — and `persistSignalScores` sits past that gate, with recommendations
+built from `signalReview.scored`. The only two `weekly-report` runs ever (2026-09-05,
+2026-09-12) both predated the `GSEC_YIELD_PCT` repo variable being created on 2026-09-13,
+so the gate had never once been open. One manual dispatch with the variable set produced
+73 signal scores, 2 recommendations and 2 benchmarks. Runs that skip the gate take ~40s;
+a real one takes ~2m30s — that timing gap is a usable signal.
+
+- `LLM_API_KEY` was never a **GitHub Actions** secret (only DATABASE_URL, TELEGRAM_*,
+  TOKEN_ENCRYPTION_KEY). Setting it in Vercel does nothing for Actions — separate stores.
+  Now set in both. The weekly.yml comment claiming a blank key also disables satellite
+  scoring is **wrong**: scoring gates on the G-sec yield alone, the key only affects
+  narration.
+
+**The satellite recommender is mathematically unable to fire right now.** See PENDING —
+trend is 30 of 100 and scores 0 for every name because `prices_eod` holds 4 days and
+`index_prices_eod` is empty; best composite 39.8 against a MEDIUM threshold of 70. The
+filter is correct; the inputs are thin. Do not touch `BANDS`.
+
+**GitHub drops scheduled runs, it does not merely delay them.** The Sunday 04:30 UTC slot
+on 2026-09-20 never fired while `sync` ran daily throughout, and the workflow was
+`active`. On a weekly cron a dropped slot loses the week. weekly.yml now carries retries
+at 07:30 and 11:30 UTC Sunday.
+
+- A retry is only safe because `pnpm report` is now idempotent per business date:
+  `alreadyReportedFor` / `recordReportRun` in `src/jobs/report.ts`, keyed on an
+  `audit_log` row (`entity='weekly_report'`, `action='REPORT_SENT'`). No new table — and
+  it closes a real gap, since the weekly report had been leaving **no audit trace at
+  all**. A dry run is deliberately not recorded, so it cannot block the real run.
+- `persistRecommendation` is a plain INSERT with no conflict clause into an append-only
+  table, so a second run on one date would write duplicate advisory rows that nothing can
+  delete. That is what the guard protects.
+- **The early-exit path still regenerates `docs/dashboard.html`.** The file is untracked,
+  so a no-op retry that skipped it would have the workflow's Pages step publish a `docs/`
+  with no dashboard and take the published dashboard down.
+
+**React error #31 on /recommendations.** `primary_rec` and `alternates` are `text`
+columns holding `JSON.stringify(RecLeg)` / `RecLeg[]`, **not** display strings. The first
+version of the page rendered them as React children and crashed in production. Verified
+against the real rows: primary is an object, alternates a 2-element array, `amountPaise`
+a decimal string (`BigInt()` it), `instrumentId` null for portfolio-level legs. Guarded
+by `tests/web/recommendations-shape.test.ts`, mutation-checked.

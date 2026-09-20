@@ -3,8 +3,15 @@ on:
   schedule:
     # 04:30 UTC = 10:00 IST, Sunday (weekly deep report, PRD 12.2).
     # Owner signed off on the Saturday 08:00 -> Sunday 10:00 move on 2026-09-13.
-    # GitHub Actions cron is best-effort — expect a few minutes of slip.
     - cron: '30 4 * * 0'
+    # Retries, because GitHub treats `schedule` as best-effort and DROPS runs under
+    # load rather than merely delaying them — the 2026-09-20 04:30 slot never fired,
+    # and on a weekly cron one dropped slot loses the whole week. `pnpm report` is a
+    # no-op once a report has been delivered for the business date (it checks the
+    # `weekly_report` audit row), so a retry that lands after a successful run costs
+    # one job and writes nothing.
+    - cron: '30 7 * * 0'
+    - cron: '30 11 * * 0'
   workflow_dispatch:
 
 permissions:

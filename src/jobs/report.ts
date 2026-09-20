@@ -1,7 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { openDb } from '../db/client.js';
+import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
 import { installIps } from '../domain/ips.js';
@@ -47,12 +47,66 @@ export function parseGsecYield(raw: string | undefined): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/**
+ * Has a weekly report already been delivered for this business date?
+ *
+ * GitHub Actions treats `schedule` as best-effort and drops runs under load — the
+ * Sunday 2026-09-20 04:30 UTC slot was dropped, and a weekly cron losing a slot loses
+ * the whole week. The workflow therefore carries a retry cron, and a retry is only
+ * safe if the second run is a no-op: `persistRecommendation` is a plain INSERT into an
+ * append-only table, so running twice on one date would write duplicate advisory rows
+ * that no one can delete afterwards.
+ *
+ * The marker is an `audit_log` row rather than a new table — the report had been
+ * leaving no audit trace at all, which was its own gap in a system whose posture is an
+ * append-only ledger of every action.
+ */
+export async function alreadyReportedFor(db: Db, asOf: string): Promise<boolean> {
+  const rows = await db.query<{ one: number }>(
+    `select 1 as one from audit_log
+      where entity = 'weekly_report' and entity_id = $1 and action = 'REPORT_SENT' limit 1`,
+    [asOf],
+  );
+  return rows.length > 0;
+}
+
+/** Records a delivered report. A dry run delivered nothing, so it is not recorded and
+ *  must not block the real run that follows it. */
+export async function recordReportRun(
+  db: Db,
+  asOf: string,
+  meta: { sent: boolean },
+): Promise<void> {
+  if (!meta.sent) return;
+  await db.query(
+    `insert into audit_log (entity, entity_id, action, actor, payload)
+     values ('weekly_report', $1, 'REPORT_SENT', 'system', $2::jsonb)`,
+    [asOf, JSON.stringify({ asOf, sent: true })],
+  );
+}
+
 if (isMainModule(import.meta.url)) {
   const env = loadEnv(process.env, ENV_PURPOSES);
   const asOf = parseAsOf(process.argv.slice(2));
   const db = await openDb(env.databaseUrl);
   await runMigrations(db);
   await installIps(db);
+
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const dashboardPath = join(repoRoot, 'docs', 'dashboard.html');
+
+  // A retry that lands after a successful run must skip everything irreversible —
+  // `persistRecommendation` is a plain INSERT into an append-only table — but it must
+  // still write the dashboard. docs/dashboard.html is untracked, so the workflow's
+  // Pages upload would otherwise publish a docs/ with no dashboard in it and take the
+  // published dashboard down.
+  if (await alreadyReportedFor(db, asOf)) {
+    const refreshed = generateDashboardHtml(await buildDigestInput(db, new Date().toISOString()));
+    await writeFile(dashboardPath, refreshed, 'utf-8');
+    console.log(`weekly report already sent for ${asOf} — dashboard refreshed, nothing else to do`);
+    await db.close();
+    process.exit(0);
+  }
 
   const maturityRecommendations: Recommendation[] = [];
   for (const r of await listRedemptionsUntil(db, REDEMPTION_HORIZON_DAYS, new Date(`${asOf}T00:00:00Z`))) {
@@ -69,8 +123,7 @@ if (isMainModule(import.meta.url)) {
 
   // The dashboard rides along with the weekly run, as it did under `pnpm weekly`.
   const html = generateDashboardHtml(await buildDigestInput(db, input.generatedAt));
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  await writeFile(join(repoRoot, 'docs', 'dashboard.html'), html, 'utf-8');
+  await writeFile(dashboardPath, html, 'utf-8');
 
   const telegram = new Telegram({
     botToken: env.telegramBotToken!,
@@ -78,6 +131,7 @@ if (isMainModule(import.meta.url)) {
     dryRun: env.dryRun,
   });
   const { sent } = await telegram.send(text);
+  await recordReportRun(db, asOf, { sent });
   console.log(sent ? `weekly report sent (as of ${asOf})` : `weekly report not sent (dry run)\n\n${text}`);
   await db.close();
 }

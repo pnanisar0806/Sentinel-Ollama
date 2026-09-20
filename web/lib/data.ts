@@ -21,6 +21,7 @@ import { listRedemptionsUntil, type Redemption } from '../../src/domain/redempti
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
+import type { RecLeg } from '../../src/domain/recommendations.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -490,8 +491,11 @@ export interface RecommendationRow {
   createdOn: string;
   kind: string;
   intent: string;
-  primary: string;
-  alternates: string[] | string;
+  /** `primary_rec` and `alternates` hold `JSON.stringify(RecLeg)` / `RecLeg[]`, NOT display
+   *  strings — rendering them directly is React error #31. A row whose JSON is unreadable
+   *  arrives as the raw string instead, and the page shows it as unparseable. */
+  primary: RecLeg | string;
+  alternates: RecLeg[] | string;
   ipsClauses: string[] | string;
   evidence: unknown;
   source: string;
@@ -516,8 +520,10 @@ export async function getRecommendations(limit = 50): Promise<RecommendationRow[
     createdOn: isoDate(r.created_on),
     kind: r.kind,
     intent: r.intent,
-    primary: r.primary_rec,
-    alternates: parseJsonColumn<string[]>(r.alternates, []),
+    // Fallback is the raw column: an unparseable leg is surfaced as its own text rather
+    // than as an empty object the page would render as a blank recommendation.
+    primary: parseJsonColumn<RecLeg | string>(r.primary_rec, r.primary_rec),
+    alternates: parseJsonColumn<RecLeg[]>(r.alternates, []),
     ipsClauses: parseJsonColumn<string[]>(r.ips_clause_refs, []),
     evidence: parseJsonColumn<unknown>(r.engine_evidence, null),
     source: r.source,

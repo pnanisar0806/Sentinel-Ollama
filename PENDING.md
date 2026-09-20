@@ -616,3 +616,26 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
 | *(pending push)* | **Screener cohort promotion**: unknown screen rows become `NSE:<slug>` instruments (kind EQUITY, `metadata {"source":"screener-cohort"}`, ISIN left NULL for `backfill:isin`), `importScreenRows` returns `createdInstruments`, CLI prints promotion count, degenerate `/company/id/` slugs refused; 4 new tests, **618→622 passed**, tsc clean. Re-import of screen 3963033 widens the pool to ~410 (~398 newly promoted) — the old 10-page default cap had truncated its 17 pages to ~230; page budget is now a 100-page safety valve + short-page terminator |
 
 (End of file)
+
+- [ ] **THE SATELLITE RECOMMENDER CANNOT FIRE — the trend leg is dead (found 2026-09-20).**
+      `SATELLITE_WEIGHTS` is valuation 30 / trend 30 / earnings 20 / fit 20, and MEDIUM
+      (the lowest band that builds a recommendation, `report.ts` line ~291) needs a
+      composite of 70. On the 2026-09-20 run, all 41 quality-passing names scored
+      `reg_trend = 0.0` on average, and the best composite in the whole set was **39.8**.
+      With trend at zero the ceiling is 70, so a name would have to score perfectly on
+      every other leg to produce a single satellite recommendation.
+
+      Cause is data depth, not the filter. `prices_eod` holds **4 trading days**
+      (2026-09-15 to 2026-09-18, 1,623 rows, 416 instruments) and `index_prices_eod` is
+      **empty**. Both trend legs need far more: 6-month relative strength against a
+      benchmark series, and a 200-day moving average. They score 0 and say so in the
+      evidence string ("fewer than 6 months of closes").
+
+      **Do not lower `BANDS.medium` to make recommendations appear.** The bands are not
+      the thing that is wrong. What is needed is bhavcopy history backfilled deep enough
+      for a 200DMA plus an index series in `index_prices_eod`; until then the only
+      recommendations that can exist are the non-satellite kinds (2026-09-20 produced
+      exactly `maturity_routing x1` and `rebalance x1`, which is correct behaviour).
+
+- [ ] **`index_prices_eod` has never been populated.** Zero rows. The benchmark leg of
+      the trend score and the scoring harness's excess-return comparison both read it.
