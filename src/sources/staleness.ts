@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
 import type { Position } from '../domain/networth.js';
+import { isTradingDay } from '../seed/seed-holidays.js';
 
 /** PRD §8.2 freshness policy, in hours. Fundamentals = one quarter. */
 export const FRESHNESS_HOURS: Record<string, number> = {
@@ -21,10 +22,53 @@ const LIMIT_BY_SOURCE: Record<string, number> = {
 /** Sentinel value for a source that has never produced a row. */
 const NEVER = '1970-01-01T00:00:00.000Z';
 
-/** Sources that are expected to have data in the current schema. */
-const KNOWN_PORTFOLIO_SOURCES = ['manual-seed', 'indmoney', 'composite'] as const;
+/** Sources that are expected to have data in the current schema.
+ *
+ * `composite` was removed on 2026-09-20: nothing in the codebase ever wrote it, so it
+ * held a permanently open incident reading "last updated never" since 2026-08-24. It
+ * was a name from the Phase 0 snapshot comment for merging Kite with INDmoney, and Kite
+ * is retired. An incident that can never clear only teaches the owner to ignore
+ * incidents. */
+const KNOWN_PORTFOLIO_SOURCES = ['manual-seed', 'indmoney'] as const;
 const KNOWN_FX_SOURCES = ['frankfurter'] as const;
 const KNOWN_MARKET_SOURCES = ['amfi', 'bhavcopy', 'screener'] as const;
+
+/**
+ * Sources that only publish on a trading day. Their freshness is measured against the
+ * market calendar, not the wall clock.
+ *
+ * A wall-clock limit is unsatisfiable for these by construction. NSE closes Friday and
+ * publishes nothing until Monday, so a 24h limit on `bhavcopy` marks it stale from
+ * Saturday morning onward and FR-31 blocks every equity, ETF and bond position for the
+ * whole weekend. On 2026-09-20 that was 39 instruments — and `weekly.yml` runs the deep
+ * report at 04:30 UTC on SUNDAY, so the recommendation pipeline was hobbled on the exact
+ * day it ran. A Friday holiday such as 2026-10-02 extends the outage to four days.
+ *
+ * The question is therefore "is there data for the most recent COMPLETED trading
+ * session", not "is the newest row younger than N hours".
+ */
+const TRADING_CALENDAR_SOURCES = new Set(['bhavcopy', 'amfi', 'frankfurter']);
+
+/** How many completed trading days a calendar source may lag before it is stale. 0 means
+ *  it must carry the most recent completed session. */
+export const TRADING_DAY_TOLERANCE = 0;
+
+/**
+ * The most recent completed trading session at `nowIso`.
+ *
+ * Strictly before today, because a session that is still open (or whose close has not
+ * been published yet) cannot be required. Bounded at 14 days so a mis-seeded holiday
+ * table cannot spin forever; exceeding that is itself a fault worth surfacing as stale.
+ */
+export async function lastCompletedTradingDay(db: Db, nowIso: string): Promise<string> {
+  const cursor = new Date(`${nowIso.slice(0, 10)}T00:00:00Z`);
+  for (let i = 0; i < 14; i += 1) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    const day = cursor.toISOString().slice(0, 10);
+    if (await isTradingDay(db, day)) return day;
+  }
+  return cursor.toISOString().slice(0, 10);
+}
 
 /**
  * `unimplemented` is deliberately NOT `stale`. amfi/bhavcopy/screener have no
@@ -117,12 +161,15 @@ async function getLatestFundamentalsAsOf(db: Db): Promise<string | undefined> {
 
 /**
  * Assesses staleness for all known sources.
- * - Portfolio sources (indmoney, manual-seed, composite) from holdings
+ * - Portfolio sources (indmoney, manual-seed) from holdings, on a wall-clock limit
+ * - Trading-calendar sources (bhavcopy, amfi, frankfurter) against the last session
  * - FX sources (frankfurter) from fx_rates
  * - Market sources (bhavcopy from prices_eod, amfi from navs, screener from fundamentals)
  */
 export async function assessStaleness(db: Db, now: string): Promise<StalenessRow[]> {
   const nowMs = Date.parse(now);
+  // Computed once: every calendar source is measured against the same session.
+  const lastSession = await lastCompletedTradingDay(db, now);
 
   const holdingsMap = await getLatestHoldingsAsOf(db);
   const fxMap = await getLatestFxAsOf(db);
@@ -145,7 +192,14 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
       };
     }
     const ageHours = (nowMs - Date.parse(asOf)) / 3_600_000;
-    const stale = ageHours > limitHours;
+
+    // A trading-calendar source is fresh when it carries the most recent COMPLETED
+    // session, however many wall-clock hours ago that was. Friday's close read on a
+    // Sunday is 58h old and perfectly current; there has been no session since.
+    const stale = TRADING_CALENDAR_SOURCES.has(source)
+      ? asOf.slice(0, 10) < lastSession
+      : ageHours > limitHours;
+
     return { source, asOf, ageHours, limitHours, state: stale ? 'stale' : 'fresh', stale };
   };
 

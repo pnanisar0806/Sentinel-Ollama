@@ -63,7 +63,10 @@ describe('staleness engine', () => {
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
     // Derived, not restated: every market + portfolio + FX source is stale with no data.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(7); // manual-seed, indmoney, composite, frankfurter, bhavcopy, amfi, screener
+    // manual-seed, indmoney, frankfurter, bhavcopy, amfi, screener. `composite` was
+    // removed on 2026-09-20 — nothing ever wrote it, so it held an incident that could
+    // never clear. One fewer source, hence 6 rather than 7.
+    expect(expected).toBe(6);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     expect(await raiseIncidents(db, rows)).toBe(0);
@@ -80,7 +83,7 @@ describe('staleness engine', () => {
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
     // Portfolio (3) + frankfurter (stale at 5 days) + bhavcopy + amfi + screener (all empty) = 7.
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(7);
+    expect(expected).toBe(6);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     const open = await db.query<{ n: string }>(
@@ -95,9 +98,9 @@ describe('staleness engine', () => {
     const fresher = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
     await raiseIncidents(db, fresher);
 
-    // manual-seed recovers; indmoney/composite/frankfurter/bhavcopy/amfi still have no data at all.
+    // manual-seed recovers; indmoney/frankfurter/bhavcopy/amfi still have no data at all.
     const expected = fresher.filter((r) => r.stale).length;
-    expect(expected).toBe(6);
+    expect(expected).toBe(5);
     expect(fresher.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
 
     const open = await db.query<{ n: string }>(
@@ -122,7 +125,7 @@ describe('staleness engine', () => {
     // the two portfolio sources that never produced a row and the three empty market tables.
     expect(after.find((r) => r.source === 'frankfurter')!.stale).toBe(false);
     const expected = after.filter((r) => r.stale).length;
-    expect(expected).toBe(6);
+    expect(expected).toBe(5);
 
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,
