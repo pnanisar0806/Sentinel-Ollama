@@ -11,6 +11,7 @@ import {
 } from '../domain/engine.js';
 import { rebalanceRec, type FundingRoute } from '../domain/alloc-engine.js';
 import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../domain/sell-triggers.js';
+import { CAPS, satelliteFit } from '../domain/allocation.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/redemptions.js';
 import {
   buildRecommendation,
@@ -165,6 +166,8 @@ async function runSignalReview(
   asOf: string,
   blocked: readonly string[],
   gsecYieldPct: number | undefined,
+  /** The live book, for the `fit` leg — see `satelliteFit`. */
+  positions: Position[],
 ): Promise<SignalReview> {
   const empty: SignalReview = {
     scored: [],
@@ -184,10 +187,13 @@ async function runSignalReview(
   }
 
   const inputs = await loadEngineInputs(db, asOf, { gsecYieldPct });
+  // These were `headroomPaise: 0n` and `sectorWeightPct: {}` written in by hand, so the
+  // two halves of `fit` — 20 of the composite's 100 points — scored 0 and a full 10 for
+  // every candidate on every run. Neither said anything about the name being scored.
   const ctx = {
     ...inputs.context,
     blockedIds: blocked,
-    fit: { headroomPaise: 0n as never, sectorWeightPct: {}, sectorCapPct: 25 },
+    fit: { ...satelliteFit(positions), sectorCapPct: CAPS.singleSector * 100 },
   };
   const scored = inputs.candidates
     .map((c) => scoreSatellite(c, ctx))
@@ -261,7 +267,7 @@ export async function buildReportInput(
       where kind = 'STALE_DATA' and resolved_at is null order by subject`,
   );
 
-  const signalReview = await runSignalReview(db, asOf, blocked, opts.gsecYieldPct);
+  const signalReview = await runSignalReview(db, asOf, blocked, opts.gsecYieldPct, positions);
 
   // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
   const rebalance = rebalanceRec(

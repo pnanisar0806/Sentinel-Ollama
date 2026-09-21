@@ -180,3 +180,54 @@ export function concentration(positions: Position[]): Concentration {
     sectorCoveragePct, breaches, caveats,
   };
 }
+
+/** IPS §3.4: the satellite bucket is capped at 25% of equity. */
+export const SATELLITE_CAP_PCT = 25;
+
+export interface SatelliteFit {
+  /** Room left under the §3.4 cap. 0n when the bucket is full or over. */
+  headroomPaise: Paise;
+  /** Share of the whole portfolio per sector, percent. Sectorless positions are absent. */
+  sectorWeightPct: Record<string, number>;
+}
+
+/**
+ * The `fit` inputs the satellite engine scores against.
+ *
+ * `report.ts` passed `headroomPaise: 0n` and `sectorWeightPct: {}` as literals, so the
+ * headroom half of `fit` scored 0 for every candidate and the balance half scored a full
+ * 10 for every candidate, on every run. Twenty of the composite's hundred points said
+ * nothing about the name being scored: one half pinned to the floor, one to the ceiling.
+ *
+ * **Satellite is agent-recommended DIRECT stocks** (IPS §3.4, core-satellite 75/25).
+ * `kind === 'EQUITY'` is that set. The employer RSU is `kind === 'RSU'`: it counts toward
+ * equity, because it is equity, but never toward the satellite bucket — it is neither
+ * agent-recommended nor sellable at will, and counting it would consume the whole bucket
+ * on a position the advisor did not choose.
+ *
+ * Sector weights are a share of the WHOLE portfolio, matching how `CAPS.sectorCap` is
+ * applied in `concentration`. A position with no sector is left out rather than pooled
+ * into an "unknown" bucket, which would compete against real sectors for the cap and
+ * read as a genuine concentration.
+ */
+export function satelliteFit(positions: Position[]): SatelliteFit {
+  const sum = (rows: Position[]): bigint => rows.reduce((a, p) => a + p.valuePaise, 0n);
+
+  const equityPaise = sum(positions.filter((p) => p.assetClass === 'EQUITY'));
+  const satellitePaise = sum(positions.filter((p) => p.kind === 'EQUITY'));
+  const allowed = (equityPaise * BigInt(SATELLITE_CAP_PCT)) / 100n;
+  const headroomPaise = allowed > satellitePaise ? allowed - satellitePaise : 0n;
+
+  const total = sum(positions);
+  const sectorWeightPct: Record<string, number> = {};
+  if (total > 0n) {
+    for (const p of positions) {
+      if (p.sector === null) continue;
+      sectorWeightPct[p.sector] = (sectorWeightPct[p.sector] ?? 0) + Number(p.valuePaise);
+    }
+    for (const k of Object.keys(sectorWeightPct)) {
+      sectorWeightPct[k] = Math.round((sectorWeightPct[k]! / Number(total)) * 1000) / 10;
+    }
+  }
+  return { headroomPaise: headroomPaise as Paise, sectorWeightPct };
+}
