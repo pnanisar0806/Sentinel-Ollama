@@ -145,10 +145,19 @@ export async function applyWatchlistProposals(
 ): Promise<number> {
   let written = 0;
   for (const p of proposals) {
+    // `watchlist`'s primary key is (instrument_id, added_on), so `on conflict` caught
+    // only a same-day re-add. On any later date this inserted a SECOND live row for a
+    // name already watched, and production reached 80 live rows for 73 instruments —
+    // the engine then scored those seven twice. The guard is "already live", not
+    // "already keyed". A name watched and since removed is a real decision and is
+    // still accepted.
     const rows = await db.query<{ instrument_id: string }>(
       `insert into watchlist (instrument_id, added_on, source, reason)
-       values ($1, $2, 'llm-advisor', $3)
-       on conflict (instrument_id, added_on) do nothing
+       select $1, $2::date, 'llm-advisor', $3
+        where not exists (
+          select 1 from watchlist
+           where instrument_id = $1 and (removed_on is null or removed_on > $2::date)
+        )
        returning instrument_id`,
       [p.instrumentId, addedOn, p.reason],
     );

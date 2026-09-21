@@ -861,6 +861,21 @@ be honest about, not as work. Phase 3 is Kite execution, human-in-loop unlock, d
 bridge, tax engine v1, breakers armed and maturity routing. Everything below falls
 between the two and will never be built unless it is tracked here.
 
+### New, found while verifying item 2 (2026-09-21)
+
+**A. Valuation scores 0 for every candidate — 30 of 100 points.** With prices backfilled
+the best composite is 58.65 (`NSE:SIEMENS`), up from 39.8, but MEDIUM is 70 so the
+satellite recommender **still cannot fire**. The gap is the valuation leg: 39 of the 73
+watchlist instruments have `sector = NULL`, and of the sectors that exist several have
+one member, so a "sector median P/E" over them means nothing. The screener export
+carries CMP, P/E, Mar Cap, Div Yld, NP Qtr, Qtr Profit Var, Sales Qtr, Qtr Sales Var,
+ROCE, D/E — **no industry column**, so sector cannot be backfilled from held data.
+**Owner input: a screener export including Industry, or a sector mapping.** Coarser
+buckets are also needed; a one-member median is not a comparison.
+
+**B. ~~Seven instruments scored twice~~ — FIXED 2026-09-21.** Production held 80 live
+watchlist rows for 73 instruments. Fixed at both ends; see MEMORY.md § Watchlist.
+
 ### Fix order, worst first
 
 **1. ~~The rails do not gate anything~~ — DONE 2026-09-21.** `checkRails` is wired into
@@ -883,6 +898,12 @@ backfill: `downloadIndexSeries` had never worked. Three silent defects, see MEMO
 § Index prices. `pnpm backfill:prices` now exists (`--days=260 --end=YYYY-MM-DD`,
 resumable). **Still to do: run it against the production database**, then confirm the
 satellite composite clears MEDIUM.
+
+**Backfill finished:** 249 days fetched, 99,001 equity rows, 1,968 index rows. 256
+trading days on both tables, 2025-09-08 to 2026-09-21, ~255 points per instrument, 8
+index series. One day served nothing — 2025-10-02, Gandhi Jayanti, a real NSE holiday
+absent from the `holidays` table. Trend now scores 19.6–28.8 where it scored 0 for every
+name. See item A above for why that is still not enough to fire.
 
 Original entry:
 **ORPHAN — price history depth and the empty `index_prices_eod`.** `prices_eod` holds

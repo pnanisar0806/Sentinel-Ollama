@@ -2478,3 +2478,45 @@ Price backfill still running at the time of writing (79 of 260 trading days, old
 ("raises a SYNC_FAILURE when the download itself fails"); two immediately following runs
 were fully green (789/789). Not chased. If it recurs, suspect a real network call or a
 timing assumption rather than the backfill work.
+
+
+## Watchlist held duplicate live rows (fixed 2026-09-21)
+
+Production carried **80 live watchlist rows for 73 instruments**. `watchlist`'s primary
+key is `(instrument_id, added_on)`, so `applyWatchlistProposals`' `on conflict do
+nothing` caught only a same-day re-add; on any later date `llm-advisor` inserted a
+second live row for a name `advisor` was already watching. `loadEngineInputs` then
+scored those seven twice — double weight in any ranking, and one instrument capable of
+reaching the owner as two separate ideas.
+
+Fixed at both ends, because the table is **append-only and the seven rows cannot be
+removed**:
+- the proposer guards on "already live" (`where not exists … removed_on is null or
+  removed_on > $2`) rather than on the primary key. A name watched and since removed is
+  a real decision and is still accepted.
+- `loadEngineInputs` selects `distinct`, so it scores each instrument once whatever the
+  table holds.
+
+## Satellite scoring after the price backfill (2026-09-21)
+
+Backfill complete: 256 trading days on `prices_eod` and `index_prices_eod`
+(2025-09-08 → 2026-09-21), ~255 points per instrument, 8 index series, 99,001 equity and
+1,968 index rows.
+
+Trend now scores **19.6–28.8**, where every name scored 0 before. Best composite is
+**58.65** (`NSE:SIEMENS`), up from 39.8. **MEDIUM is 70, so the satellite recommender
+still cannot fire** — do not record item 2 as having unblocked recommendations.
+
+The remaining gap is the **valuation leg, 30 of 100, scoring 0**: 39 of 73 watchlist
+instruments have `sector = NULL`, and several existing sectors have a single member, so
+their median P/E compares a name to itself. The screener export holds CMP, P/E, Mar Cap,
+Div Yld, NP Qtr, Qtr Profit Var, Sales Qtr, Qtr Sales Var, ROCE, D/E — **no industry
+column** — so sector cannot be backfilled from held data. Owner input needed: an export
+carrying Industry, or a sector mapping, plus coarser buckets.
+
+`fit` also scores 10 of 20 ("satellite bucket has no headroom"), which is a real
+portfolio fact rather than a data gap.
+
+**2025-10-02 (Gandhi Jayanti) is missing from the `holidays` table** — the backfill
+reported it as "served nothing". Harmless for the backfill, which records an empty day,
+but `lastCompletedTradingDay` will treat it as a session.

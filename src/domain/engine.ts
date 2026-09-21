@@ -439,8 +439,13 @@ export async function loadEngineInputs(
   const lookback = opts.lookbackDays ?? 400;
   const benchmarkSeries = opts.benchmarkSeries ?? 'NIFTY 500';
 
+  // DISTINCT because `watchlist` can hold more than one live row per instrument: its
+  // primary key is (instrument_id, added_on), and the proposer used to add a name on a
+  // later date that was already being watched. Those rows are already written and the
+  // table is append-only, so they cannot be removed — scoring a name twice would
+  // double-weight it in any ranking and could surface one instrument as two ideas.
   const watch = await db.query<{ instrument_id: string; sector: string | null }>(
-    `select w.instrument_id, i.sector
+    `select distinct w.instrument_id, i.sector
        from watchlist w
        join instruments i on i.id = w.instrument_id
       where w.added_on <= $1 and (w.removed_on is null or w.removed_on > $1)`,
