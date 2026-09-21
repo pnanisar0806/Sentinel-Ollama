@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractHoldingsFromImage, LLM_MODEL_CHAIN } from '../../src/sources/llm-extract.js';
+import { extractHoldingsFromImage, LLM_MODEL_CHAIN, parseModelJson } from '../../src/sources/llm-extract.js';
 
 const POSITIONS = [
   { name: 'Tata Motors Ltd', instrumentId: 'IND:INDS01789', account: 'zerodha' },
@@ -163,5 +163,44 @@ describe('the model chain survives a retired model', () => {
     }).then(() => null, (e: Error) => e);
     expect(err).toBeInstanceOf(Error);
     for (const model of LLM_MODEL_CHAIN) expect(err!.message).toContain(model);
+  });
+});
+
+/**
+ * A model replied with a SPACE before the fence and /import died with
+ * `Unexpected token '`', " ```json { "... is not valid JSON`. The old strip anchored on
+ * `^```, so the fence had to be the very first character. The free pool is six
+ * different models with six habits.
+ */
+
+const BT = '```';
+const body = '{"items":[]}';
+
+/**
+ * A model replied with a SPACE before the fence and /import died with
+ * `Unexpected token '`', " ```json { "... is not valid JSON`. The old strip anchored the
+ * fence to the very first character. The free pool is six models with six habits.
+ */
+describe('parseModelJson', () => {
+  it('reads a fence that is not the first character', () => {
+    expect(parseModelJson(` ${BT}json\n${body}\n${BT}`)).toEqual({ items: [] });
+  });
+
+  it('reads a bare fence with no language tag', () => {
+    expect(parseModelJson(`${BT}\n${body}\n${BT}`)).toEqual({ items: [] });
+  });
+
+  it('reads unfenced JSON', () => {
+    expect(parseModelJson(body)).toEqual({ items: [] });
+    expect(parseModelJson(`  ${body}  `)).toEqual({ items: [] });
+  });
+
+  it('ignores prose the model put around the block', () => {
+    expect(parseModelJson(`Here is the data:\n${BT}json\n${body}\n${BT}\nHope that helps.`))
+      .toEqual({ items: [] });
+  });
+
+  it('still throws on content that holds no JSON at all', () => {
+    expect(() => parseModelJson('I cannot read this image.')).toThrow();
   });
 });

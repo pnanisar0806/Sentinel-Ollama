@@ -46,6 +46,23 @@ const SYSTEM_RULES = [
 ].join('\n');
 
 /**
+ * Pulls the JSON out of whatever the model wrapped it in.
+ *
+ * The previous version anchored on `^```` and so needed the fence to be the very first
+ * character. A model that replied with a leading space produced
+ * `Unexpected token '`', " ```json { "... is not valid JSON` and the whole extraction
+ * failed. Models also put a sentence before or after the block, and the free pool is
+ * seven different models with seven habits.
+ *
+ * So: take the first fenced block if there is one, otherwise the trimmed content.
+ */
+export function parseModelJson(content: string): unknown {
+  const trimmed = content.trim();
+  const fenced = trimmed.match(/```(?:json)?[ \t]*\r?\n?([\s\S]*?)```/i);
+  return JSON.parse((fenced?.[1] ?? trimmed).trim());
+}
+
+/**
  * Shared OpenRouter vision pass: send one or more images with a task prompt to the free
  * vision-model chain, retry once on the primary, walk the chain on 429, strip JSON fences
  * and return whatever JSON the model produced — ANY shape. Callers map the shape they
@@ -118,7 +135,7 @@ export async function extractJsonFromImage(deps: {
       if (typeof content !== 'string') throw new Error('OpenRouter returned no message content');
 
       // Models love wrapping JSON in fences even when told not to.
-      return JSON.parse(content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+      return parseModelJson(content);
     }
   }
   throw new Error(
