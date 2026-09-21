@@ -892,7 +892,19 @@ recommender cannot fire at all**. Phase 2.5 Task 6 has the LLM choose among *eli
 engine candidates*; with none produced, the centrepiece of 2.5 advises on an empty set.
 Needs a bhavcopy backfill deep enough for a 200DMA plus an index series.
 
-**3. ORPHAN — exit candidates are never persisted.** `evaluateExits` output is rendered
+**3. ~~ORPHAN — exit candidates are never persisted~~ — DONE 2026-09-21.** New
+append-only `exit_candidates` table (migration 0021), written by the weekly report,
+idempotent per (month, instrument, trigger). `ExitCandidate` now carries `amountPaise`:
+the whole position for SELL/REDEEM, the excess back inside the rail for a hard-cap TRIM,
+NULL when no position sizes it. `/cleanup` shows the size.
+
+Deliberately NOT done: candidates do not become `recommendations` rows. A candidate is a
+signal the engine raised; promoting one is a separate step that spends the FR-12 monthly
+action budget, and the default answer is hold. `/cleanup` still computes live so the page
+is current between weekly runs — the table is the memory, not the source.
+
+Original entry:
+**ORPHAN — exit candidates are never persisted.** `evaluateExits` output is rendered
 into the weekly Telegram text (`report.ts:515`) and written nowhere, so no exit trigger —
 employer cap, underperformance, falsification, better-alternative, credit-maturity — can
 reach `/recommendations`. `ExitCandidate` also carries no `amountPaise`. Phase 2.5 Task 4

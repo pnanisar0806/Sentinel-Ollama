@@ -92,6 +92,14 @@ export interface ExitCandidate {
   heldMonths: number | null;
   /** A non-override trigger that would break the §3.7 minimum hold. */
   blockedByMinimumHold: boolean;
+  /**
+   * What to sell, in paise. A full exit for SELL and REDEEM; for a hard-cap TRIM, the
+   * excess that brings the bucket back inside the rail, never more than the position
+   * itself holds. NULL when nothing in the portfolio sizes it — an exit candidate for
+   * an instrument no position covers is still worth surfacing, but it is not sizeable,
+   * and an unknown size is NULL rather than 0.
+   */
+  amountPaise: bigint | null;
   /** §6.5 candidates are recommendations, never orders. */
   paper: true;
 }
@@ -201,6 +209,7 @@ function candidate(
   evidence: string,
   ipsClauseRefs: string[],
   held: Map<string, string>,
+  amountPaise: bigint | null,
 ): ExitCandidate {
   const since = held.get(instrumentId);
   const heldMonths = since === undefined ? null : monthsBetween(since, monthEnd(month));
@@ -219,6 +228,7 @@ function candidate(
     overridesMinimumHold,
     heldMonths,
     blockedByMinimumHold,
+    amountPaise,
     paper: true,
   };
 }
@@ -242,6 +252,30 @@ export async function evaluateExits(
   const heldIds = new Set(positions.map((p) => p.instrumentId));
   const out: ExitCandidate[] = [];
 
+  /**
+   * Sizing. An exit candidate the owner cannot act on without first working out the
+   * quantity himself is half a recommendation, so every candidate carries the amount
+   * its own trigger implies.
+   *
+   * Caps are converted to basis points so the arithmetic stays exact bigint: a cap is a
+   * ratio, and multiplying paise by a float to find the excess is the one place this
+   * would have crept back in.
+   */
+  const sumWhere = (pred: (p: Position) => boolean): bigint =>
+    positions.filter(pred).reduce((acc, p) => acc + p.valuePaise, 0n);
+  const totalValue = sumWhere(() => true);
+  /** The whole position, summed across accounts. NULL when nothing holds it. */
+  const fullPosition = (id: string): bigint | null => {
+    const v = sumWhere((p) => p.instrumentId === id);
+    return v > 0n ? v : null;
+  };
+  /** What must leave a bucket to bring it back to `cap`. Proceeds stay in the portfolio
+   *  as cash, so the denominator does not move. */
+  const excessOver = (bucketValue: bigint, cap: number): bigint => {
+    const allowed = (totalValue * BigInt(Math.round(cap * 10_000))) / 10_000n;
+    return bucketValue > allowed ? bucketValue - allowed : 0n;
+  };
+
   // 1. Falsification — an open recommendation's stored condition, tested against live data.
   const recs = await db.query<{ primary_rec: string }>(
     `select primary_rec from recommendations
@@ -262,7 +296,8 @@ export async function evaluateExits(
     const verdict = await testCondition(db, id, cond, asOf);
     if (verdict === null || verdict.fired === false) continue;
     out.push(
-      candidate('falsification', id, 'SELL', month, verdict.evidence, ['3.7'], held),
+      candidate('falsification', id, 'SELL', month, verdict.evidence, ['3.7'], held,
+        fullPosition(id)),
     );
   }
 
@@ -279,6 +314,7 @@ export async function evaluateExits(
         `${f.redFlags} screener red flag(s) as of ${f.asOf}`,
         ['3.7'],
         held,
+        fullPosition(id),
       ),
     );
   }
@@ -287,27 +323,51 @@ export async function evaluateExits(
   // re-deriving them; the sector cap is deliberately absent because it names a sector,
   // not a holding, and an exit candidate has to name something sellable.
   const c = concentration(positions);
-  const capHits = new Map<string, string>();
+  /** Per instrument: why it is over, and how much of the bucket has to go. */
+  const capHits = new Map<string, { evidence: string; excess: bigint }>();
   for (const [id, share] of c.byStock) {
-    if (share > CAPS.singleStock) capHits.set(id, `single-stock ${(share * 100).toFixed(1)}% vs ${(CAPS.singleStock * 100).toFixed(0)}% cap`);
+    if (share > CAPS.singleStock) {
+      capHits.set(id, {
+        evidence: `single-stock ${(share * 100).toFixed(1)}% vs ${(CAPS.singleStock * 100).toFixed(0)}% cap`,
+        excess: excessOver(sumWhere((p) => p.instrumentId === id), CAPS.singleStock),
+      });
+    }
   }
   for (const [id, share] of c.byMfScheme) {
-    if (share > CAPS.singleMfScheme) capHits.set(id, `single-MF-scheme ${(share * 100).toFixed(1)}% vs ${(CAPS.singleMfScheme * 100).toFixed(0)}% cap`);
+    if (share > CAPS.singleMfScheme) {
+      capHits.set(id, {
+        evidence: `single-MF-scheme ${(share * 100).toFixed(1)}% vs ${(CAPS.singleMfScheme * 100).toFixed(0)}% cap`,
+        excess: excessOver(sumWhere((p) => p.instrumentId === id), CAPS.singleMfScheme),
+      });
+    }
   }
   for (const [issuer, share] of c.byIssuer) {
     if (share <= CAPS.singleIssuer) continue;
+    const excess = excessOver(sumWhere((x) => x.issuer === issuer), CAPS.singleIssuer);
     for (const p of positions.filter((x) => x.issuer === issuer)) {
-      capHits.set(p.instrumentId, `single-issuer ${issuer} ${(share * 100).toFixed(1)}% vs ${(CAPS.singleIssuer * 100).toFixed(0)}% cap`);
+      capHits.set(p.instrumentId, {
+        evidence: `single-issuer ${issuer} ${(share * 100).toFixed(1)}% vs ${(CAPS.singleIssuer * 100).toFixed(0)}% cap`,
+        excess,
+      });
     }
   }
   if (c.employerPct > CAPS.employer) {
+    const excess = excessOver(sumWhere((x) => x.isEmployer), CAPS.employer);
     for (const p of positions.filter((x) => x.isEmployer)) {
-      capHits.set(p.instrumentId, `employer ${(c.employerPct * 100).toFixed(1)}% vs ${(CAPS.employer * 100).toFixed(0)}% cap`);
+      capHits.set(p.instrumentId, {
+        evidence: `employer ${(c.employerPct * 100).toFixed(1)}% vs ${(CAPS.employer * 100).toFixed(0)}% cap`,
+        excess,
+      });
     }
   }
-  for (const [id, evidence] of capHits) {
+  for (const [id, hit] of capHits) {
     // A cap breach asks for the excess back inside the rail, not for the position to go.
-    out.push(candidate('hard-cap', id, 'TRIM', month, evidence, ['3.5'], held));
+    // Where a bucket spans several instruments (an issuer, the employer) the excess is
+    // what the BUCKET must shed; no one position can be asked for more than it holds,
+    // and clearing the breach may take more than one of them.
+    const own = fullPosition(id);
+    const trim = own === null ? null : (hit.excess < own ? hit.excess : own);
+    out.push(candidate('hard-cap', id, 'TRIM', month, hit.evidence, ['3.5'], held, trim));
   }
 
   // 4. Sustained underperformance: 12-month relative return worse than −20pp at two
@@ -336,6 +396,7 @@ export async function evaluateExits(
         `12-month return ${now.toFixed(1)}pp vs benchmark this quarter and ${prior.toFixed(1)}pp last quarter, both past the ${UNDERPERFORMANCE_PP}pp line`,
         ['3.7'],
         held,
+        fullPosition(id),
       ),
     );
   }
@@ -362,6 +423,7 @@ export async function evaluateExits(
         `${alt.challengerId} scores ${alt.challengerComposite} against ${alt.heldComposite} — ${edge} points clear of the ${BETTER_ALTERNATIVE_MARGIN}-point margin`,
         ['3.7'],
         held,
+        fullPosition(alt.heldInstrumentId),
       ),
     );
     budget--;
@@ -383,6 +445,7 @@ export async function evaluateExits(
         `${r.symbol} matures ${r.maturityDate}, ${r.daysUntil} days out`,
         ['3.8', '3.9'],
         held,
+        fullPosition(r.instrumentId),
       ),
     );
   }
@@ -435,4 +498,75 @@ async function testCondition(
     fired,
     evidence: `${cond.metric} ${actual} is ${cond.op === 'lt' ? 'below' : 'above'} the falsification level ${threshold} (screener ${f.asOf})`,
   };
+}
+
+/**
+ * Records what the triggers found this month.
+ *
+ * Idempotent on (month, instrument, trigger): the weekly job runs four or five times a
+ * month and must add nothing on the repeats. The table is append-only, so a duplicate
+ * could not be cleaned up afterwards.
+ *
+ * A candidate that cannot be sized is still recorded — the fact that the engine flagged
+ * it is the point, and `amount_paise` stays NULL rather than becoming 0.
+ *
+ * Returns the number of rows this call actually wrote, which is what lets the caller
+ * say "two new candidates" instead of repeating a standing list every week.
+ */
+export async function persistExitCandidates(
+  db: Db,
+  candidates: ExitCandidate[],
+  asOf: string,
+  source = 'sell-triggers',
+): Promise<number> {
+  let written = 0;
+  for (const c of candidates) {
+    const rows = await db.query<{ id: string }>(
+      `insert into exit_candidates
+         (month, instrument_id, trigger_code, action, evidence, ips_clause_refs,
+          overrides_minimum_hold, held_months, blocked_by_minimum_hold, amount_paise,
+          as_of, source)
+       values ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12)
+       on conflict (month, instrument_id, trigger_code) do nothing
+       returning id`,
+      [c.month, c.instrumentId, c.trigger, c.action, c.evidence,
+       JSON.stringify(c.ipsClauseRefs), c.overridesMinimumHold, c.heldMonths,
+       c.blockedByMinimumHold, c.amountPaise === null ? null : c.amountPaise.toString(),
+       asOf, source],
+    );
+    if (rows.length > 0) written += 1;
+  }
+  return written;
+}
+
+/** Everything recorded for a month, newest month first when `month` is omitted. */
+export async function loadExitCandidates(db: Db, month?: string): Promise<ExitCandidate[]> {
+  const rows = await db.query<{
+    month: string; instrument_id: string; trigger_code: ExitTrigger;
+    action: ExitCandidate['action']; evidence: string; ips_clause_refs: unknown;
+    overrides_minimum_hold: boolean; held_months: number | null;
+    blocked_by_minimum_hold: boolean; amount_paise: string | number | null;
+  }>(
+    month === undefined
+      ? `select * from exit_candidates
+          where month = (select max(month) from exit_candidates)
+          order by instrument_id, trigger_code`
+      : `select * from exit_candidates where month = $1 order by instrument_id, trigger_code`,
+    month === undefined ? [] : [month],
+  );
+  return rows.map((r) => ({
+    trigger: r.trigger_code,
+    instrumentId: r.instrument_id,
+    action: r.action,
+    month: r.month,
+    evidence: r.evidence,
+    ipsClauseRefs: (typeof r.ips_clause_refs === 'string'
+      ? JSON.parse(r.ips_clause_refs)
+      : r.ips_clause_refs) as string[],
+    overridesMinimumHold: r.overrides_minimum_hold,
+    heldMonths: r.held_months,
+    blockedByMinimumHold: r.blocked_by_minimum_hold,
+    amountPaise: r.amount_paise === null ? null : BigInt(r.amount_paise),
+    paper: true,
+  }));
 }

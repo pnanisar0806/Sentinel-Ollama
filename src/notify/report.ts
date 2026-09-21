@@ -10,7 +10,7 @@ import {
   type SatelliteScore,
 } from '../domain/engine.js';
 import { rebalanceRec, type FundingRoute } from '../domain/alloc-engine.js';
-import { evaluateExits, type ExitCandidate } from '../domain/sell-triggers.js';
+import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../domain/sell-triggers.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/redemptions.js';
 import {
   buildRecommendation,
@@ -344,6 +344,11 @@ export async function buildReportInput(
   );
 
   const exits = await evaluateExits(db, { positions, blockedIds: blocked }, month);
+  // Record what the triggers found. Idempotent per (month, instrument, trigger), so the
+  // four or five weekly runs inside a month write the first one and nothing after it.
+  // Without this the digest re-sent the same standing candidates every week with no
+  // memory, and nothing could say when a name was first flagged.
+  await persistExitCandidates(db, exits, asOf);
 
   const watchRows = await db.query<{
     instrument_id: string;

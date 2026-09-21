@@ -19,8 +19,14 @@ export default async function CleanupPage() {
   const exitRows = exitCandidates.map((c) => ({
     key: `${c.trigger}-${c.instrumentId}`,
     trigger: statusMap[c.trigger]?.label ?? c.trigger,
+    // The tone was looked up by the mapped LABEL ('HARD CAP'), which is never a key of
+    // statusMap, so every badge fell back to grey and the triggers all looked alike.
+    tone: statusMap[c.trigger]?.tone ?? 'gray',
     instrument: c.instrumentId,
     action: c.action,
+    // A TRIM is sized at the excess over the cap, a SELL or REDEEM at the whole
+    // position. NULL means no position sizes it, and renders as unknown, never as 0.
+    size: c.amountPaise === null ? null : rupees(c.amountPaise.toString()),
     month: c.month,
     evidence: c.evidence,
     overridesHold: c.overridesMinimumHold ? 'Yes' : 'No',
@@ -145,9 +151,10 @@ export default async function CleanupPage() {
               <DataTable
                 rows={exitRows}
                 cols={[
-                  { label: 'Trigger', value: (r) => <Badge tone={statusMap[r.trigger]?.tone ?? 'gray'}>{r.trigger}</Badge> },
+                  { label: 'Trigger', value: (r) => <Badge tone={r.tone}>{r.trigger}</Badge> },
                   { label: 'Instrument', value: (r) => <span className="mono">{r.instrument}</span> },
                   { label: 'Action', value: (r) => r.action },
+                  { label: 'Size', value: (r) => r.size ?? <span className="dim">unknown</span> },
                   { label: 'Month', value: (r) => r.month },
                   { label: 'Evidence', value: (r) => <span className="dim">{r.evidence}</span> },
                   { label: 'Overrides hold', value: (r) => r.overridesHold },

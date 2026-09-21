@@ -2349,3 +2349,43 @@ path to a file that does not exist. Local CLI and Telegram paths are unchanged.
 
 **Open:** an upload made through the deployed app leaves no image on disk at all. If the
 archive matters, the bytes need a column or a bucket — neither exists today.
+
+
+## Exit candidates are recorded, 2026-09-21
+
+`exit_candidates` (migration 0021, append-only) holds what the §6.5 triggers found each
+month. `persistExitCandidates` is called from the weekly report and is idempotent on
+(month, instrument_id, trigger_code), so the four or five runs inside a month write the
+first and nothing after. `loadExitCandidates(db, month?)` reads them back; no month
+means the latest one.
+
+**They are not recommendations, on purpose.** A candidate is a signal the engine raised.
+Promoting one into an FR-11 recommendation spends the FR-12 monthly action budget and
+the default answer is hold, so that stays a separate, deliberate step. `/cleanup` keeps
+computing live — the page must be current between weekly runs — and the table is the
+memory that lets the digest say "new this month" instead of re-sending a standing list
+forever.
+
+**`ExitCandidate.amountPaise`** — the whole position for SELL and REDEEM; for a hard-cap
+TRIM, the excess that brings the bucket back inside the rail, never more than that one
+position holds. NULL when no position sizes it, never 0. Caps are converted to basis
+points so the arithmetic stays exact bigint: multiplying paise by a float cap is exactly
+where float money would have crept back in. A bucket spanning several instruments (an
+issuer, the employer) gives each the bucket's excess capped at its own value, so
+clearing the breach may take more than one of them.
+
+Also fixed in `/cleanup`: the trigger badge looked its tone up by the already-mapped
+LABEL ('HARD CAP'), which is never a key of `statusMap`, so every badge rendered grey.
+
+## OpenRouter model chain, 2026-09-21
+
+The vision chain walked **only on 429** and threw on anything else, so when OpenRouter
+retired `minimax/minimax-m3:free` (`"This model is unavailable for free", code 404`) the
+404 killed extraction and the five healthy models behind it were never tried. Any
+per-model failure now advances the chain; only exhaustion throws, and the error names
+every model tried with its reason.
+
+`minimax/minimax-m3:free` is removed. Checked against OpenRouter's catalogue on
+2026-09-21 — the only one of the seven that has gone; the other six are live. **The paid
+`minimax/minimax-m3` slug was deliberately not substituted**: the pool is free by owner
+decision, and adding a billed model is the owner's call.
