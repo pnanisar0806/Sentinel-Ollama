@@ -28,6 +28,9 @@ export default async function CleanupPage() {
     // position. NULL means no position sizes it, and renders as unknown, never as 0.
     size: c.amountPaise === null ? null : rupees(c.amountPaise.toString()),
     month: c.month,
+    // A breach standing since August is not news in September. NULL means the weekly
+    // job has not recorded one yet, which is not the same as "new".
+    firstSeen: c.firstSeen,
     evidence: c.evidence,
     overridesHold: c.overridesMinimumHold ? 'Yes' : 'No',
     blockedByHold: c.blockedByMinimumHold ? '⚠ BLOCKED' : 'No',
@@ -156,6 +159,12 @@ export default async function CleanupPage() {
                   { label: 'Action', value: (r) => r.action },
                   { label: 'Size', value: (r) => r.size ?? <span className="dim">unknown</span> },
                   { label: 'Month', value: (r) => r.month },
+                  {
+                    label: 'First flagged',
+                    value: (r) => (r.firstSeen === null
+                      ? <span className="dim">not yet recorded</span>
+                      : r.firstSeen === r.month ? 'this month' : r.firstSeen),
+                  },
                   { label: 'Evidence', value: (r) => <span className="dim">{r.evidence}</span> },
                   { label: 'Overrides hold', value: (r) => r.overridesHold },
                   { label: 'Blocked by hold', value: (r) => r.blockedByHold },

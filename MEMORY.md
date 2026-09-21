@@ -2474,10 +2474,11 @@ call it consistency. Nothing calls it yet.
 Price backfill still running at the time of writing (79 of 260 trading days, oldest
 2025-09-08). Resumable — re-run `pnpm backfill:prices --days=260` to finish it.
 
-**One flaky test observed:** a full run showed 1 failure in `tests/jobs/sync.test.ts`
-("raises a SYNC_FAILURE when the download itself fails"); two immediately following runs
-were fully green (789/789). Not chased. If it recurs, suspect a real network call or a
-timing assumption rather than the backfill work.
+**The "flaky test" was a misattribution, corrected 2026-09-21.** The line read as a
+failure in `tests/jobs/sync.test.ts` was stderr noise printed beside a PASSING test; the
+real failure that run was a guard test mid-edit. That file has no network call and no
+clock dependency, and ran green three times consecutively plus every full suite since.
+There is no known flaky test.
 
 
 ## Watchlist held duplicate live rows (fixed 2026-09-21)

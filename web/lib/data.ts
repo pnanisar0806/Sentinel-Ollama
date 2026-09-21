@@ -312,7 +312,9 @@ export interface CleanupCalendarData {
   freezeState: { active: boolean; frozenAt: string | null; reason: string | null };
   breakerState: { active: boolean; consecutiveFalsifications: number; lastFalsificationAt: string | null; demotedAt: string | null; postMortemNote: string | null };
   railCoolingUntil: string | null;
-  exitCandidates: ExitCandidate[];
+  /** `firstSeen` is the earliest month `exit_candidates` recorded it; NULL before the
+   *  weekly job has written one. */
+  exitCandidates: (ExitCandidate & { firstSeen: string | null })[];
   drawdownPct: number | null;
 }
 
@@ -354,13 +356,25 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
     alternatives: [], // Better alternatives would need composite scores
   };
   const exitCandidates = await evaluateExits(d, exitState, now.slice(0, 7));
+
+  // When each was FIRST recorded. The live evaluation only knows about this month, so
+  // without this a breach standing since August reads as new every single week — which
+  // is precisely what the digest used to do before `exit_candidates` existed.
+  const history = await d.query<{ instrument_id: string; trigger_code: string; first_seen: string }>(
+    `select instrument_id, trigger_code, min(month) as first_seen
+       from exit_candidates group by 1, 2`,
+  );
+  const firstSeen = new Map(history.map((h) => [`${h.instrument_id}|${h.trigger_code}`, h.first_seen]));
   
   return {
     redemptions,
     freezeState,
     breakerState,
     railCoolingUntil,
-    exitCandidates,
+    exitCandidates: exitCandidates.map((c) => ({
+      ...c,
+      firstSeen: firstSeen.get(`${c.instrumentId}|${c.trigger}`) ?? null,
+    })),
     drawdownPct: drawdown?.current_pct ?? null,
   };
 }
