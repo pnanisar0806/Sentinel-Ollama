@@ -863,13 +863,19 @@ between the two and will never be built unless it is tracked here.
 
 ### Fix order, worst first
 
-**1. The rails do not gate anything (Phase 2 debt, not an orphan — but ranked first).**
-`checkRails` has zero production callers. `validateOrderGate` enforces FR-31 staleness
-and FR-11/FR-12 structure only; `orders.ts` contains no reference to freeze, breaker or
-paper mode. Worst because the Phase 2 DoD is four weeks of paper approvals: exercising a
-gate that is not there manufactures confidence in a control that does not exist, directly
-before Phase 3 arms real execution. Phase 2.5 states plainly that "Phase 2 approval/rails
-remain hard gates" — today they are not.
+**1. ~~The rails do not gate anything~~ — DONE 2026-09-21.** `checkRails` is wired into
+`validateOrderGate`, so the per-order ceiling, forbidden universe, FR-12 repeat-BUY hold,
+rail cooling and both drawdown rails now refuse an order. Four defects had to be fixed
+first; the function had never once executed. See MEMORY.md § Rails.
+
+Still open from this item, deliberately not done here:
+- `getTacticalUsedThisMonth` is still a `return 0n` stub, so TACTICAL_BUDGET_EXCEEDED only
+  fires when a single order exceeds the monthly cap. `order_intents` has no amount column;
+  sizing it needs `payload_snapshot` parsing, which is its own task.
+- Freeze, breaker and paper mode are still not consulted by `orders.ts`. `checkFreeze` and
+  `getBreakerState` exist and have no caller.
+- `RAIL_CONSTRAINTS` in `rails.ts` is now dead — nothing reads it. Left in place; deleting
+  pre-existing dead code is a separate call.
 
 **2. ORPHAN — price history depth and the empty `index_prices_eod`.** `prices_eod` holds
 4 trading days; the index table is empty. Trend is 30 of 100 and scores 0 for every name,

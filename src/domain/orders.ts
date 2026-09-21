@@ -3,6 +3,7 @@ import type { Recommendation, RecLeg } from './recommendations.js';
 import { formatInr } from '../money/paise.js';
 import { assessStaleness, blockedInstruments, type StalenessRow } from '../sources/staleness.js';
 import { loadPositions, type Position } from '../domain/networth.js';
+import { checkRails } from './rails.js';
 import { validateRecommendation } from './recommendations.js';
 
 export type OrderStatus =
@@ -214,6 +215,7 @@ async function validateOrderGate(
   instrumentId: string,
   recommendation: Recommendation,
   skipStalenessCheck = false,
+  forRecommendationId?: number,
 ): Promise<void> {
   // Skip staleness check if explicitly requested (e.g., for tests)
   if (!skipStalenessCheck) {
@@ -232,6 +234,23 @@ async function validateOrderGate(
   const errors = validateRecommendation(recommendation);
   if (errors.length > 0) {
     throw new Error(`FR-11/12 validation failed: ${errors.join('; ')}`);
+  }
+
+  // The owner rails. This function's comment has always claimed to "validate rails", but
+  // until now it checked only freshness and FR-11/12 structure: `checkRails` had no
+  // caller anywhere in the codebase, so MAX_ORDER_EXCEEDED, TACTICAL_BUDGET_EXCEEDED,
+  // FORBIDDEN_UNIVERSE, HOLD_PERIOD, OVERRIDE_INVALID, COOLING_NOT_ELAPSED and the two
+  // drawdown rails gated nothing. An order over the owner's per-order ceiling was
+  // created without complaint.
+  //
+  // STALE_DATA is dropped: the block above already raises it, with the offending sources
+  // named, and honours `skipStalenessCheck`. Every other violation refuses the order.
+  const railViolations = (await checkRails(db, recommendation, { forRecommendationId }))
+    .filter((v) => v.code !== 'STALE_DATA');
+  if (railViolations.length > 0) {
+    throw new Error(
+      `Rails refused this order: ${railViolations.map((v) => `${v.code} (${v.detail})`).join('; ')}`,
+    );
   }
 }
 
@@ -283,7 +302,7 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
 
   // FR-30/31: Validate rails and freshness before creating draft
   if (!primary.instrumentId) throw new Error('Primary instrumentId is required for order creation');
-  await validateOrderGate(db, primary.instrumentId, recommendation, process.env.NODE_ENV === 'test');
+  await validateOrderGate(db, primary.instrumentId, recommendation, process.env.NODE_ENV === 'test', recommendationId);
 
   const [row] = await db.query<Record<string, unknown> & { id: string }>(
     `insert into order_intents
@@ -449,7 +468,7 @@ export async function modifyOrder(db: Db, id: string, input: ModifyInput): Promi
       paperMode: baseRec.paperMode,
     };
     const targetInstrumentId = (newPayload.alternateInstrumentId as string) ?? (newPayload.instrumentId as string) ?? primary.instrumentId ?? order.instrumentId;
-    await validateOrderGate(tx, targetInstrumentId, modifiedRec, process.env.NODE_ENV === 'test');
+    await validateOrderGate(tx, targetInstrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId);
 
     await tx.query(
       `insert into order_revisions
@@ -783,7 +802,7 @@ export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderI
   };
 
   // Re-validate rails and freshness (skip staleness in tests)
-  await validateOrderGate(db, order.instrumentId, modifiedRec, process.env.NODE_ENV === 'test');
+  await validateOrderGate(db, order.instrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId);
 
   // Check if score (if available in engineEvidence) fell below threshold
   const composite = modifiedRec.engineEvidence?.composite;

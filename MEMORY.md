@@ -2264,3 +2264,40 @@ so do not weaken it.
 A seed row dropped by account coverage with **no** identity match logs an error naming the
 instrument and amount. That is the only path where money could vanish silently, so it is
 made loud rather than trusted.
+
+
+## Rails — the order gate, wired 2026-09-21
+
+`checkRails` is called by `validateOrderGate` (`src/domain/orders.ts`), which every order
+creation, revision and deferred-resurface routes through. Before this it had **zero**
+callers and had never executed in any environment; four defects were found in sequence,
+each hidden behind the one before it:
+
+1. The forbidden-universe query selected `instrument_id` from `instruments`, whose key is
+   `id`. Every call threw before reaching any later check.
+2. The FR-12 hold used `count(*)` with `order by created_on` and no GROUP BY — invalid in
+   Postgres. The count was redundant; the row fetch beside it answers the same question.
+3. The hold matched `primary_rec like '%"instrumentId":"X"%'`, so a prior SELL or HOLD on
+   a name blocked its first BUY, and `%`/`_` in an id acted as wildcards. Now reads
+   `(primary_rec::jsonb)->>'instrumentId'` and `->>'action' = 'BUY'`.
+4. The recommendation an order implements counted as its own prior, so the gate refused
+   **every** order the moment it was wired (30 tests red). `checkRails` now takes
+   `forRecommendationId` and excludes it.
+
+**Concentration is judged at the margin.** `checkRails` used to push every standing
+breach. The seeded portfolio carries three, all `US:NOW` (single-stock, employer,
+single-issuer), so the gate would have refused everything — including the SELL that
+clears the breach. `marginalConcentration` projects the post-order portfolio and reports
+a breach only when the order creates it or worsens one of the bought instrument's own
+buckets. A BUY of X strictly raises every bucket X sits in and strictly lowers all others
+(the denominator grows), so no percentage arithmetic is needed to tell the two apart.
+SELL and TRIM are never gated on concentration. Standing breaches still reach the owner
+through `checkPortfolioRails`, which the digest and `/rails` both call.
+
+**Order rails are read from `settings_rails`.** `max_order_paise` and
+`tactical_monthly_paise` were literals inside `checkRails`, so editing either in
+`settings_rails` changed nothing. Both now go through `railPaise()`, falling back to
+`DEFAULT_OWNER_RAILS` — the same pattern `checkCashCeiling` already used.
+
+**Not done:** `getTacticalUsedThisMonth` is still a `0n` stub (`order_intents` has no
+amount column). Freeze, breaker and paper mode still have no caller in `orders.ts`.

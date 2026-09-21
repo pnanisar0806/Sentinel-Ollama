@@ -1,5 +1,5 @@
 import type { Db } from '../db/client.js';
-import { loadPositions, type Position } from './networth.js';
+import { classify, loadPositions, type Position } from './networth.js';
 import { concentration } from './allocation.js';
 import { blockedInstruments, assessStaleness } from '../sources/staleness.js';
 import { formatInr, paise } from '../money/paise.js';
@@ -54,7 +54,12 @@ export type BreakerState = {
 export async function checkRails(
   db: Db,
   recommendation: Recommendation,
-  opts: { override?: OverrideEvent; isRevision?: boolean } = {}
+  opts: {
+    override?: OverrideEvent;
+    isRevision?: boolean;
+    /** The recommendation this call is gating, so FR-12 does not treat it as its own prior. */
+    forRecommendationId?: number | undefined;
+  } = {}
 ): Promise<{ code: string; detail: string }[]> {
   const violations: { code: string; detail: string }[] = [];
 
@@ -69,41 +74,62 @@ export async function checkRails(
     }
   }
 
-  const conc = concentration(positions);
-  for (const breach of conc.breaches) {
-    violations.push({ code: 'CONCENTRATION_BREACH', detail: breach });
-  }
+  const amountPaise = BigInt(recommendation.primary.amountPaise ?? '0');
+  violations.push(...(await marginalConcentration(db, positions, recommendation, amountPaise)));
 
-  const forbidden = await db.query<{ instrument_id: string }>(
-    `select instrument_id from instruments where metadata->>'forbidden' = 'true'`
+  // `instruments` keys on `id`; there is no `instrument_id` column. This query threw
+  // `column "instrument_id" does not exist` on EVERY call, so checkRails aborted here and
+  // never reached MAX_ORDER_EXCEEDED, TACTICAL_BUDGET_EXCEEDED, HOLD_PERIOD,
+  // OVERRIDE_INVALID, COOLING_NOT_ELAPSED or the drawdown checks. It went unnoticed
+  // because the function had no production caller to fail.
+  const forbidden = await db.query<{ id: string }>(
+    `select id from instruments where metadata->>'forbidden' = 'true'`
   );
-  if (primaryInst && forbidden.some(f => f.instrument_id === primaryInst)) {
+  if (primaryInst && forbidden.some(f => f.id === primaryInst)) {
     violations.push({ code: 'FORBIDDEN_UNIVERSE', detail: `${primaryInst} is in forbidden universe` });
   }
 
-  const amountPaise = BigInt(recommendation.primary.amountPaise ?? '0');
-  if (amountPaise > 100_00_000n) {
-    violations.push({ code: 'MAX_ORDER_EXCEEDED', detail: `${formatInr(paise(amountPaise))} exceeds ₹1L ceiling` });
+  const maxOrder = await railPaise(db, 'max_order_paise');
+  if (amountPaise > maxOrder) {
+    violations.push({
+      code: 'MAX_ORDER_EXCEEDED',
+      detail: `${formatInr(paise(amountPaise))} exceeds the ${formatInr(paise(maxOrder))} per-order ceiling`,
+    });
   }
 
+  const tacticalCap = await railPaise(db, 'tactical_monthly_paise');
   const tacticalUsed = await getTacticalUsedThisMonth(db);
-  if (tacticalUsed + amountPaise > 50_00_000n) {
-    violations.push({ code: 'TACTICAL_BUDGET_EXCEEDED', detail: `Tactical deployment would exceed ₹50k/month (used: ${formatInr(paise(tacticalUsed))})` });
+  if (tacticalUsed + amountPaise > tacticalCap) {
+    violations.push({
+      code: 'TACTICAL_BUDGET_EXCEEDED',
+      detail: `Tactical deployment would exceed ${formatInr(paise(tacticalCap))}/month `
+        + `(used: ${formatInr(paise(tacticalUsed))})`,
+    });
   }
 
   if (recommendation.primary.action === 'BUY' && primaryInst) {
-    const [{ n } = { n: '0' }] = await db.query<{ n: string }>(
-      `select count(*) as n from recommendations
-       where suppressed = false and primary_rec like $1
-       order by created_on desc limit 1`,
-      [`%"instrumentId":"${primaryInst}"%`]
-    );
-    if (Number(n) > 0) {
+    // One query, not two. The count that used to guard this threw
+    // `column "recommendations.created_on" must appear in the GROUP BY clause` —
+    // `count(*)` with an `order by` and no grouping is invalid, and it sat directly
+    // behind the bad column name above, so the hold-period check had never run either.
+    // The count was redundant regardless: the row fetch below answers "is there a prior".
+    {
+      // FR-12 dates the hold from the last BUY. The `like '%"instrumentId":"X"%'` this
+      // replaces matched any prior recommendation naming the instrument, so a SELL or a
+      // HOLD on the name would have blocked a first BUY of it; it also treated `%` and
+      // `_` inside an id as wildcards. `primary_rec` is text holding JSON, so the cast
+      // reads the two fields the rule is actually about.
       const [prior] = await db.query<{ created_on: string | Date }>(
         `select created_on from recommendations
-         where suppressed = false and primary_rec like $1
+         where suppressed = false
+           and (primary_rec::jsonb)->>'instrumentId' = $1
+           and (primary_rec::jsonb)->>'action' = 'BUY'
+           -- The recommendation being executed is not prior to itself. Without this the
+           -- order gate refused every order it was given, each one blocked by the very
+           -- recommendation it implements.
+           and ($2::bigint is null or id <> $2::bigint)
          order by created_on desc limit 1`,
-        [`%"instrumentId":"${primaryInst}"%`]
+        [primaryInst, opts.forRecommendationId ?? null]
       );
       if (prior) {
         const priorIso = prior.created_on instanceof Date
@@ -130,6 +156,108 @@ export async function checkRails(
   if (drawdownJustification) violations.push(drawdownJustification);
 
   return violations;
+}
+
+/**
+ * A rail the owner can change lives in `settings_rails` (PRD 11), with
+ * DEFAULT_OWNER_RAILS as the fallback when the row is absent. `checkRails` used to
+ * compare against `100_00_000n` and `50_00_000n` written into the function, so editing
+ * either rail in `settings_rails` changed nothing — the same split `checkCashCeiling`
+ * already avoids.
+ */
+async function railPaise(db: Db, key: string): Promise<bigint> {
+  const [row] = await db.query<{ value: number | string }>(
+    `select value from settings_rails where key = $1`,
+    [key],
+  );
+  const raw = Number(row ? row.value : DEFAULT_OWNER_RAILS[key]);
+  if (!Number.isFinite(raw)) throw new Error(`rail ${key} is not a number`);
+  return BigInt(Math.trunc(raw));
+}
+
+/** `Single-stock cap: NSE:X at 12.0% (cap 10.0%)` -> `NSE:X`. The separator is a colon
+ *  followed by a space, which an instrument id (`NSE:X`) never contains. */
+const breachSubject = (breach: string): string => breach.split(' at ')[0]!.split(': ').slice(1).join(': ');
+
+/**
+ * What THIS order does to concentration — not what the portfolio already is.
+ *
+ * `concentration()` reports every standing breach, and the owner's portfolio carries
+ * three of them (Employer, Single-issuer, Single-stock). Pushing them all through
+ * `checkRails` would refuse *every* order the moment the gate was wired up, including
+ * the SELL that would clear the breach. Standing breaches already reach the owner
+ * through `checkPortfolioRails`, which both the digest and `/rails` call; this is the
+ * only place that can say whether an order makes one worse.
+ *
+ * A BUY of X strictly raises every bucket X sits in and strictly lowers every other
+ * bucket, because the denominator grows. So a post-order breach is caused by this order
+ * exactly when it is new, or when its subject is one of X's own buckets — no percentage
+ * arithmetic distinguishes them. SELL and TRIM only reduce X, so they are never gated
+ * here.
+ */
+async function marginalConcentration(
+  db: Db,
+  positions: Position[],
+  recommendation: Recommendation,
+  amountPaise: bigint,
+): Promise<{ code: string; detail: string }[]> {
+  const id = recommendation.primary.instrumentId;
+  if (recommendation.primary.action !== 'BUY' || !id || amountPaise <= 0n) return [];
+
+  const held = positions.find((p) => p.instrumentId === id);
+  let after: Position[];
+  if (held) {
+    after = positions.map((p) =>
+      p.instrumentId === id ? { ...p, valuePaise: paise(p.valuePaise + amountPaise) } : p);
+  } else {
+    const bought = await syntheticPosition(db, id, amountPaise);
+    // An id absent from `instruments` cannot be ordered at all — `order_intents.instrument_id`
+    // carries a foreign key to it — so there is no order here whose effect to assess.
+    if (!bought) return [];
+    after = [...positions, bought];
+  }
+
+  const target = held ?? after[after.length - 1]!;
+  const ownBuckets = new Set([target.instrumentId, target.issuer, target.sector]
+    .filter((b): b is string => b !== null));
+  const before = new Set(concentration(positions).breaches.map(breachSubject));
+
+  return concentration(after).breaches
+    .filter((breach) => {
+      const subject = breachSubject(breach);
+      // The employer breach names every employer instrument at once, so it is matched on
+      // the flag rather than on its subject text.
+      if (breach.startsWith('Employer cap:')) return target.isEmployer;
+      return !before.has(subject) || ownBuckets.has(subject);
+    })
+    .map((breach) => ({ code: 'CONCENTRATION_BREACH', detail: `this order would breach — ${breach}` }));
+}
+
+/** The position this BUY would create, for an instrument not currently held. */
+async function syntheticPosition(db: Db, id: string, amountPaise: bigint): Promise<Position | null> {
+  const [row] = await db.query<{
+    kind: Position['kind']; name: string; issuer: string | null;
+    sector: string | null; currency: string; is_employer: boolean;
+  }>(
+    `select kind, name, issuer, sector, currency, is_employer from instruments where id = $1`,
+    [id],
+  );
+  if (!row) return null;
+  return {
+    instrumentId: id,
+    name: row.name,
+    kind: row.kind,
+    account: 'zerodha',
+    valuePaise: paise(amountPaise),
+    avgCostPaise: null,
+    assetClass: classify(row.kind, id, row.name),
+    issuer: row.issuer,
+    sector: row.sector,
+    currency: row.currency,
+    isEmployer: row.is_employer,
+    asOf: new Date().toISOString(),
+    source: 'rails-projection',
+  };
 }
 
 async function getTacticalUsedThisMonth(db: Db): Promise<bigint> {
