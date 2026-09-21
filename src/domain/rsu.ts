@@ -163,11 +163,17 @@ export async function persistVests(
 ): Promise<void> {
   const asOf = opts.asOf ?? new Date().toISOString();
   for (const v of vests) {
-    const existing = await db.query<{ status: string }>(
-      'select status from rsu_vests where grant_id = $1 and vest_on = $2',
+    const existing = await db.query<{ status: string; source: string }>(
+      'select status, source from rsu_vests where grant_id = $1 and vest_on = $2',
       [v.grantId, v.vestOn],
     );
     if (existing[0]?.status === 'ACTUAL') continue;
+    // FR-03's principle, one step further: a MODEL projection may not overwrite a row
+    // that came from the owner's own Fidelity statement either. The statement lists the
+    // real tranches — 25RUST vests annually, the 21RUIN4A* grants semi-annually — while
+    // `projectVests` spreads every grant over uniform quarters. Letting the projection
+    // win would put the fiction back on every sync.
+    if (existing[0] !== undefined && existing[0].source !== PROJECTED_SOURCE) continue;
     await db.query(
       `insert into rsu_vests
          (grant_id, vest_on, units, status, gross_paise, net_paise, as_of, source)
@@ -176,7 +182,8 @@ export async function persistVests(
           set units = excluded.units, gross_paise = excluded.gross_paise,
               net_paise = excluded.net_paise, as_of = excluded.as_of,
               source = excluded.source
-        where rsu_vests.status <> 'ACTUAL'`,
+        where rsu_vests.status <> 'ACTUAL'
+          and rsu_vests.source = $7`,
       [v.grantId, v.vestOn, v.units, v.grossPaise.toString(), v.netPaise.toString(),
        asOf, PROJECTED_SOURCE],
     );

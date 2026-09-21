@@ -26,9 +26,9 @@ const LLM = (vests: unknown[]) => ({
   json: async () => ({ choices: [{ message: { content: JSON.stringify({ vests }) } }] }),
 });
 
-/** G2026 grant id, a real seeded grant (grantedOn 2026-02-17). */
+/** 26RSU: the owner’s real grant, granted 2026-02-17. */
 const VEST = {
-  grantId: 'G2026',
+  grantId: '26RSU',
   vestOn: '2026-08-15',
   units: 71.25,
   priceUsd: 185.47,
@@ -94,7 +94,7 @@ describe('Fidelity RSU flow (real PGlite + seeded grants)', () => {
 
     await privates.processFidelityStatement(Number(SHOT), [{ fileId: `${SHOT}.png`, mime: 'image/png' }]);
 
-    const card = sent.find((m) => m.includes('G2026 vesting 2026-08-15'));
+    const card = sent.find((m) => m.includes('26RSU vesting 2026-08-15'));
     expect(card).toBeDefined();
     expect(card).toContain(`71.25u`);
     expect(privates.fidelityPending).toHaveLength(1);
@@ -166,7 +166,10 @@ describe('Fidelity RSU flow (real PGlite + seeded grants)', () => {
     await privates.handleConfirm('/confirm all');
     expect(privates.fidelityPending).toBeNull();
     expect(sent.some((m) => m.includes('no such grant'))).toBe(true);
-    const rows = await db.query<{ id: string }>('select id from rsu_vests');
+    // The seed now carries the owner's real unvested schedule, so an empty table is no
+    // longer the right assertion — what matters is that the unknown grant wrote nothing.
+    const rows = await db.query<{ id: string }>(
+      `select id from rsu_vests where grant_id = 'G2099'`);
     expect(rows).toHaveLength(0);
   });
 

@@ -185,17 +185,29 @@ describe('persistence and reconciliation', () => {
     db = await openDb();
     await runMigrations(db);
     await seed(db, { asOf: '2026-08-12' });
+    // These tests exercise the persistence MECHANICS against `SEED_RSU_GRANTS`, which
+    // `seed()` no longer writes — the real Fidelity grants replaced it. The grant rows
+    // are inserted here so `rsu_vests.grant_id`'s foreign key holds, without tying the
+    // mechanics tests to whichever grants the owner happens to have.
+    for (const g of SEED_RSU_GRANTS) {
+      await db.query(
+        `insert into rsu_grants (id, granted_on, units, note)
+         values ($1,$2,$3,$4) on conflict (id) do nothing`,
+        [g.id, g.grantedOn, g.units, g.note],
+      );
+    }
   });
 
   it('stamps every row with a pinned as_of and a source', async () => {
     const vests = projectVests(SEED_RSU_GRANTS, opts);
     await persistVests(db, vests, { asOf: AS_OF });
     const rows = await db.query<{ n: string }>(
-      'select count(*) as n from rsu_vests where as_of is not null and source <> \'\'',
+      `select count(*) as n from rsu_vests
+        where as_of is not null and source = 'model'`,
     );
     expect(Number(rows[0]!.n)).toBe(vests.length);
     const distinct = await db.query<{ as_of: string | Date; source: string }>(
-      'select distinct as_of, source from rsu_vests',
+      `select distinct as_of, source from rsu_vests where source = 'model'`,
     );
     expect(distinct).toHaveLength(1);
     expect(distinct[0]!.source).toBe('model');
@@ -210,7 +222,8 @@ describe('persistence and reconciliation', () => {
     await persistVests(db, vests, { asOf: AS_OF });
     await persistVests(db, vests, { asOf: AS_OF });
     const counted = async () =>
-      Number((await db.query<{ n: string }>('select count(*) as n from rsu_vests'))[0]!.n);
+      Number((await db.query<{ n: string }>(
+        `select count(*) as n from rsu_vests where source = 'model'`))[0]!.n);
     expect(await counted()).toBe(vests.length);
 
     // Idempotent row COUNT is not the same as a working upsert: move a projection input
@@ -289,7 +302,8 @@ describe('persistence and reconciliation', () => {
 
   it('refuses to confirm a vest whose net exceeds its recomputed gross', async () => {
     await persistVests(db, projectVests(SEED_RSU_GRANTS, opts), { asOf: AS_OF });
-    const [row] = await db.query<{ id: string }>('select id from rsu_vests limit 1');
+    const [row] = await db.query<{ id: string }>(
+      `select id from rsu_vests where source = 'model' limit 1`);
     await expect(confirmVest(db, row!.id, {
       units: 9, priceUsdCents: 15_000n, usdInrMicros: 96_000_000n, netPaise: rupees(200_000),
     })).rejects.toThrow(/net .* gross/i);
@@ -303,7 +317,8 @@ describe('persistence and reconciliation', () => {
 
   it('refuses a confirmation carrying a negative net, units or price', async () => {
     await persistVests(db, projectVests(SEED_RSU_GRANTS, opts), { asOf: AS_OF });
-    const [row] = await db.query<{ id: string }>('select id from rsu_vests limit 1');
+    const [row] = await db.query<{ id: string }>(
+      `select id from rsu_vests where source = 'model' limit 1`);
     const ok = { units: 9, priceUsdCents: 15_000n, usdInrMicros: 96_000_000n,
                  netPaise: rupees(90_720) };
 
@@ -331,7 +346,10 @@ describe('persistence and reconciliation', () => {
 
   it('rolls the confirmation back if its audit row cannot be written', async () => {
     await persistVests(db, projectVests(SEED_RSU_GRANTS, opts), { asOf: AS_OF });
-    const [row] = await db.query<{ id: string }>('select id from rsu_vests limit 1');
+    // A row the MODEL wrote: the seed now also holds the owner's Fidelity schedule,
+    // and this test is about the projection's rollback behaviour.
+    const [row] = await db.query<{ id: string }>(
+      `select id from rsu_vests where source = 'model' limit 1`);
 
     // A row confirmed with no audit trail defeats the point of an append-only audit table.
     const auditDown: Db = {

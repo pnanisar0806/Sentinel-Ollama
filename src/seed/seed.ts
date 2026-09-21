@@ -8,6 +8,7 @@ import { isMainModule } from '../util/main-module.js';
 import { DEFAULT_OWNER_RAILS } from '../domain/rails.js';
 import { seedWatchlist } from './seed-watchlist.js';
 import { seedHolidays } from './seed-holidays.js';
+import { seedActualRsu } from './seed-rsu-actual.js';
 
 const SOURCE = 'manual-seed';
 
@@ -90,13 +91,10 @@ export async function seed(db: Db, opts: { asOf?: string } = {}): Promise<{ snap
     );
   }
 
-  for (const g of SEED_RSU_GRANTS) {
-    await db.query(
-      `insert into rsu_grants (id, granted_on, units, note)
-       values ($1,$2,$3,$4) on conflict (id) do update set units = excluded.units`,
-      [g.id, g.grantedOn, g.units, g.note],
-    );
-  }
+  // The owner's real grants and unvested tranches, from the Fidelity statement. This
+  // replaces `SEED_RSU_GRANTS`, whose 1,105-unit total was right while every grant but
+  // the last had the wrong date and size — see `seed-rsu-actual.ts`.
+  await seedActualRsu(db);
 
   await seedWatchlist(db);
   await seedHolidays(db);

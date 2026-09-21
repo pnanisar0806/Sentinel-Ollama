@@ -26,8 +26,8 @@ const llmReply = (content: string) => ({
 describe('fidelityVestsToProposals', () => {
   it('prices vests at confirmVest scale — net ≤ recomputed gross, exact gross match', () => {
     const vests = [
-      { grantId: 'G2023', vestOn: '2026-02-15', units: 120, priceUsd: 12.345, withholdingPct: 30 },
-      { grantId: 'G2026', vestOn: '2026-08-15', units: 71.25, priceUsd: 185.47, withholdingPct: 30, netUnits: 49.875 },
+      { grantId: '21RUIN4A1', vestOn: '2026-02-15', units: 120, priceUsd: 12.345, withholdingPct: 30 },
+      { grantId: '26RSU', vestOn: '2026-08-15', units: 71.25, priceUsd: 185.47, withholdingPct: 30, netUnits: 49.875 },
     ];
     const rate = 95.3;
     const proposals = fidelityVestsToProposals(vests, rate);
@@ -48,7 +48,7 @@ describe('fidelityVestsToProposals', () => {
 
   it('does not inflate USD gross by the old 10000x unit scale (shipped defect)', () => {
     const [maybeP] = fidelityVestsToProposals(
-      [{ grantId: 'G2026', vestOn: '2026-08-15', units: 7.125, priceUsd: 185.47, withholdingPct: 30 }],
+      [{ grantId: '26RSU', vestOn: '2026-08-15', units: 7.125, priceUsd: 185.47, withholdingPct: 30 }],
       95.3,
     );
     const p = maybeP!;
@@ -64,8 +64,8 @@ describe('fidelityVestsToProposals', () => {
 describe('extractRsuVestsFromImage', () => {
   it('maps a valid {vests:[…]} payload, stripping JSON fences and deriving netUnits when omitted', async () => {
     const fetchImpl = vi.fn(async () => llmReply('```json\n' + JSON.stringify({ vests: [
-      { grantId: 'G2023', vestOn: '2026-02-15', units: 120, priceUsd: 12.345, withholdingPct: 30 },
-      { grantId: 'G2024', vestOn: '2026-05-15', units: 7.125, priceUsd: 185.47, withholdingPct: 30, netUnits: 4.9875 },
+      { grantId: '21RUIN4A1', vestOn: '2026-02-15', units: 120, priceUsd: 12.345, withholdingPct: 30 },
+      { grantId: '21RUIN4A3', vestOn: '2026-05-15', units: 7.125, priceUsd: 185.47, withholdingPct: 30, netUnits: 4.9875 },
     ] }) + '\n```'));
     const out = await extractRsuVestsFromImage({
       fetchImpl: fetchImpl as unknown as typeof fetch,
@@ -74,7 +74,7 @@ describe('extractRsuVestsFromImage', () => {
     });
     expect(out).toHaveLength(2);
     expect(out[0]).toEqual({
-      grantId: 'G2023', vestOn: '2026-02-15', units: 120, priceUsd: 12.345,
+      grantId: '21RUIN4A1', vestOn: '2026-02-15', units: 120, priceUsd: 12.345,
       withholdingPct: 30, netUnits: 84,
     });
     expect(out[1]!.netUnits).toBe(4.9875);
@@ -131,13 +131,13 @@ describe('checkFidelityVestExists (real PGlite)', () => {
   });
 
   it('reports only ACTUAL rows as duplicates', async () => {
-    expect(await checkFidelityVestExists(db, 'G2026', '2026-08-15')).toBe(false);
+    expect(await checkFidelityVestExists(db, '26RSU', '2026-08-15')).toBe(false);
     // Persist a PROJECTED row — the queue filter must NOT skip on it.
     const gross = rupees(100_000);
     await persistVests(db, [{
-      grantId: 'G2026', vestOn: '2026-08-15', units: 5, status: 'PROJECTED',
+      grantId: '26RSU', vestOn: '2026-08-15', units: 5, status: 'PROJECTED',
       grossPaise: gross, netPaise: mulP(gross, 0.7),
     }], { asOf: '2026-09-01T00:00:00Z' });
-    expect(await checkFidelityVestExists(db, 'G2026', '2026-08-15')).toBe(false);
+    expect(await checkFidelityVestExists(db, '26RSU', '2026-08-15')).toBe(false);
   });
 });

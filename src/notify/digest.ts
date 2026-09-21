@@ -6,12 +6,12 @@ import { fundedStatus } from '../domain/funded-status.js';
 import { escapeMarkdown } from './telegram.js';
 import { currentIps } from '../domain/ips.js';
 import { loadPositions, netWorth, outstandingLiabilities } from '../domain/networth.js';
-import { projectVests, type VestEvent } from '../domain/rsu.js';
+import { PROJECTED_SOURCE, projectVests, type VestEvent } from '../domain/rsu.js';
 import { assessStaleness, type StalenessRow } from '../sources/staleness.js';
 import { fetchLiveRsuInputs } from '../sources/rsu-live.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/maturities.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
-import { formatInr, type Paise, cents } from '../money/paise.js';
+import { formatInr, paise, type Paise, cents } from '../money/paise.js';
 import { usdToInr } from '../money/fx.js';
 
 export interface DigestInput {
@@ -123,20 +123,49 @@ export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInp
     'select id, granted_on, units, note from rsu_grants',
   );
 
-  const vests = projectVests(
-    grants.map((g) => ({
-      id: g.id,
-      grantedOn: g.granted_on instanceof Date ? g.granted_on.toISOString().slice(0, 10) : String(g.granted_on).slice(0, 10),
-      units: Number(g.units),
-      note: g.note,
-    })),
-    {
-      priceUsd,
-      usdInr,
-      from: businessDate,
-      to: `${Number(businessDate.slice(0, 4)) + 1}-12-31`,
-    },
+  // Prefer what is ON RECORD over what the model would project.
+  //
+  // `projectVests` spreads every grant over uniform quarterly tranches. The owner's
+  // Fidelity statement says otherwise — 25RUST vests annually on 15 Feb, the two
+  // 21RUIN4A* grants semi-annually — and projecting over invented grant dates is why
+  // the digest announced roughly ₹4L vesting on 15 Nov 2026 when the real tranche is
+  // 18 units. Rows sourced from the statement are evidence; the projection is a model,
+  // and it is only used where there is no evidence yet.
+  const stored = await db.query<{
+    grant_id: string; vest_on: string | Date; units: string;
+    gross_paise: string | number | null; net_paise: string | number | null; status: string;
+  }>(
+    `select grant_id, vest_on, units, gross_paise, net_paise, status
+       from rsu_vests
+      where source <> $1 and vest_on >= $2
+      order by vest_on`,
+    [PROJECTED_SOURCE, businessDate],
   );
+
+  const vests: VestEvent[] = stored.length > 0
+    ? stored.map((r) => ({
+      grantId: r.grant_id,
+      vestOn: r.vest_on instanceof Date
+        ? r.vest_on.toISOString().slice(0, 10) : String(r.vest_on).slice(0, 10),
+      units: Number(r.units),
+      status: r.status === 'ACTUAL' ? 'ACTUAL' : 'PROJECTED',
+      grossPaise: paise(BigInt(r.gross_paise ?? 0)),
+      netPaise: paise(BigInt(r.net_paise ?? 0)),
+    }))
+    : projectVests(
+      grants.map((g) => ({
+        id: g.id,
+        grantedOn: g.granted_on instanceof Date ? g.granted_on.toISOString().slice(0, 10) : String(g.granted_on).slice(0, 10),
+        units: Number(g.units),
+        note: g.note,
+      })),
+      {
+        priceUsd,
+        usdInr,
+        from: businessDate,
+        to: `${Number(businessDate.slice(0, 4)) + 1}-12-31`,
+      },
+    );
 
   // A vest the owner already confirmed ACTUAL on a Fidelity statement is fact, not a
   // forecast — drop it from the projection so the digest never re-announces the same

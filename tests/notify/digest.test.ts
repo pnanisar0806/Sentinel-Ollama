@@ -112,10 +112,17 @@ describe('daily digest', () => {
 
     const after = await buildDigestInput(db, '2026-08-12T08:45:00+05:30', mockLiveInputs);
     expect(after.nextVest).not.toBeNull();
-    // Grant grantIds share the same quarterly cycle, so the next announcement is the same
-    // date one grant along — never the confirmed pair again.
-    expect(after.nextVest!.grantId).not.toBe(target.grantId);
-    expect(after.nextVest!.vestOn).toBe(target.vestOn);
+    // What must hold is that the CONFIRMED pair is never announced again.
+    //
+    // This used to assert the next announcement was the same date one grant along,
+    // which was only true of the old uniform-quarterly projection over six invented
+    // grants. The owner's real schedule has exactly one tranche on 2026-11-15 (26RSU,
+    // 18 units), so confirming it moves the digest to the next DATE — which is the
+    // behaviour that was wanted all along.
+    expect(`${after.nextVest!.grantId}|${after.nextVest!.vestOn}`)
+      .not.toBe(`${target.grantId}|${target.vestOn}`);
+    expect(after.nextVest!.vestOn > target.vestOn || after.nextVest!.grantId !== target.grantId)
+      .toBe(true);
   });
 
   it('shows 14-day bond maturity alert when a bond is maturing soon', async () => {
