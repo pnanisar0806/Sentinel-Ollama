@@ -112,7 +112,9 @@ describe('blockedInstruments blocks on valuation inputs, not just portfolio sour
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
     const blocked = blockedInstruments(rows, await loadPositions(db));
     // manual-seed is stale at this instant, so everything it supplies is blocked.
-    expect(blocked).toContain('CASH:SAVINGS');
+    // CASH:SAVINGS was the example here until 2026-09-20, when it was retired as a
+    // double count; BOND:EDELWEISS-2033 is another instrument the seed supplies.
+    expect(blocked).toContain('BOND:EDELWEISS-2033');
     expect(blocked).toContain('MF:PPFC');
   });
 

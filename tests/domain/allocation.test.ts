@@ -206,17 +206,29 @@ describe('the real seeded portfolio', () => {
     // Derived side comes from the loaded positions; the literals are the seed's own
     // arithmetic, asserted exactly so a seed correction fails loudly.
     // Updated for current Fidelity reality (78 NOW shares @ $145.59, FX ~94.48)
+    //
+    // Re-derived 2026-09-20 after retiring two DOUBLE-COUNTING seed rows:
+    //   534_197_361  previous seeded total
+    //  -  65_540_000  NSE:SMALLCASE-RESIDUE — the sync already carries the real
+    //                 Rs 7,91,280.11 of Indian equity it stood in for
+    //  -  16_300_000  CASH:SAVINGS — the sync already carries HDFC + SBI
+    //   -----------
+    //   452_357_361  = Rs 45,23,573.61
+    // Neither was superseded by reconciliation, because (canonical_id, account) matched
+    // no live row, so both were being ADDED to the live holdings.
     expect(employer).toBe(107_297_400n);
     expect(sammaan).toBe(379_999_61n);
-    expect(total).toBe(534_197_361n);
+    expect(total).toBe(452_357_361n);
 
+    // Both caps land the same side of the line as before; only the denominator moved.
     expect(c.employerPct).toBeCloseTo(Number(employer) / Number(total), 12);
-    expect(c.employerPct).toBeCloseTo(0.20085723, 8);   // 20.0857% - OVER the 10% cap
+    expect(c.employerPct).toBeCloseTo(0.23719610, 8);   // 23.7196% - OVER the 10% cap
     expect(c.employerPct).toBeGreaterThan(CAPS.employer);
 
-    // Sammaan issuer % is now 7.11% (was 7.97% at old total) — well under 10% cap
+    // Sammaan issuer % is 8.40% on the corrected total (7.11% on the inflated one) —
+    // still under the 10% cap.
     expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(Number(sammaan) / Number(total), 12);
-    expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(0.07113468, 8);
+    expect(c.byIssuer.get('Sammaan Capital')).toBeCloseTo(0.08400429, 8);
     expect(c.byIssuer.get('Sammaan Capital')!).toBeLessThan(CAPS.singleIssuer);
     expect(c.breaches.filter((b) => /Sammaan/.test(b))).toEqual([]);
 
@@ -231,18 +243,27 @@ describe('the real seeded portfolio', () => {
     const c = concentration(positions);
     const kinds = c.breaches.map((b) => b.split(':')[0]).sort();
 
-    // Breaches: Employer cap (20.09%), Single-issuer cap (ServiceNow 20.09%),
-    // Single-stock cap (NOW 20.09%), Single-stock cap (Smallcase residue ~12.6%)
-    // No Sammaan issuer breach, no MF-scheme breach, no sector breach.
+    // Breaches: Employer cap (23.72%), Single-issuer cap (ServiceNow 23.72%),
+    // Single-stock cap (NOW 23.72%). No Sammaan issuer breach, no MF-scheme breach,
+    // no sector breach.
+    //
+    // The SECOND Single-stock breach is gone, and its disappearance is a correctness
+    // fix rather than a regression: it was NSE:SMALLCASE-RESIDUE at ~12.6%, a single
+    // fake instrument standing in for 25 real ones. The system was reporting a
+    // concentration breach that did not exist. The largest genuine single stock is far
+    // under the 10% cap.
     expect(kinds).toEqual([
-      'Employer cap', 'Single-issuer cap', 'Single-stock cap', 'Single-stock cap',
+      'Employer cap', 'Single-issuer cap', 'Single-stock cap',
     ]);
-    expect(c.breaches.filter((b) => b.includes('NSE:SMALLCASE-RESIDUE'))).toHaveLength(1);
+    // The retired row can no longer breach anything, because it no longer exists.
+    expect(c.breaches.filter((b) => b.includes('NSE:SMALLCASE-RESIDUE'))).toHaveLength(0);
     expect(c.breaches.filter((b) => b.includes('US:NOW'))).toHaveLength(2); // stock + employer
-    expect(c.topStockPct).toBeCloseTo(0.20085723, 8);
+    // NOW is unchanged in paise; only the denominator shrank to 452_357_361.
+    expect(c.topStockPct).toBeCloseTo(0.23719610, 8);
 
-    // Only NOW and RPOWER carry a sector in the seed, so the sector cap sees ~20% of the portfolio
-    expect(c.sectorCoveragePct).toBeCloseTo(0.20134394, 8);
+    // Only NOW and RPOWER carry a sector in the seed, so the sector cap sees ~23.8% of
+    // the portfolio — same paise as before against the corrected total.
+    expect(c.sectorCoveragePct).toBeCloseTo(0.23777086, 8);
     expect(c.caveats).toContain(SECTOR_COVERAGE_CAVEAT);
   });
 
@@ -251,19 +272,27 @@ describe('the real seeded portfolio', () => {
     const rows = allocationDrift(nw.byAssetClass, nw.assetsPaise);
     const by = new Map(rows.map((r) => [r.assetClass, r]));
 
-    // EQUITY is 58.89% (NOW 20.13% + other equity) — under 60% cap
-    expect(by.get('EQUITY')!.actual).toBeCloseTo(0.58891605, 8);
+    // Re-derived 2026-09-20 against the corrected total of 452_357_361. Only the two
+    // retired rows moved: EQUITY lost the 65_540_000 residue and CASH lost the
+    // 16_300_000 seeded balance. DEBT and GOLD are unchanged in paise and move only
+    // because the denominator shrank.
+    //
+    // EQUITY is 55.06% (249_057_400) — still under the 60% cap.
+    expect(by.get('EQUITY')!.actual).toBeCloseTo(0.55057665, 8);
     expect(by.get('EQUITY')!.breach).toBeNull();
-    // DEBT is 36.88% (EPF + bonds + liquid ETF)
-    expect(by.get('DEBT')!.actual).toBeCloseTo(0.36877749, 8);
+    // DEBT is 43.55% (196_999_962, unchanged in paise).
+    expect(by.get('DEBT')!.actual).toBeCloseTo(0.43549631, 8);
     expect(by.get('DEBT')!.breach).toBeNull();
-    // CASH is 3.05%
-    expect(by.get('CASH')!.actual).toBeCloseTo(0.03051307, 8);
+    // CASH is now effectively ZERO: CASH:SAVINGS was the seed's ONLY cash line, and it
+    // is retired because the live sync carries HDFC and SBI. The seed is a gap-filler
+    // after Phase 0, not a standalone portrait of the portfolio — in production cash
+    // comes from the sync at Rs 2,46,348.75.
+    expect(by.get('CASH')!.actual).toBeCloseTo(0, 8);
     expect(by.get('CASH')!.breach).toBeNull();
 
-    expect(by.get('GOLD')!.actual).toBeCloseTo(0.01179339, 8);
+    expect(by.get('GOLD')!.actual).toBeCloseTo(0.01392704, 8);
     expect(by.get('GOLD')!.breach).toBe('UNDER');
-    // 5% of 53,41,97,361 paise = 26,709,868 less the 6,30,000 held = 20,409,868
-    expect(by.get('GOLD')!.driftPaise).toBe(20_409_868n);
+    // 5% of 452,357,361 paise = 22,617,868 less the 6,300,000 held = 16,317,868
+    expect(by.get('GOLD')!.driftPaise).toBe(16_317_868n);
   });
 });

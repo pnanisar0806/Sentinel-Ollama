@@ -130,7 +130,12 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
   { instrumentId: 'NSE:NIFTYBEES', account: 'zerodha', quantity: 1, valuePaise: rupees(95_000), avgCostPaise: null },
   { instrumentId: 'NSE:GOLDBEES', account: 'zerodha', quantity: 2616, valuePaise: rupees(63_000), avgCostPaise: null },
   { instrumentId: 'NSE:LIQUIDBEES', account: 'zerodha', quantity: 1, valuePaise: rupees(16_000), avgCostPaise: null },
-  { instrumentId: 'NSE:SMALLCASE-RESIDUE', account: 'zerodha', quantity: 1, valuePaise: rupees(655_400), avgCostPaise: null },
+  // NSE:SMALLCASE-RESIDUE retired 2026-09-20 — it was DOUBLE COUNTING, not merely stale.
+  // loadPositions reconciles by (canonical_id, account) with live winning and seed
+  // filling gaps. Its canonical id `NSE:SMALLCASE-RESIDUE` matched no live row, so it
+  // was never superseded and its Rs 6,55,400 was being added on top of the real
+  // Rs 7,91,280.11 of Indian equity the sync already carries. The four smallcases are
+  // decomposed properly in `smallcase_positions` (src/config/smallcases.ts).
   { instrumentId: 'NSE:RPOWER', account: 'groww', quantity: 1, valuePaise: rupees(2_600), avgCostPaise: null },
 
   // Corporate bonds - owner-verified 2026-08-14 from the INDmoney bonds screen. The three
@@ -156,7 +161,12 @@ export const SEED_HOLDINGS: HoldingSeed[] = [
   { instrumentId: 'BOND:SAMMAAN-2029', account: 'indmoney', quantity: 1, valuePaise: rupees('95941.91'), avgCostPaise: rupees('95941.91') },
   { instrumentId: 'BOND:EDELWEISS-2033', account: 'indmoney', quantity: 1, valuePaise: rupees('220000.00'), avgCostPaise: rupees('220000.00') },
 
-  { instrumentId: 'CASH:SAVINGS', account: 'bank', quantity: 1, valuePaise: rupees(163_000), avgCostPaise: null },
+  // CASH:SAVINGS retired 2026-09-20, same double count. Its canonical id
+  // `CASH:SAVINGS_HDFC_FEDERAL` matched neither live bank row (IND:HDFC-BANK and
+  // IND:STATE-BANK-OF-INDIA both carry a NULL canonical_id), so all three survived
+  // reconciliation and cash read Rs 4,09,348.75 against a real Rs 2,46,348.75. That
+  // inflated figure was what the owner's 10% cash-ceiling rail was being judged
+  // against. It was also the row FR-31 blocked as "manual-seed 86.9h old".
   { instrumentId: 'US:INDMONEY-BASKET', account: 'indmoney', quantity: 1, valuePaise: rupees(137_000), avgCostPaise: null },
   { instrumentId: 'US:NOW', account: 'fidelity', quantity: 78, valuePaise: rupees(1_072_974), avgCostPaise: null },
 ];

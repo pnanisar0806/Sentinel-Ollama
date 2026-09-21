@@ -33,7 +33,12 @@ describe('net worth', () => {
     // Exact, not a band. Both figures are fully determined by seed data, so a wide
     // band would only hide a transcription slip (MEMORY.md).
     expect(nw.assetsPaise).toBe(seedAssets());
-    expect(nw.assetsPaise).toBe(534_197_361n); // Rs 53,41,973.61 (updated for current Fidelity reality)
+    // 452_357_361 = Rs 45,23,573.61. Was 534_197_361 until 2026-09-20, when two
+    // DOUBLE-COUNTING seed rows were retired: NSE:SMALLCASE-RESIDUE (65_540_000) and
+    // CASH:SAVINGS (16_300_000). Neither was superseded by reconciliation — their
+    // (canonical_id, account) matched no live row — so both were being ADDED on top of
+    // the real holdings the sync already carries.
+    expect(nw.assetsPaise).toBe(452_357_361n);
   });
 
   it('partitions assets across accounts and asset classes without loss', async () => {
@@ -86,7 +91,9 @@ describe('net worth', () => {
     expect(byId.get('NSE:LIQUIDBEES')!.assetClass).toBe('DEBT');
     expect(byId.get('NSE:GOLDBEES')!.assetClass).toBe('GOLD');
     expect(byId.get('US:NOW')!.assetClass).toBe('EQUITY');
-    expect(byId.get('CASH:SAVINGS')!.assetClass).toBe('CASH');
+    // No CASH line remains in the seed: CASH:SAVINGS was its only one and is retired.
+    // `classify('CASH', ...)` is covered directly in tests/sources/asset-class-mapping.
+    expect(positions.some((p) => p.assetClass === 'CASH')).toBe(false);
     expect(byId.get('BOND:SAMMAAN-2026')!.assetClass).toBe('DEBT');
     expect(byId.get('MF:PPFC')!.assetClass).toBe('EQUITY');
   });
@@ -114,7 +121,7 @@ describe('net worth', () => {
     const byId = new Map(positions.map((p) => [p.instrumentId, p]));
     expect(byId.get('US:NOW')!.sector).toBe('Technology');
     expect(byId.get('NSE:RPOWER')!.sector).toBe('Power');
-    expect(byId.get('CASH:SAVINGS')!.sector).toBeNull();
+    expect(byId.get('BOND:SAMMAAN-2026')!.sector).toBeNull();
   });
 
   it('preserves unknown cost as null rather than coercing to zero', async () => {

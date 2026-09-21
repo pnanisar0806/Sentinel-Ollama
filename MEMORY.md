@@ -2185,3 +2185,36 @@ reconciles to the owner's real net worth without those two lines, update the all
 assertions to the new shape with the arithmetic shown, and drop the guards in the same
 commit. Neither row causes harm in production today — both are absent from every live
 snapshot — so this is hygiene, not urgency.
+
+### The seed was double counting, and reconciliation is why (2026-09-20)
+
+`loadPositions` merges by `(canonical_id, account)`: live wins, seed fills gaps. A seed
+row whose key matches **no** live row is therefore never superseded — it is **added**.
+Five survived that test; only one deserved to.
+
+| seed row | ₹ | verdict |
+|---|---|---|
+| `US:NOW` | 10,72,974 | correct — INDmoney never serves the Fidelity RSU |
+| `NSE:SMALLCASE-RESIDUE` | 6,55,400 | double count — **retired** |
+| `CASH:SAVINGS` | 1,63,000 | double count — **retired** |
+| `US:INDMONEY-BASKET` | 1,37,000 | double count — still open |
+| `MF:ICICI-NIFTY50-IDX` | 47,000 | suspect third row — still open |
+
+Cash read ₹4,09,348.75 against a real ₹2,46,348.75, and that inflated figure was what the
+owner's 10% cash ceiling was judged against. Net worth was overstated by ₹8,18,400 before
+this change and is still overstated by ₹1,84,000 after it.
+
+**The general rule, worth applying to any future seed row:** a seed row is only safe if a
+live row shares its `(canonical_id, account)`. Lump placeholders — a residue, a basket —
+can never match, because the live side reports constituents. They double count by
+construction, not by accident.
+
+**Two traps found the hard way, both now written into the tests:**
+
+- Removing a row without its exclusion guards, or guards without the row, is worse than
+  either. The residue's id guards the micro-orphan and thesis-less scans; with the row
+  present and the guards gone, the ₹6,55,400 phantom earned a **SELL recommendation**.
+- The seed is no longer a standalone portrait of the portfolio. `seed-data.test.ts` used
+  to assert it equalled the PRD balance sheet; it now asserts the **gap-fill** total, and
+  the PRD total is met by seed *plus* live. Anyone re-reading those tests needs that, or
+  they will "fix" the seed back to 53.42L and restore the double count.

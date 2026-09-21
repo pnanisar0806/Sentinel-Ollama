@@ -810,3 +810,37 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       static; treat both as run-off, not as holdings to maintain. This is an owner
       decision, not a signal the engine produced — do not let a rebalance prompt or a
       weak XIRR generate a recommendation to re-engage.
+
+- [x] **SEED RETIREMENT DONE (2026-09-20) — it was a live double count, not hygiene.**
+      `NSE:SMALLCASE-RESIDUE` (₹6,55,400) and `CASH:SAVINGS` (₹1,63,000) are gone from
+      `SEED_HOLDINGS`. `loadPositions` reconciles by `(canonical_id, account)` with live
+      winning and seed filling gaps; neither row's key matched any live row, so both were
+      **added on top of** holdings the sync already carried. Net worth was overstated by
+      ₹8,18,400 and cash read ₹4,09,348.75 against a real ₹2,46,348.75 — which is the
+      figure the owner's 10% cash-ceiling rail was being judged against.
+
+      Every dependent literal was re-derived, not pasted: seeded total 534_197_361 →
+      452_357_361, employer 20.09% → 23.72%, Sammaan 8.40%, EQUITY 55.06%, DEBT 43.55%,
+      GOLD 1.39% with a 16_317_868 drift. The residue's exclusion guards in the
+      micro-orphan and thesis-less scans went in the same commit — leaving them while
+      removing the row let the phantom earn a SELL, and removing them while keeping the
+      row would do the same.
+
+      One breach legitimately disappeared: a second **Single-stock cap** at ~12.6% that
+      was the residue itself — one fake instrument standing in for 25 real ones. The
+      system had been reporting a concentration breach that did not exist.
+
+- [ ] **TWO MORE SEED ROWS ARE STILL DOUBLE COUNTING — ₹1,84,000.** Same query, same
+      rule. Of the five seed rows that survive reconciliation, only `US:NOW` (₹10,72,974)
+      is a legitimate gap-fill, because INDmoney never serves the Fidelity RSU.
+
+      - `US:INDMONEY-BASKET` **₹1,37,000** — a lump stand-in superseded in reality by the
+        live per-stock US rows (AAPL, GOOGL, AMZN, MSFT, TSLA, VOO ≈ ₹1.39L). Exactly the
+        same shape as the smallcase residue.
+      - `MF:ICICI-NIFTY50-IDX` **₹47,000** — a THIRD seed row for one fund; the other two
+        (₹3,68,000 and ₹2,81,000) are superseded. Establish why three rows exist and which
+        account this one belongs to before removing it.
+
+      Retiring these repeats the exercise above: re-derive the seeded total and every
+      percentage, and expect `US:INDMONEY-BASKET` to also be carrying a single-stock
+      breach it should never have had.

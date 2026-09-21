@@ -363,11 +363,6 @@ export async function generateCleanupRecommendations(
   for (const pos of input.positions) {
     if (
       pos.valuePaise < MICRO_ORPHAN_THRESHOLD &&
-      // Still excluded: NSE:SMALLCASE-RESIDUE remains in SEED_HOLDINGS. Dropping the
-      // guard let the ₹6,55,400 phantom fall into the thesis-less scan and earn a SELL
-      // recommendation — worse than the blob it replaced. The guard goes when the seed
-      // row does, and the two must move together.
-      pos.instrumentId !== 'NSE:SMALLCASE-RESIDUE' &&
       pos.instrumentId !== 'NSE:RPOWER'
     ) {
       const rec = buildMicroOrphanRec(pos.instrumentId, pos.name, pos.valuePaise, pos.account);
@@ -380,7 +375,6 @@ export async function generateCleanupRecommendations(
   const thesisLessCandidates = input.positions.filter(
     (p) =>
       p.valuePaise >= MICRO_ORPHAN_THRESHOLD &&
-      p.instrumentId !== 'NSE:SMALLCASE-RESIDUE' &&
       p.instrumentId !== 'NSE:RPOWER' &&
       !p.instrumentId.startsWith('BOND:') &&
       !p.instrumentId.startsWith('EPF:') &&

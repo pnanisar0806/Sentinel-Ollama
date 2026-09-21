@@ -9,12 +9,21 @@ describe('seed data matches the PRD balance sheet', () => {
   const sumOf = (ids: string[]) =>
     addP(...SEED_HOLDINGS.filter((h) => ids.includes(h.instrumentId)).map((h) => h.valuePaise));
 
-  it('totals exactly 53.42L of assets (within ±5,000 rupees) — updated for current Fidelity reality', () => {
+  it('totals 45.24L — the PRD balance sheet less what the live sync now carries', () => {
     const total = addP(...SEED_HOLDINGS.map((h) => h.valuePaise));
     const totalRupees = Number(total / 100n);
-    // EPF 1,354,000 + MF 1,183,000 + stocks/ETFs 832,000 + bonds 600,000 + savings 163,000 + US basket 137,000 + Fidelity 1,072,974 = 5,341,974
-    expect(totalRupees).toBeGreaterThan(5_336_000); // 5,341,974 - 5,000
-    expect(totalRupees).toBeLessThan(5_347_000); // 5,341,974 + 5,000
+    // EPF 1,354,000 + MF 1,183,000 + stocks/ETFs 176,600 + bonds 600,000
+    //   + US basket 137,000 + Fidelity 1,072,974 = 4,523,574
+    //
+    // Was 5,341,974 until 2026-09-20. The seed is no longer a standalone portrait of
+    // the portfolio: it is the GAP-FILL set, and loadPositions merges it under live
+    // data. Two rows were retired because they were not gap-fills at all — their
+    // (canonical_id, account) matched no live row, so reconciliation ADDED them on top:
+    //   -655,400  NSE:SMALLCASE-RESIDUE, against real Indian equity of 791,280.11
+    //   -163,000  CASH:SAVINGS, against real HDFC + SBI of 246,348.75
+    // The PRD balance sheet is now met by seed PLUS live, not by the seed alone.
+    expect(totalRupees).toBeGreaterThan(4_518_574); // 4,523,574 - 5,000
+    expect(totalRupees).toBeLessThan(4_528_574);    // 4,523,574 + 5,000
   });
 
   it('carries EPF and Fidelity at their stated values', () => {
@@ -56,11 +65,12 @@ describe('seed data matches the PRD balance sheet', () => {
     expect(SEED_RSU_GRANTS.reduce((a, g) => a + g.units, 0)).toBe(1105);
   });
 
-  it('Indian stocks and ETFs sum to exactly 8.32L', () => {
+  it('Indian stocks and ETFs sum to 1.766L after the residue is retired', () => {
+    // 95,000 + 63,000 + 16,000 + 2,600. Was 832,000 with the 655,400 residue, which the
+    // live sync supersedes with 29 real per-instrument rows totalling 791,280.11.
     expect(sumOf([
-      'NSE:NIFTYBEES', 'NSE:GOLDBEES', 'NSE:LIQUIDBEES',
-      'NSE:SMALLCASE-RESIDUE', 'NSE:RPOWER',
-    ])).toBe(rupees(832_000));
+      'NSE:NIFTYBEES', 'NSE:GOLDBEES', 'NSE:LIQUIDBEES', 'NSE:RPOWER',
+    ])).toBe(rupees(176_600));
   });
 
   it('mutual funds sum to exactly 1.83L', () => {
