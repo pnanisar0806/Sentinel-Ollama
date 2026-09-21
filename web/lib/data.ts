@@ -19,6 +19,7 @@ import { fetchLiveRsuInputs } from '../../src/sources/rsu-live.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
+import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
@@ -602,4 +603,15 @@ export async function getScoring(): Promise<{ calibration: Calibration; evaluate
       eval12m: parseJsonColumn<unknown>(r.eval_12m_jsonb, null),
     })),
   };
+}
+
+/**
+ * Delivered weekly reports, newest first.
+ *
+ * `loadReportRuns` reads `audit_log`, where the run record already lived; the narrative
+ * and its bullets are now stored in that same row. Runs delivered before 2026-09-21
+ * carry no narrative, and the page says so rather than showing an empty panel.
+ */
+export async function getWeeklyReports(limit = 12): Promise<ReportRunRecord[]> {
+  return loadReportRuns(await db(), limit);
 }

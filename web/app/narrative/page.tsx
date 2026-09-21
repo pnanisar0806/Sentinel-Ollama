@@ -1,23 +1,75 @@
-import { NotYetBuild, PageHead } from '../../lib/ui';
+import { getWeeklyReports } from '@/lib/data';
+import { Card, Notice, PageHead, Stat } from '@/lib/ui';
 
 export const dynamic = 'force-dynamic';
 
-export default function NarrativePage() {
+export default async function NarrativePage() {
+  const runs = await getWeeklyReports();
+  const withNarrative = runs.filter((r) => r.narrative !== null);
+
   return (
     <>
       <PageHead
         title="Weekly narrative"
-        sub="The weekly deep report and its narration."
+        sub="Every weekly report that was delivered, and the narration that went with it."
       />
-      <NotYetBuild
-        task="persistence"
-        why="The weekly report and its LLM narration are built and shipping — `pnpm report` composes them and Telegram delivers them. They are simply never stored: the narration exists only in the message that was sent, so there is no row for this page to read."
-        points={[
-          'What is missing is a table, not an engine. The report builder, the narration prompt and the Sunday schedule all already run.',
-          'Persisting it means a weekly_reports row written at send time, carrying the composed text, the model that wrote it and the as_of date — the same as_of/source discipline every other externally-derived row follows.',
-          'Until that exists this page would have to re-run the report to show anything, which would spend an LLM call on a page view and could render text that was never actually sent to you.',
-        ]}
-      />
+
+      {runs.length === 0 ? (
+        <Notice tone="amber">
+          No weekly report has been delivered yet. <span className="mono">pnpm report</span>{' '}
+          writes a row here once Telegram accepts the message — a dry run delivers
+          nothing and is deliberately not recorded, so it cannot mask a failed send.
+        </Notice>
+      ) : (
+        <>
+          <div className="stats">
+            <Stat label="Reports delivered" value={runs.length} />
+            <Stat
+              label="With a narration"
+              value={withNarrative.length}
+              sub={withNarrative.length < runs.length ? 'earlier runs were not stored' : undefined}
+            />
+            <Stat label="Most recent" value={runs[0]?.asOf ?? '—'} />
+          </div>
+
+          <div className="stack">
+            {runs.map((run) => (
+              <Card
+                key={run.asOf}
+                title={`Week of ${run.asOf}`}
+                aside={run.narrative === null ? 'no narration stored' : undefined}
+              >
+                {run.narrative === null ? (
+                  <Notice tone="gray">
+                    Delivered without a stored narration — either{' '}
+                    <span className="mono">LLM_API_KEY</span> was unset when it ran, or the
+                    run predates 2026-09-21, when the narration began being kept. The
+                    engine&rsquo;s own bullets below are unaffected.
+                  </Notice>
+                ) : (
+                  <p className="ips-text">{run.narrative}</p>
+                )}
+
+                {run.bullets.length > 0 ? (
+                  <>
+                    {/* The narration rewrites exactly these and nothing more. Showing
+                        both is the only way to see whether it drifted from the engine,
+                        which is the reason to read one back at all. */}
+                    <p className="muted">What the engine said</p>
+                    <ul className="notyet-points">
+                      {run.bullets.map((b, i) => <li key={i}>{b}</li>)}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="muted">
+                    No bullets stored for this run.
+                  </p>
+                )}
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
     </>
   );
 }

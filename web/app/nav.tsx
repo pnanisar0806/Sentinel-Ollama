@@ -44,7 +44,7 @@ const GROUPS: {
       // Still 'soon' on purpose: the weekly report and its narration ship to Telegram
       // but are never persisted, so this page has no row to read. Engine built, table
       // not. Flipping this to 'live' would promise a surface that renders nothing.
-      { href: '/narrative', label: 'Narrative', stage: 'soon' },
+      { href: '/narrative', label: 'Narrative', stage: 'live' },
       { href: '/scoring', label: 'Scoring', stage: 'live' },
     ],
   },

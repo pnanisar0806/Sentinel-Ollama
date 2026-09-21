@@ -13,6 +13,7 @@ import { maturityRoutingRec } from '../domain/maturities.js';
 import { announceMaturity, type Recommendation } from '../domain/recommendations.js';
 import { Telegram } from '../notify/telegram.js';
 import { isMainModule } from '../util/main-module.js';
+import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
 
 /**
  * FR-51 weekly deep report — `pnpm report [--as-of YYYY-MM-DD]`.
@@ -61,30 +62,6 @@ export function parseGsecYield(raw: string | undefined): number | undefined {
  * leaving no audit trace at all, which was its own gap in a system whose posture is an
  * append-only ledger of every action.
  */
-export async function alreadyReportedFor(db: Db, asOf: string): Promise<boolean> {
-  const rows = await db.query<{ one: number }>(
-    `select 1 as one from audit_log
-      where entity = 'weekly_report' and entity_id = $1 and action = 'REPORT_SENT' limit 1`,
-    [asOf],
-  );
-  return rows.length > 0;
-}
-
-/** Records a delivered report. A dry run delivered nothing, so it is not recorded and
- *  must not block the real run that follows it. */
-export async function recordReportRun(
-  db: Db,
-  asOf: string,
-  meta: { sent: boolean },
-): Promise<void> {
-  if (!meta.sent) return;
-  await db.query(
-    `insert into audit_log (entity, entity_id, action, actor, payload)
-     values ('weekly_report', $1, 'REPORT_SENT', 'system', $2::jsonb)`,
-    [asOf, JSON.stringify({ asOf, sent: true })],
-  );
-}
-
 if (isMainModule(import.meta.url)) {
   const env = loadEnv(process.env, ENV_PURPOSES);
   const asOf = parseAsOf(process.argv.slice(2));
@@ -131,7 +108,9 @@ if (isMainModule(import.meta.url)) {
     dryRun: env.dryRun,
   });
   const { sent } = await telegram.send(text);
-  await recordReportRun(db, asOf, { sent });
+  await recordReportRun(db, asOf, { sent, narrative: input.narrative, bullets: input.bullets, text });
   console.log(sent ? `weekly report sent (as of ${asOf})` : `weekly report not sent (dry run)\n\n${text}`);
   await db.close();
 }
+
+export { alreadyReportedFor, recordReportRun, loadReportRuns, type ReportRunRecord } from '../domain/report-runs.js';

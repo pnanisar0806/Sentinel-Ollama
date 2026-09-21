@@ -2435,3 +2435,46 @@ NAV lookups must resolve through `canonical_id`, never the raw instrument id.**
 
 Confirmed while checking this: MF is NOT double counted. Live MF total is ₹11,96,695
 across six `IND:*` rows; the six `MF:*` seed rows are correctly superseded.
+
+
+## Weekly narrative is stored, /narrative is live (2026-09-21)
+
+`recordReportRun` now takes the narration, the engine bullets and the delivered text and
+writes them into the `audit_log` row it already created (`entity='weekly_report'`,
+`action='REPORT_SENT'`). No new table: that row was already the run record, so this is it
+gaining its content rather than a second place to look. `loadReportRuns(db, limit)` reads
+them back, newest first.
+
+The narration is stored **beside the bullets it rewrites**, because the reason to read
+one back later is to check it did not drift from the engine; a narration alone cannot be
+audited.
+
+`narrative` is NULL when no key was configured, never an empty string — an empty string
+renders as a blank panel and reads as "the model said nothing", a different fact. A dry
+run is still not recorded at all, so it cannot mask a failed send.
+
+**Moved `alreadyReportedFor` / `recordReportRun` / `loadReportRuns` from
+`src/jobs/report.ts` to `src/domain/report-runs.ts`.** The web page reads them, and
+importing the job module pulled in `runMigrations`, whose dynamic `../../migrations`
+import Next cannot resolve — `next build` failed with
+`Module not found: Can't resolve '../../migrations'`. `jobs/report.ts` re-exports them,
+so existing importers are unaffected. **Rule: anything the web reads belongs in
+`src/domain`, never in `src/jobs`.**
+
+## Price and NAV backfill results (2026-09-21)
+
+NAV backfill complete: 28 months fetched, 3,074 rows, 209–599 points per fund, oldest
+2024-03-31. `MF:PPFC` is shallower (from 2025-10-30) than the rest.
+
+**These are DAILY NAVs.** `rankMfs` defaults `rollingWindow` to 12 and its comment reads
+"monthly NAV points over a year". Whatever eventually calls it must either downsample to
+month-ends or pass a window in sessions (~250), or it will measure 12-DAY momentum and
+call it consistency. Nothing calls it yet.
+
+Price backfill still running at the time of writing (79 of 260 trading days, oldest
+2025-09-08). Resumable — re-run `pnpm backfill:prices --days=260` to finish it.
+
+**One flaky test observed:** a full run showed 1 failure in `tests/jobs/sync.test.ts`
+("raises a SYNC_FAILURE when the download itself fails"); two immediately following runs
+were fully green (789/789). Not chased. If it recurs, suspect a real network call or a
+timing assumption rather than the backfill work.

@@ -941,7 +941,17 @@ kind CHECK and the `RecKind` union, and nothing constructs one. The engine ranks
 (consistency 40 / expense 20) and the ranking goes nowhere. MF is ~₹12L, the second
 largest asset class after EPF, and no phase covers acting on it.
 
-**5. ORPHAN — the weekly narrative is never stored.** Composed, sent to Telegram,
+**5. ~~ORPHAN — the weekly narrative is never stored~~ — DONE 2026-09-21.** The
+narration, the engine bullets it rewrites and the delivered text are kept in the
+`audit_log` row that already recorded the run. `/narrative` is live: every delivered
+report newest-first, narration beside bullets so drift is visible, and a run with no
+stored narration says so. Nav flipped to `live`, product row off `p1`.
+
+A dry run still records nothing, by design, so it cannot mask a failed send. Runs before
+2026-09-21 carry no narration and the page states that rather than showing a blank panel.
+
+Original entry:
+**ORPHAN — the weekly narrative is never stored.** Composed, sent to Telegram,
 discarded. `/narrative` stays a shell because there is no row to read. Phase 2.5 Task 8
 is bounded commentary on advisor decisions, a different artefact.
 

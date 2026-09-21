@@ -149,13 +149,16 @@ export const AREAS: Area[] = [
   {
     slug: 'narrative',
     name: 'Weekly narrative',
-    stage: 'p1',
-    task: 'persistence',
+    stage: 'live',
     what: 'The weekly deep report and its LLM narration.',
-    works: ['The report builder, the narration and the Sunday schedule all run and deliver to Telegram'],
+    works: [
+      'Every delivered report, newest first, with the narration that was actually sent',
+      'The engine bullets beside the narration, so a narration that drifted from them is visible',
+      'A run delivered without a narration says so, rather than showing an empty panel',
+    ],
     missing: [
-      'A weekly_reports table — the narration exists only in the message that was sent, so there is no row for a page to read',
-      'This is the one Phase 1 surface with no web page: engine built, storage not',
+      'Runs delivered before 2026-09-21 carry no narration — it was not stored until then',
+      'A dry run is not recorded at all, by design, so it cannot mask a failed send',
     ],
   },
   {
