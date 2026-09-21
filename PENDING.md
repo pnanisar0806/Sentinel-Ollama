@@ -955,7 +955,19 @@ Original entry:
 discarded. `/narrative` stays a shell because there is no row to read. Phase 2.5 Task 8
 is bounded commentary on advisor decisions, a different artefact.
 
-**6. ORPHAN — surplus and expense trend.** `projectSurplus`, `projectAnnualSurplus`,
+**6. ORPHAN — surplus and expense trend — BLOCKED ON TIME, not on code (checked
+2026-09-21).** Capture IS wired: `sync` calls `fetchBalanceSnapshot` + 
+`persistBalanceSnapshot`, and `sync.yml` runs it on cron. Production holds **one day**,
+2026-09-20, 18 rows. A trend needs 2–3 months of that, and nothing in code shortens the
+wait.
+
+The only way to accelerate it is an HDFC + SBI statement export covering the past
+1–2 years, which would let the surplus be derived rather than accumulated. `data/docs`
+holds only `Kite/` and `Smallcase/` — no bank statements — and there is no bank-statement
+importer. **Owner input: supply the exports if the wait is not acceptable.**
+
+Original entry:
+**ORPHAN — surplus and expense trend.** `projectSurplus`, `projectAnnualSurplus`,
 `loanOutflowByMonth` and `runCascade` have **zero callers** and no page. Owner asked for a
 measured trend on 2026-09-20; `balance_snapshots` capture begins with the next sync and
 needs 2-3 months before it says anything. No phase owns this.
