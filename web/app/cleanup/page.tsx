@@ -1,6 +1,7 @@
 import { getCleanupCalendar } from '@/lib/data';
 import { Badge, Card, DataTable, Notice, PageHead, Pct } from '@/lib/ui';
 import { fmtDateTime, relTime, rupees } from '@/lib/format';
+import PromoteExit from './promote-exit';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,6 +36,8 @@ export default async function CleanupPage() {
     overridesHold: c.overridesMinimumHold ? 'Yes' : 'No',
     blockedByHold: c.blockedByMinimumHold ? '⚠ BLOCKED' : 'No',
     ips: c.ipsClauseRefs.join(', '),
+    rawTrigger: c.trigger,
+    heldByIps: c.blockedByMinimumHold,
   }));
 
   const redemptionRows = redemptions.map((r) => ({
@@ -169,6 +172,16 @@ export default async function CleanupPage() {
                   { label: 'Overrides hold', value: (r) => r.overridesHold },
                   { label: 'Blocked by hold', value: (r) => r.blockedByHold },
                   { label: 'IPS refs', value: (r) => <span className="mono dim">{r.ips}</span> },
+                  {
+                    label: 'Act',
+                    value: (r) => (
+                      <PromoteExit
+                        instrumentId={r.instrument}
+                        trigger={r.rawTrigger}
+                        blocked={r.heldByIps}
+                      />
+                    ),
+                  },
                 ]}
               />
             )}
