@@ -97,9 +97,15 @@ export async function checkRails(
     });
   }
 
+  // FR-12 caps DEPLOYMENT, so only a buy is measured against it. A SELL or REDEEM
+  // returns money; counting it would make selling into a breach impossible in exactly
+  // the month the portfolio needs it. The month is the server's, matching the `as_of`
+  // the order row is stamped with — `recommendation.createdOn` can be an older date and
+  // would then be compared against a different month's spend.
   const tacticalCap = await railPaise(db, 'tactical_monthly_paise');
-  const tacticalUsed = await getTacticalUsedThisMonth(db);
-  if (tacticalUsed + amountPaise > tacticalCap) {
+  const deploying = recommendation.primary.action === 'BUY' ? amountPaise : 0n;
+  const tacticalUsed = await getTacticalUsedThisMonth(db, new Date().toISOString());
+  if (tacticalUsed + deploying > tacticalCap) {
     violations.push({
       code: 'TACTICAL_BUDGET_EXCEEDED',
       detail: `Tactical deployment would exceed ${formatInr(paise(tacticalCap))}/month `
@@ -260,10 +266,46 @@ async function syntheticPosition(db: Db, id: string, amountPaise: bigint): Promi
   };
 }
 
-async function getTacticalUsedThisMonth(db: Db): Promise<bigint> {
-  // Tactical budget tracking not yet implemented - order_intents lacks amount_paise column
-  // Would need payload_snapshot parsing or a dedicated amount column
-  return 0n;
+/**
+ * Orders that no longer represent deployed or committed money. Everything else — a
+ * draft, a pending approval, a filled order — has the budget spoken for.
+ */
+const RELEASED_STATUSES = ['REJECTED', 'EXPIRED', 'CANCELLED', 'BROKER_REJECTED', 'ABANDONED'];
+
+/**
+ * FR-12's ₹50k monthly tactical deployment, spent so far this month.
+ *
+ * This was `return 0n` with a note that `order_intents` lacks an amount column. It has
+ * one: `createOrder` writes `primary.amountPaise` into `quantity`. So the rail was only
+ * ever comparing a single order against the cap, and four ₹40,000 buys in one month all
+ * passed — which is the whole point of a MONTHLY budget.
+ *
+ * Only BUY-shaped intents count: FR-12 caps *deployment*, and a SELL or REDEEM returns
+ * money rather than spending it. SIPs are excluded because they are not orders here at
+ * all — they never pass through `createOrder`.
+ *
+ * NOT implemented: FR-12's "confirmed-vest-month redeployment allowance", which raises
+ * the cap in a month when an RSU vest is confirmed. The PRD states the allowance exists
+ * but not its size, and inventing one would silently widen a rail. Under-counting the
+ * allowance makes the gate stricter than the PRD, which is the safe direction to be
+ * wrong in; it is on the owner true-up list.
+ */
+async function getTacticalUsedThisMonth(db: Db, asOfIso: string): Promise<bigint> {
+  const month = asOfIso.slice(0, 7);
+  const rows = await db.query<{ total: string | number | null }>(
+    `select coalesce(sum(o.quantity::numeric), 0)::text as total
+       from order_intents o
+      where o.intent in ('BUY')
+        and to_char(o.as_of, 'YYYY-MM') = $1
+        and coalesce((
+              select t.to_status from order_transitions t
+               where t.order_intent_id = o.id order by t.at desc limit 1
+            ), 'DRAFT') <> all($2::text[])`,
+    [month, RELEASED_STATUSES],
+  );
+  const total = rows[0]?.total ?? '0';
+  // `sum` of a numeric column comes back as a decimal string; money is paise and whole.
+  return BigInt(String(total).split('.')[0] || '0');
 }
 
 function monthsBetween(fromIso: string, toIso: string): number {
@@ -405,7 +447,7 @@ export async function checkPortfolioRails(
   }
 
   // Tactical monthly budget check (aggregate, not per order)
-  const tacticalUsed = await getTacticalUsedThisMonth(db);
+  const tacticalUsed = await getTacticalUsedThisMonth(db, new Date().toISOString());
   let totalTactical: import('../money/paise.js').Paise = paise(0n);
   for (const p of positions) {
     if (['EQUITY', 'ETF', 'MF'].includes(p.kind)) {

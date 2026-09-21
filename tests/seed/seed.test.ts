@@ -31,16 +31,19 @@ describe('seed job', () => {
     const rows = await db.query<{ id: string; isin: string | null }>(
       'select id, isin from instruments where isin is not null order by id',
     );
+    // Corrected 2026-09-21: four of these named the wrong PLAN (IDCW) or, for
+    // ICICI-LARGECAP, a different fund on the Regular plan. Resolved against AMFI's
+    // NAVAll.txt and cross-checked against the NAV INDmoney reports for the holding.
     expect(rows.map((r) => [r.id, r.isin])).toEqual([
       ['BOND:EDELWEISS-2033', 'INE532F07EK1'],
       ['BOND:SAMMAAN-2026', 'INE148I07GL3'],
       ['BOND:SAMMAAN-2029', 'INE148I07TX1'],
       ['MF:BANDHAN-SMALLCAP', 'INF194KB1AL4'],
-      ['MF:HDFC-MIDCAP', 'INF179K01XP2'],
-      ['MF:ICICI-LARGECAP', 'INF109K01449'],
+      ['MF:HDFC-MIDCAP', 'INF179K01XQ0'],
+      ['MF:ICICI-LARGECAP', 'INF109K016L0'],
       ['MF:ICICI-NIFTY50-IDX', 'INF109K012M7'],
-      ['MF:MOTILAL-MIDCAP', 'INF247L01452'],
-      ['MF:PPFC', 'INF879O01308'],
+      ['MF:MOTILAL-MIDCAP', 'INF247L01445'],
+      ['MF:PPFC', 'INF879O01027'],
       ['NSE:AMBER', 'INE371P01024'],
       ['NSE:ASIANPAINT', 'INE021A01026'],
       ['NSE:ASTRAL', 'INE006I01046'],

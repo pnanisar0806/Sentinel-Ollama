@@ -45,7 +45,33 @@ export const SEED_HOLIDAYS_2026: HolidaySeed[] = [
   { date: '2026-11-08', note: 'Muhurat trading (Diwali Laxmi Pujan) — timings per NSE circular', specialSession: true },
 ];
 
-export async function seedHolidays(db: Db, holidays = SEED_HOLIDAYS_2026): Promise<number> {
+/**
+ * 2025, so the price history has a calendar too.
+ *
+ * The table held 2026 only, while `prices_eod` now goes back to 2025-09-08 — so every
+ * 2025 holiday read as a trading day. These four are the weekdays in the backfilled
+ * range for which **NSE itself served no bhavcopy**, cross-checked against the 2025
+ * calendar: Gandhi Jayanti, Diwali-Balipratipada, Guru Nanak and Christmas. Derived from
+ * the exchange's own silence rather than transcribed from a list, which is the evidence
+ * the 2026 block's provenance note asks for.
+ *
+ * 2025-10-21 is absent on purpose: NSE traded the Muhurat session that day and served a
+ * bhavcopy for it.
+ *
+ * Only the range actually backfilled (2025-09-08 onward) can be derived this way, so
+ * earlier 2025 holidays are deliberately not listed — a wrong entry silently skips a
+ * real trading day, and the 2026 note's rule is to leave a date out when in doubt.
+ */
+export const SEED_HOLIDAYS_2025: HolidaySeed[] = [
+  { date: '2025-10-02', note: 'Mahatma Gandhi Jayanti / Dussehra' },
+  { date: '2025-10-22', note: 'Diwali-Balipratipada' },
+  { date: '2025-11-05', note: 'Prakash Gurpurb Sri Guru Nanak Dev' },
+  { date: '2025-12-25', note: 'Christmas' },
+];
+
+export const SEED_HOLIDAYS = [...SEED_HOLIDAYS_2025, ...SEED_HOLIDAYS_2026];
+
+export async function seedHolidays(db: Db, holidays = SEED_HOLIDAYS): Promise<number> {
   let written = 0;
   for (const h of holidays) {
     const rows = await db.query<{ holiday_date: string }>(

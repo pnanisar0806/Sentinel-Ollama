@@ -3,7 +3,7 @@ import type { Recommendation, RecLeg } from './recommendations.js';
 import { formatInr } from '../money/paise.js';
 import { assessStaleness, blockedInstruments, type StalenessRow } from '../sources/staleness.js';
 import { loadPositions, type Position } from '../domain/networth.js';
-import { checkRails } from './rails.js';
+import { checkFreeze, checkRails, getBreakerState } from './rails.js';
 import { validateRecommendation } from './recommendations.js';
 
 export type OrderStatus =
@@ -234,6 +234,26 @@ async function validateOrderGate(
   const errors = validateRecommendation(recommendation);
   if (errors.length > 0) {
     throw new Error(`FR-11/12 validation failed: ${errors.join('; ')}`);
+  }
+
+  // FR-32 and FR-33. `/freeze` halts drafting, and the breaker puts the advisor into
+  // report-only after three consecutive approved recommendations hit their falsification
+  // conditions. Both states were stored, both were rendered on /cleanup, and neither was
+  // ever consulted: `checkFreeze` and `getBreakerState` had no caller anywhere. A control
+  // that is displayed but not enforced is worse than one that is absent, because it reads
+  // as protection.
+  //
+  // Cancelling already-pending requests on freeze (the rest of FR-32) is a state
+  // transition that belongs with the `/freeze` command itself, which is Phase 2 Task 2.
+  // This is the half that stops a NEW draft.
+  await checkFreeze(db);
+  const breaker = await getBreakerState(db);
+  if (breaker.active) {
+    throw new Error(
+      `FR-33: breaker tripped after ${breaker.consecutiveFalsifications} consecutive `
+      + `falsifications (demoted ${breaker.demotedAt ?? 'unknown'}) — the advisor is `
+      + 'report-only until /reset_breaker is run with a post-mortem note',
+    );
   }
 
   // The owner rails. This function's comment has always claimed to "validate rails", but

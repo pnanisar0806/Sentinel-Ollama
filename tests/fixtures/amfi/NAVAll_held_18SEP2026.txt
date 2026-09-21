@@ -1,0 +1,8 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date
+122639;INF879O01027;-;Parag Parikh Flexi Cap Fund;Direct Plan;Growth;89.8569;18-Sep-2026
+118989;INF179K01XQ0;-;HDFC Mid Cap Fund;Direct Plan;Growth Option;231.413;18-Sep-2026
+120586;INF109K016L0;-;ICICI Prudential Large Cap Fund (erstwhile Bluechip Fund);Direct Plan;Growth;116.61;21-Sep-2026
+127042;INF247L01445;-;Motilal Oswal Midcap Fund;;;119.7221;21-Sep-2026
+120620;INF109K012M7;-;ICICI Prudential Nifty 50 Index Fund;Direct Plan;Cumulative;247.8619;21-Sep-2026
+147946;INF194KB1AL4;-;BANDHAN Small Cap Fund;Direct Plan;Growth;57.537;21-Sep-2026
+119551;INF209KA12Z1;INF209KA13Z9;Aditya Birla Sun Life Banking & PSU Debt Fund;Direct Plan;IDCW-Re-investment;107.0677;18-Sep-2026

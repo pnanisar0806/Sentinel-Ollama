@@ -3,6 +3,7 @@ import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import {
+  SEED_HOLIDAYS,
   SEED_HOLIDAYS_2026,
   isTradingDay,
   seedHolidays,
@@ -18,7 +19,10 @@ describe('the NSE trading calendar', () => {
   it('is seeded with the full year and is idempotent', async () => {
     await seed(db, { asOf: '2026-08-12' });
     const [row] = await db.query<{ n: string }>(`select count(*) as n from holidays`);
-    expect(Number(row!.n)).toBe(SEED_HOLIDAYS_2026.length);
+    // 2025 joined the seed on 2026-09-21: `prices_eod` now reaches back to
+    // 2025-09-08, and the table held 2026 only, so every 2025 holiday read as a
+    // trading day.
+    expect(Number(row!.n)).toBe(SEED_HOLIDAYS.length);
     // A re-seed writes nothing new rather than failing on the primary key.
     expect(await seedHolidays(db)).toBe(0);
   });
@@ -26,7 +30,7 @@ describe('the NSE trading calendar', () => {
   it('closes the exchange on a weekday holiday', async () => {
     await seedHolidays(db);
     // Derived from the seed rather than restated: every non-special entry is closed.
-    for (const h of SEED_HOLIDAYS_2026.filter((x) => x.specialSession !== true)) {
+    for (const h of SEED_HOLIDAYS.filter((x) => x.specialSession !== true)) {
       expect(await isTradingDay(db, h.date), `${h.date} ${h.note}`).toBe(false);
     }
   });

@@ -27,7 +27,7 @@ afterAll(async () => {
 
 describe('parseNavText', () => {
   it('parses the AMFI daily NAV fixture', () => {
-    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_legacy_layout_synthetic.txt'), 'utf8');
     const rows = parseNavText(text);
     
     expect(rows.length).toBe(6);
@@ -84,7 +84,7 @@ describe('parseNavText', () => {
   });
 
   it('mutation check: changing expected NAV makes test fail', () => {
-    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_legacy_layout_synthetic.txt'), 'utf8');
     const rows = parseNavText(text);
     
     const iciciNifty = rows.find(r => r.schemeCode === '100001');
@@ -144,20 +144,56 @@ describe('parseNavHistory', () => {
   });
 });
 
-describe('ingestNavs', () => {
-  it('inserts NAVs for known MF instruments and tracks unknown schemes', async () => {
-    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
-    const rows = parseNavText(text);
-    
-    const result = await ingestNavs(db, rows, '2026-09-11T17:30:00+05:30');
-    
-    // 5 of 6 schemes in fixture match our seed (100001 ICICI Nifty 50 has different scheme code 120620 in real AMFI)
-    expect(result.inserted).toBe(5);
+/**
+ * `NAVAll_held_18SEP2026.txt` is a verbatim excerpt of AMFI's own daily file: the six
+ * funds the owner holds plus one they do not.
+ *
+ * The synthetic fixture it replaces used scheme codes 100001-100006, which matched the
+ * seed only because the SEED's codes were the same invented sequence. Both were wrong
+ * about AMFI, and agreed with each other — so `ingestNavs` looked like it resolved five
+ * funds while resolving none of the real ones.
+ */
+describe("ingestNavs against AMFI's own file", () => {
+  it('resolves every held fund and flags the one that is not held', async () => {
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_held_18SEP2026.txt'), 'utf8');
+    const result = await ingestNavs(db, parseNavText(text), '2026-09-18T17:30:00+05:30');
+
+    expect(result.inserted).toBe(6);
     expect(result.unknownSchemes.length).toBe(1);
   });
 
+  it('stores each fund the NAV of the plan the owner holds', async () => {
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_held_18SEP2026.txt'), 'utf8');
+    await ingestNavs(db, parseNavText(text), '2026-09-18T17:30:00+05:30');
+
+    // PPFC Direct Growth is 89.8569 — the figure INDmoney reports for the holding.
+    // Before the identifier fix this row resolved to the IDCW plan instead.
+    const [ppfc] = await db.query<{ nav_micros: string }>(
+      `select nav_micros from navs where instrument_id = 'MF:PPFC'`,
+    );
+    expect(Number(ppfc!.nav_micros)).toBe(Math.round(89.8569 * 1_000_000));
+
+    const [hdfc] = await db.query<{ nav_micros: string }>(
+      `select nav_micros from navs where instrument_id = 'MF:HDFC-MIDCAP'`,
+    );
+    expect(Number(hdfc!.nav_micros)).toBe(Math.round(231.413 * 1_000_000));
+  });
+
+  it('reads a row whose Plan and Option are blank', async () => {
+    // Motilal's row is `127042;INF247L01445;-;Motilal Oswal Midcap Fund;;;119.7221;...`.
+    // The layout sniffer keys on index 4 being non-numeric, and an EMPTY field must
+    // count as non-numeric or the NAV would be read from the wrong column.
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_held_18SEP2026.txt'), 'utf8');
+    const row = parseNavText(text).find((r) => r.schemeCode === '127042');
+    expect(row!.nav).toBe(119.7221);
+  });
+});
+
+describe('ingestNavs', () => {
+
+
   it('idempotent - re-ingesting same date updates nav_micros', async () => {
-    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_legacy_layout_synthetic.txt'), 'utf8');
     const rows = parseNavText(text);
     
     // First ingest
@@ -183,7 +219,7 @@ describe('ingestNavs', () => {
   });
 
   it('stores NAV as BIGINT micros (NAV × 1e6)', async () => {
-    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_11SEP2026.txt'), 'utf8');
+    const text = readFileSync(join(FIXTURE_DIR, 'NAVAll_legacy_layout_synthetic.txt'), 'utf8');
     const rows = parseNavText(text);
     
     await ingestNavs(db, rows, '2026-09-11T17:30:00+05:30');

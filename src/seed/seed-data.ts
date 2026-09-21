@@ -59,12 +59,25 @@ export interface RsuGrantSeed {
 
 export const SEED_INSTRUMENTS: InstrumentSeed[] = [
   { id: 'EPF:ANIRBAN', kind: 'EPF', name: 'Employees Provident Fund', currency: 'INR', canonicalId: 'EPF:SERVICE_NOW' },
+  // AMFI scheme codes and ISINs, each resolved against AMFI's own NAVAll.txt on
+  // 2026-09-21 and cross-checked against the NAV INDmoney reports for the holding.
+  //
+  // FOUR of the six were wrong before that check. The scheme codes 100002-100006 were
+  // sequential placeholders that match no AMFI scheme at all, and the ISINs pointed at
+  // the wrong PLAN of the right fund, or at a different fund entirely:
+  //   MF:PPFC          INF879O01308 = scheme 153964, the IDCW variant
+  //   MF:HDFC-MIDCAP   INF179K01XP2 = scheme 118988, the IDCW variant
+  //   MF:ICICI-LARGECAP INF109K01449 = scheme 100348, ICICI Large & MID Cap, REGULAR plan
+  //   MF:MOTILAL-MIDCAP INF247L01452 = scheme 127044, not the Direct Growth plan
+  // `ingestNavs` matches on ISIN, so every NAV stored for those four was a different
+  // plan's price series. Nothing consumed per-instrument NAVs yet, which is the only
+  // reason this had not produced wrong advice.
   { id: 'MF:ICICI-NIFTY50-IDX', kind: 'MF', name: 'ICICI Pru Nifty 50 Index Direct', currency: 'INR', canonicalId: 'MF:5536', schemeCode: '120620', isin: 'INF109K012M7' },
-  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR', canonicalId: 'MF:3229', schemeCode: '100002', isin: 'INF879O01308' },
-  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR', canonicalId: 'MF:2995', schemeCode: '100003', isin: 'INF109K01449' },
-  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR', canonicalId: 'MF:3097', schemeCode: '100004', isin: 'INF179K01XP2' },
-  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR', canonicalId: 'MF:3113', schemeCode: '100005', isin: 'INF247L01452' },
-  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR', canonicalId: 'MF:1005544', schemeCode: '100006', isin: 'INF194KB1AL4' },
+  { id: 'MF:PPFC', kind: 'MF', name: 'Parag Parikh Flexi Cap Direct', currency: 'INR', canonicalId: 'MF:3229', schemeCode: '122639', isin: 'INF879O01027' },
+  { id: 'MF:ICICI-LARGECAP', kind: 'MF', name: 'ICICI Pru Large Cap Direct', currency: 'INR', canonicalId: 'MF:2995', schemeCode: '120586', isin: 'INF109K016L0' },
+  { id: 'MF:HDFC-MIDCAP', kind: 'MF', name: 'HDFC Mid Cap Opportunities Direct', currency: 'INR', canonicalId: 'MF:3097', schemeCode: '118989', isin: 'INF179K01XQ0' },
+  { id: 'MF:MOTILAL-MIDCAP', kind: 'MF', name: 'Motilal Oswal Midcap Direct', currency: 'INR', canonicalId: 'MF:3113', schemeCode: '127042', isin: 'INF247L01445' },
+  { id: 'MF:BANDHAN-SMALLCAP', kind: 'MF', name: 'Bandhan Small Cap Direct', currency: 'INR', canonicalId: 'MF:1005544', schemeCode: '147946', isin: 'INF194KB1AL4' },
   { id: 'NSE:NIFTYBEES', kind: 'ETF', name: 'Nippon Nifty BeES', currency: 'INR', canonicalId: 'NSE:INDS19182', isin: 'INF732E01037' },
   { id: 'NSE:GOLDBEES', kind: 'GOLD', name: 'Gold ETF', currency: 'INR', canonicalId: 'NSE:INDS29570', isin: 'INF732E01029' },
   { id: 'NSE:LIQUIDBEES', kind: 'ETF', name: 'Liquid ETF', currency: 'INR', canonicalId: 'NSE:INDS28892', isin: 'INF732E01011' },
