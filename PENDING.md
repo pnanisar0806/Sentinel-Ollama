@@ -849,3 +849,52 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       Retiring these repeats the exercise above: re-derive the seeded total and every
       percentage, and expect `US:INDMONEY-BASKET` to also be carrying a single-stock
       breach it should never have had.
+
+---
+
+## ORPHANS — capabilities no phase owns (catalogued 2026-09-20)
+
+Checked against the Phase 2.5 plan and PRD §14 Phase 3. Phase 2.5 mentions mutual funds,
+`mf_switch`, price history, `prices_eod`, bhavcopy, 200DMA, narrative, surplus and
+expenses **zero times**; it only names the missing index series as a caveat advice must
+be honest about, not as work. Phase 3 is Kite execution, human-in-loop unlock, deep-link
+bridge, tax engine v1, breakers armed and maturity routing. Everything below falls
+between the two and will never be built unless it is tracked here.
+
+### Fix order, worst first
+
+**1. The rails do not gate anything (Phase 2 debt, not an orphan — but ranked first).**
+`checkRails` has zero production callers. `validateOrderGate` enforces FR-31 staleness
+and FR-11/FR-12 structure only; `orders.ts` contains no reference to freeze, breaker or
+paper mode. Worst because the Phase 2 DoD is four weeks of paper approvals: exercising a
+gate that is not there manufactures confidence in a control that does not exist, directly
+before Phase 3 arms real execution. Phase 2.5 states plainly that "Phase 2 approval/rails
+remain hard gates" — today they are not.
+
+**2. ORPHAN — price history depth and the empty `index_prices_eod`.** `prices_eod` holds
+4 trading days; the index table is empty. Trend is 30 of 100 and scores 0 for every name,
+so the best composite is 39.8 against a MEDIUM threshold of 70 and **the satellite
+recommender cannot fire at all**. Phase 2.5 Task 6 has the LLM choose among *eligible
+engine candidates*; with none produced, the centrepiece of 2.5 advises on an empty set.
+Needs a bhavcopy backfill deep enough for a 200DMA plus an index series.
+
+**3. ORPHAN — exit candidates are never persisted.** `evaluateExits` output is rendered
+into the weekly Telegram text (`report.ts:515`) and written nowhere, so no exit trigger —
+employer cap, underperformance, falsification, better-alternative, credit-maturity — can
+reach `/recommendations`. `ExitCandidate` also carries no `amountPaise`. Phase 2.5 Task 4
+supplies a size for *advisor* candidates; nothing covers persisting the deterministic
+engine's own exits.
+
+**4. ORPHAN — mutual funds have no advice path.** `mf_switch` is in the `recommendations`
+kind CHECK and the `RecKind` union, and nothing constructs one. The engine ranks funds
+(consistency 40 / expense 20) and the ranking goes nowhere. MF is ~₹12L, the second
+largest asset class after EPF, and no phase covers acting on it.
+
+**5. ORPHAN — the weekly narrative is never stored.** Composed, sent to Telegram,
+discarded. `/narrative` stays a shell because there is no row to read. Phase 2.5 Task 8
+is bounded commentary on advisor decisions, a different artefact.
+
+**6. ORPHAN — surplus and expense trend.** `projectSurplus`, `projectAnnualSurplus`,
+`loanOutflowByMonth` and `runCascade` have **zero callers** and no page. Owner asked for a
+measured trend on 2026-09-20; `balance_snapshots` capture begins with the next sync and
+needs 2-3 months before it says anything. No phase owns this.
