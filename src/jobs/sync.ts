@@ -212,7 +212,10 @@ export async function indmoneySource(
       // this client rather than a second OAuth path. Every addition to this list is a
       // deliberate widening of what the process can invoke: read-only tools only, and
       // never anything that could place, modify or cancel an order.
-      allowedTools: ['networth_holdings', 'networth_snapshot', 'get_mf_funds_details'],
+      allowedTools: [
+        'networth_holdings', 'networth_snapshot', 'get_mf_funds_details',
+        'get_mf_by_category',
+      ],
       getToken: () => ensureAccessToken(db, 'indmoney', {
         md, clientId: registration.client_id, key, allowedScopes: INDMONEY_SCOPES,
         ...(clientSecret ? { clientSecret } : {}),

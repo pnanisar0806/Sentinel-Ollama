@@ -2620,3 +2620,63 @@ smallest holding is 17,254 crore. Cost and consistency are the only separators.
 candidate-universe decision matters.
 
 `mf_switch` is deliberately not emitted. See the owner ask in PENDING.md.
+
+
+## Owner decisions and confirmations, 2026-09-21 (second batch)
+
+- **Exits ARE promotable on demand.** Built: a Recommend button on `/cleanup`, a
+  `POST /api/exits/promote` route and `promoteExitCandidate`. Never automatic — see the
+  module note.
+- **MF switch universe: INDmoney peers** (`get_mf_by_category`). Peer resolution is
+  built and proven live; emitting the recommendation is the remaining step.
+- **`MIN_EVALS_FOR_CALIBRATION = 20` — CONFIRMED by the owner.** No longer a stake in
+  the ground; strike it from the owner-input list.
+- **`GSEC_YIELD_PCT = 7.0` — CONFIRMED by the owner.**
+- **₹82,124 vs PRD ₹76,000:** owner believes the PRD figure is after existing SIPs, and
+  wants it settled from the surplus trend once that has months behind it. Not an open
+  question for now; revisit when the trend exists.
+- **Bank statements still not wanted.** Trend accumulates from now.
+
+## Sector comes from NSE, free (2026-09-21)
+
+The screener's Industry column needs a paid subscription. **Checked and ruled out:**
+Kite's instrument master has no sector field at all (id, tradingsymbol, isin, name,
+series, segment, prices), and INDmoney returns `market_cap: "LARGE CAP"` — a size
+bucket — while `networth_snapshot`'s own documentation states the portfolio backend has
+no sector analytics.
+
+NSE publishes it free at
+`nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv`:
+`Company Name,Industry,Symbol,Series,ISIN Code`, 755 stocks, 22 industries. Columns are
+read from the END of the row because a company name can contain a comma.
+`src/sources/nse-industry.ts`, refreshed on every `sync`.
+
+Coverage: 67 of 73 watchlist instruments; the six misses are the mutual funds. An
+instrument NSE does not list keeps the sector it had.
+
+**The satellite recommender now fires.** With real cohorts, `NSE:BAJAJ-AUTO` scores
+73.73 and `NSE:HAL` 71.82 against the MEDIUM threshold of 70 — the best score before
+today's work was 39.8. Twelve sector medians are computable.
+
+## MF peer resolution (2026-09-21)
+
+`src/sources/mf-peers.ts`. INDmoney's `get_mf_by_category` gives name, expense ratio,
+AUM (as the string `"108325 Cr"`, unlike `get_mf_funds_details` which gives a number),
+NAV, nav_date and `purchase_allowed` — but **its fund id is not an AMFI scheme code and
+it carries no ISIN**, so a peer cannot be joined to NAV history by identifier.
+
+`resolvePeerToAmfi` uses the NAV as a **fingerprint**: a peer resolves only when an AMFI
+row both contains its name and carries the same NAV to the paisa. HDFC Mid Cap has four
+AMFI rows on one day at 231.413, 207.974, 81.906 and 52.178, so name alone picks a plan
+at random — which is exactly how the four seeded funds ended up on their IDCW variants.
+
+**The match is only valid on a shared session.** AMFI's daily file rolls forward while
+INDmoney still reports the previous close; the first live run resolved zero peers for
+that reason. Resolve against `downloadNavHistory(navDate, navDate)`, not the daily file.
+
+Verified live: all four mid-cap peers resolved, HDFC Mid Cap to scheme 118989 /
+INF179K01XQ0 — independently matching the value derived by hand for the identifier fix.
+
+**Remaining for `mf_switch`:** create `instruments` rows for resolved peers, backfill
+their NAVs (the existing monthly AMFI download already contains them), score held and
+peer together per category, and emit the recommendation.

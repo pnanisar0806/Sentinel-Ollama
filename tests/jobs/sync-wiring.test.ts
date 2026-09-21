@@ -101,7 +101,12 @@ describe('the OAuth INDmoney path is reachable from the entrypoint', () => {
     // expense ratio and AUM, which are 35 of `rankMfs`'s 100 points and exist in no
     // other source. It reads one fund's published facts, names no order surface and
     // takes no amount.
-    const ALLOWED = ['networth_holdings', 'networth_snapshot', 'get_mf_funds_details'];
+    // Widened again, deliberately, on 2026-09-21: `get_mf_by_category` lists the peer
+    // funds `mf_switch` needs as a candidate universe (owner decision). It reads a
+    // published category listing, names no order surface and takes no amount.
+    const ALLOWED = [
+      'networth_holdings', 'networth_snapshot', 'get_mf_funds_details', 'get_mf_by_category',
+    ];
 
     const match = source.match(/allowedTools:\s*\[([^\]]*)\]/);
     expect(match, 'allowedTools literal not found in sync.ts').not.toBeNull();
