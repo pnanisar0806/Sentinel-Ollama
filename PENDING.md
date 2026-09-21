@@ -830,7 +830,12 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       was the residue itself — one fake instrument standing in for 25 real ones. The
       system had been reporting a concentration breach that did not exist.
 
-- [ ] **TWO MORE SEED ROWS ARE STILL DOUBLE COUNTING — ₹1,84,000.** Same query, same
+- [x] **WITHDRAWN — these two were never double counting.** `US:INDMONEY-BASKET` is
+      retired by the basket-placeholder branch and the ₹47,000 MF row by canonical match.
+      The claim below came from a SQL reimplementation that skipped both branches. Kept
+      for the record; nothing to do.
+
+- [ ] ~~TWO MORE SEED ROWS ARE STILL DOUBLE COUNTING — ₹1,84,000.~~ Same query, same
       rule. Of the five seed rows that survive reconciliation, only `US:NOW` (₹10,72,974)
       is a legitimate gap-fill, because INDmoney never serves the Fidelity RSU.
 

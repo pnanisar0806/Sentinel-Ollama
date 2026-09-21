@@ -1,5 +1,5 @@
 import type { Db } from '../db/client.js';
-import { addP, subP, type Paise } from '../money/paise.js';
+import { addP, subP, formatInr, type Paise } from '../money/paise.js';
 import type { Account } from '../seed/seed-data.js';
 
 /**
@@ -79,6 +79,18 @@ const toPaise = (v: string | number | bigint): Paise => BigInt(v) as Paise;
  * This is the C-A supersession rule: live source wins per canonical key; seed fills gaps;
  * fallback to seed when live stops reporting.
  */
+/**
+ * Sources that publish a WHOLE broker account rather than a sample of one, and are
+ * therefore authoritative for every account they touch.
+ *
+ * Authority is DECLARED, never inferred from "this source emitted a row". Inferring it
+ * is unsafe: a source reporting one zerodha holding would retire the seed's NIFTYBEES,
+ * GOLDBEES and LIQUIDBEES and the money would simply vanish. `RemoteIndmoneySource`
+ * qualifies because it aggregates a broker's full book and throws on `holding_error`
+ * rather than writing a partial one. Anything else falls back to identity matching.
+ */
+const ACCOUNT_AUTHORITATIVE_SOURCES = new Set(['indmoney']);
+
 function reconcileKey(row: HoldingRow): string {
   return `${row.canonical_id ?? row.instrument_id}|${row.account}`;
 }
@@ -149,32 +161,44 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
     [businessDate ?? null],
   );
 
-  // First pass: collect all live source keys (non-manual-seed), their canonical ids,
-  // and whether live now carries unmapped granular EQUITY rows.
+  // First pass: which ACCOUNTS a live source reports at all, plus the per-key and
+  // per-canonical matches used to carry owner-verified cost across a supersession.
+  const liveAccounts = new Set<string>();
   const liveKeys = new Set<string>();
   const liveCanonicals = new Set<string>();
-  let hasUnmappedLiveEquity = false;
   for (const r of rows) {
     if (r.source !== 'manual-seed') {
+      if (ACCOUNT_AUTHORITATIVE_SOURCES.has(r.source)) liveAccounts.add(r.account);
       liveKeys.add(reconcileKey(r));
       if (r.canonical_id) liveCanonicals.add(r.canonical_id);
-      if (!r.canonical_id && r.kind === 'EQUITY') hasUnmappedLiveEquity = true;
     }
   }
 
   /**
-   * Supersession (owner decision 2026-08-23, refined against the real capture):
-   * a seed row retires when a live row shares its identity — by (canonical,account)
-   * key, by CANONICAL ALONE (live labels accounts by real broker, seed used broker
-   * guesses; same money, different label), or because it is one of the two placeholder
-   * baskets whose decomposed constituents live now reports. Live-live rows are never
-   * merged: each source manages its own aggregation.
+   * Supersession is PER ACCOUNT (2026-09-20), not per instrument.
+   *
+   * A live source publishes a whole broker account, not a sampling of it: INDmoney is
+   * authoritative for zerodha, indmoney, bank, epf and groww, and knows nothing about
+   * fidelity. So once it reports ANY row for an account, every seed row for that
+   * account is superseded — the seed is the bootstrap, and live has taken over.
+   *
+   * This replaces three identity heuristics that each failed differently. Matching by
+   * (canonical, account) missed rows the seed had labelled with a guessed broker.
+   * Matching by canonical alone missed CASH:SAVINGS, whose canonical
+   * `CASH:SAVINGS_HDFC_FEDERAL` matches neither live bank row (both carry a NULL
+   * canonical_id) — it was double counting Rs 1,63,000 of cash, and that inflated
+   * figure was what the owner's 10% cash ceiling was judged against. And a lump
+   * placeholder can NEVER match a constituent set, which is why `BASKET_PLACEHOLDERS`
+   * had to name the residue and the INDmoney basket by hand — a list that needs a new
+   * entry every time a placeholder is invented. Account coverage needs none.
+   *
+   * `US:NOW` survives, correctly: the Fidelity RSU is on an account no live source
+   * reports, which is exactly what a gap-fill is.
    *
    * When the retiring seed row carried an owner-verified cost and its live twin has
    * none (the bond face-value trap), that cost is CARRIED OVER to the survivor —
    * verified data must not die with a superseded row.
    */
-  const BASKET_PLACEHOLDERS = new Set(['NSE:SMALLCASE-RESIDUE', 'US:INDMONEY-BASKET']);
   interface Entry { pos: Position; row: HoldingRow }
   const entries: Entry[] = [];
   const orphanedSeedCost = new Map<string, Paise>();
@@ -182,10 +206,23 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
   for (const r of rows) {
     const key = reconcileKey(r);
     if (r.source === 'manual-seed') {
-      const covered = liveKeys.has(key)
-        || (r.canonical_id ? liveCanonicals.has(r.canonical_id) : false)
-        || (BASKET_PLACEHOLDERS.has(r.instrument_id) && hasUnmappedLiveEquity);
+      const covered = liveAccounts.has(r.account)
+        || liveKeys.has(key)
+        || (r.canonical_id ? liveCanonicals.has(r.canonical_id) : false);
       if (covered) {
+        // A seed row dropped by account coverage that ALSO had no identity match is the
+        // one case where money could silently vanish: live owns the account but never
+        // reported this holding. RemoteIndmoneySource throws on a partial book rather
+        // than writing one, so this should not happen — say so loudly if it ever does.
+        const identityMatched = liveKeys.has(key)
+          || (r.canonical_id ? liveCanonicals.has(r.canonical_id) : false);
+        if (!identityMatched) {
+          console.error(
+            `seed row ${r.instrument_id} (${r.account}, ${formatInr(toPaise(r.value_paise))}) ` +
+            'dropped because a live source owns that account, but no live row matches it — ' +
+            'verify the live book is complete for that account',
+          );
+        }
         if (r.avg_cost_paise !== null) {
           orphanedSeedCost.set(r.canonical_id ?? r.instrument_id, toPaise(r.avg_cost_paise));
         }

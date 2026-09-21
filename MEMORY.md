@@ -2186,6 +2186,27 @@ assertions to the new shape with the arithmetic shown, and drop the guards in th
 commit. Neither row causes harm in production today — both are absent from every live
 snapshot — so this is hygiene, not urgency.
 
+### CORRECTED: the double count was ₹1,63,000, not ₹8,18,400 (2026-09-20)
+
+**The section below overstated the problem and named two innocent rows. Read this
+first.** The figures there came from re-deriving `reconcileKey` in SQL, which omitted two
+of the three branches `loadPositions` actually applies. Running all three:
+
+| seed row | ₹ | real fate |
+|---|---|---|
+| `US:NOW` | 10,72,974 | survives — correct, no live source covers `fidelity` |
+| `CASH:SAVINGS` | 1,63,000 | **survives — the only genuine double count** |
+| `NSE:SMALLCASE-RESIDUE` | 6,55,400 | retired by the `BASKET_PLACEHOLDERS` branch |
+| `US:INDMONEY-BASKET` | 1,37,000 | retired by the same branch |
+| `MF:ICICI-NIFTY50-IDX` | 47,000 | retired by canonical match |
+
+So net worth was overstated by **₹1,63,000**, and only cash was wrong. Retiring the
+residue from `SEED_HOLDINGS` was still right — it was dead weight and let the exclusion
+guards go — but not for the reason the commit gave.
+
+**The lesson, twice in one session:** do not reimplement a rule to audit it. The same
+mistake read a partial smallcase export as complete. Exercise the real code path.
+
 ### The seed was double counting, and reconciliation is why (2026-09-20)
 
 `loadPositions` merges by `(canonical_id, account)`: live wins, seed fills gaps. A seed
@@ -2218,3 +2239,28 @@ construction, not by accident.
   to assert it equalled the PRD balance sheet; it now asserts the **gap-fill** total, and
   the PRD total is met by seed *plus* live. Anyone re-reading those tests needs that, or
   they will "fix" the seed back to 53.42L and restore the double count.
+
+### Supersession is per ACCOUNT, and authority is declared (2026-09-20)
+
+`loadPositions` now retires a seed row when an **account-authoritative** live source
+reports that account at all — `ACCOUNT_AUTHORITATIVE_SOURCES = {'indmoney'}` in
+`src/domain/networth.ts`. The identity branches (key, canonical) remain as a fallback for
+every other source.
+
+This replaces `BASKET_PLACEHOLDERS`, a hand-maintained list naming the smallcase residue
+and the INDmoney basket. A lump placeholder can never match a constituent set, so that
+list needed a new entry per invented placeholder; account coverage needs none. It also
+catches `CASH:SAVINGS`, which no identity branch could: its canonical
+`CASH:SAVINGS_HDFC_FEDERAL` matches neither live bank row, both of which carry a NULL
+`canonical_id`.
+
+**Authority is declared, never inferred from "this source emitted a row".** Inferring it
+is unsafe and a real test caught it: a `composite` source emitting one `zerodha` row would
+have retired the seed's NIFTYBEES, GOLDBEES and LIQUIDBEES with nothing replacing them.
+`RemoteIndmoneySource` qualifies because it publishes a broker's full book and throws on
+`holding_error` rather than writing a partial one — that guard is what makes the rule safe,
+so do not weaken it.
+
+A seed row dropped by account coverage with **no** identity match logs an error naming the
+instrument and amount. That is the only path where money could vanish silently, so it is
+made loud rather than trusted.
