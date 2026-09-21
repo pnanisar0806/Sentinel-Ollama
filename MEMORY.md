@@ -2594,3 +2594,29 @@ trimmed content. The old strip anchored on `^` + fence, so a reply with a leadin
 produced `Unexpected token '`', " ```json { "... is not valid JSON` and the extraction
 failed outright. Six free models, six habits — some lead with whitespace, some add prose
 around the block, some omit the language tag.
+
+
+## MF ranking is live (2026-09-21)
+
+`rankHeldFunds` (`src/domain/mf-ranking.ts`) is the only production caller of `rankMfs`.
+`/funds` shows it. Verified end to end against the live book after the identifier fix
+and NAV re-backfill:
+
+| # | fund | score /75 | consistency | cost | size | months |
+|---|---|---|---|---|---|---|
+| 1 | HDFC Mid Cap | 66.83 | 37.89 | 13.94 | 15 | 31 |
+| 2 | Bandhan Small Cap | 64.44 | 33.68 | 15.76 | 15 | 31 |
+| 3 | Parag Parikh Flexi Cap | 61.25 | 31.58 | 14.67 | 15 | 31 |
+| 4 | ICICI Nifty 50 Index | 56.05 | 21.05 | 20 | 15 | 31 |
+| 5 | ICICI Large Cap | 55.14 | 29.47 | 10.67 | 15 | 31 |
+| 6 | Motilal Oswal Midcap | 47.81 | 21.05 | 11.76 | 15 | 31 |
+
+All six now carry 31 month-end NAVs, so no uneven-history caveat fires. **Size scores 15
+for every fund**, exactly as predicted — the AUM ramp tops out at 2,000 crore and the
+smallest holding is 17,254 crore. Cost and consistency are the only separators.
+
+**The one same-category pair is HDFC Mid Cap (1st) against Motilal Oswal Midcap (6th)**
+— the only place a switch question can currently be asked at all, and the reason the
+candidate-universe decision matters.
+
+`mf_switch` is deliberately not emitted. See the owner ask in PENDING.md.
