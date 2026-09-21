@@ -10,6 +10,7 @@ import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { fetchMfDetails } from '../sources/indmoney.js';
+import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
 } from '../domain/mf-metadata.js';
@@ -270,6 +271,18 @@ if (isMainModule(import.meta.url)) {
     } catch (error) {
       console.error(`balance capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // Sector, from NSE's free index constituent list. The screener's Industry column
+  // needs a paid subscription and neither Kite nor INDmoney carries a sector at all.
+  // Refreshed every sync because index membership changes; a failure must not fail the
+  // portfolio sync.
+  try {
+    const industries = await downloadIndustries();
+    const applied = await applyIndustries(db, industries);
+    console.log(`sectors: ${applied.updated} instruments set from ${industries.length} NSE rows`);
+  } catch (error) {
+    console.error(`sector refresh failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // MF metadata. Expense ratio and AUM are 35 of `rankMfs`'s 100 points and exist
