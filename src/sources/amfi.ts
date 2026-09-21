@@ -19,12 +19,6 @@ export interface NavRow {
   date: string;
 }
 
-export interface NavHistoryRow {
-  schemeCode: string;
-  nav: number;
-  date: string;
-}
-
 export interface AmfiReport {
   date: string;
   totalRows: number;
@@ -121,27 +115,60 @@ export function parseNavText(text: string): NavRow[] {
   return rows;
 }
 
-export function parseNavHistory(text: string): NavHistoryRow[] {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  
-  const rows: NavHistoryRow[] = [];
-  
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line) continue;
-    const parts = line.split(',');
-    if (parts.length < 3) continue;
-    
-    const schemeCode = parts[0]?.trim() ?? '';
-    const nav = parseFloat(parts[1] ?? '0');
-    const date = parts[2]?.trim() ?? '';
-    
-    if (!schemeCode || isNaN(nav) || nav <= 0 || !date) continue;
-    
-    rows.push({ schemeCode, nav, date });
+/**
+ * AMFI's historical NAV report.
+ *
+ * This split on COMMA and read columns 0, 1, 2 as scheme code, NAV and date. AMFI serves
+ * the file SEMICOLON-delimited with eight columns, NAV at index 6 and date at 7, so the
+ * parser returned nothing at all for the real report — and the fixture behind its test
+ * had been written to match the parser (`Scheme Code,NAV,Date`) rather than the source,
+ * so the test passed. The same failure the index bhavcopy parser carried.
+ *
+ * Columns are found by header name rather than position: the historical report and the
+ * daily NAVAll.txt order them differently (history puts the ISINs after Plan/Option),
+ * and a positional reader silently mixes up the two.
+ *
+ * Returns `NavRow`, the same shape the daily file yields, so `ingestNavs` resolves both
+ * through one path.
+ */
+export function parseNavHistory(text: string): NavRow[] {
+  const lines = text.trim().split('\n').map((l) => l.replace(/\r$/, ''));
+  const header = lines.findIndex((l) => l.toLowerCase().startsWith('scheme code;'));
+  if (header === -1) return [];
+
+  const cols = lines[header]!.split(';').map((h) => h.trim().toLowerCase());
+  const at = (match: (h: string) => boolean): number => cols.findIndex(match);
+  const iCode = at((h) => h === 'scheme code');
+  const iName = at((h) => h.includes('name'));
+  const iPayout = at((h) => h.includes('isin') && h.includes('payout'));
+  const iReinvest = at((h) => h.includes('isin') && h.includes('reinvest'));
+  const iNav = at((h) => h.includes('net asset value') || h === 'nav');
+  const iDate = at((h) => h === 'date');
+  if (iCode === -1 || iNav === -1 || iDate === -1) return [];
+
+  const rows: NavRow[] = [];
+  for (const line of lines.slice(header + 1)) {
+    // The report interleaves AMC and scheme-category banners between data lines.
+    if (!line.includes(';')) continue;
+    const parts = line.split(';');
+    if (parts.length <= Math.max(iCode, iNav, iDate)) continue;
+
+    const schemeCode = parts[iCode]?.trim() ?? '';
+    const nav = parseFloat(parts[iNav] ?? '');
+    const date = parts[iDate]?.trim() ?? '';
+    if (!schemeCode || !date || !Number.isFinite(nav) || nav <= 0) continue;
+
+    rows.push({
+      schemeCode,
+      isinDivPayout: iPayout === -1 ? null : normalizeIsin(parts[iPayout]),
+      isinDivReinvestment: iReinvest === -1 ? null : normalizeIsin(parts[iReinvest]),
+      schemeName: iName === -1 ? '' : (parts[iName]?.trim() ?? ''),
+      nav,
+      repurchasePrice: null,
+      salePrice: null,
+      date,
+    });
   }
-  
   return rows;
 }
 
@@ -170,28 +197,28 @@ export async function downloadDailyNav(): Promise<{ rows: NavRow[]; report: Amfi
   }
 }
 
-export async function downloadHistory(schemeCode: string, fromDate: string, toDate: string): Promise<{ rows: NavHistoryRow[]; report: AmfiReport }> {
-  const url = `${AMFI_HISTORY_BASE}?frmdt=${fromDate}&todt=${toDate}&tp=1&sc=${schemeCode}`;
-  const today = new Date().toISOString().slice(0, 10);
+/**
+ * Every scheme's NAV between two dates, as `dd-MMM-yyyy`.
+ *
+ * The previous signature took a scheme code and passed it as `&sc=`, which AMFI ignores:
+ * the response is the full ~15MB report either way. Callers filter by instrument, which
+ * `ingestNavs` already does when it resolves ISIN and scheme code against `instruments`.
+ */
+export async function downloadNavHistory(
+  fromDate: string,
+  toDate: string,
+): Promise<{ rows: NavRow[]; report: AmfiReport }> {
+  const url = `${AMFI_HISTORY_BASE}?frmdt=${fromDate}&todt=${toDate}`;
   const report: AmfiReport = {
-    date: today,
-    totalRows: 0,
-    inserted: 0,
-    updated: 0,
-    unknownSchemes: [],
-    errors: [],
+    date: new Date().toISOString().slice(0, 10),
+    totalRows: 0, inserted: 0, updated: 0, unknownSchemes: [], errors: [],
   };
-
   try {
-    const response = await fetchWithRetry(url);
-    const text = await response.text();
-    const rows = parseNavHistory(text);
+    const rows = parseNavHistory(await (await fetchWithRetry(url)).text());
     report.totalRows = rows.length;
     return { rows, report };
   } catch (e) {
-    if (e instanceof SourceError && e.code === 'NOT_FOUND') {
-      return { rows: [], report };
-    }
+    if (e instanceof SourceError && e.code === 'NOT_FOUND') return { rows: [], report };
     throw e;
   }
 }

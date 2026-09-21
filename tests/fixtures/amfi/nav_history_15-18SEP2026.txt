@@ -1,0 +1,13 @@
+Scheme Code;NAV Name;Plan;Option;ISIN Div Payout/ISIN Growth;ISIN Div Reinvestment;Net Asset Value;Date
+118988;HDFC Mid Cap Fund - IDCW Option - Direct Plan;Direct Plan;IDCW Option;INF179K01XO5;INF179K01XP2;80.46;15-Sep-2026
+118988;HDFC Mid Cap Fund - IDCW Option - Direct Plan;Direct Plan;IDCW Option;INF179K01XO5;INF179K01XP2;80.853;16-Sep-2026
+118988;HDFC Mid Cap Fund - IDCW Option - Direct Plan;Direct Plan;IDCW Option;INF179K01XO5;INF179K01XP2;81.495;17-Sep-2026
+118988;HDFC Mid Cap Fund - IDCW Option - Direct Plan;Direct Plan;IDCW Option;INF179K01XO5;INF179K01XP2;82.17;18-Sep-2026
+120620;ICICI Prudential Nifty 50 Index Fund - Direct Plan Cumulative Option;Direct Plan;Cumulative;INF109K012M7;;244.7406;15-Sep-2026
+120620;ICICI Prudential Nifty 50 Index Fund - Direct Plan Cumulative Option;Direct Plan;Cumulative;INF109K012M7;;245.7869;16-Sep-2026
+120620;ICICI Prudential Nifty 50 Index Fund - Direct Plan Cumulative Option;Direct Plan;Cumulative;INF109K012M7;;246.3466;17-Sep-2026
+120620;ICICI Prudential Nifty 50 Index Fund - Direct Plan Cumulative Option;Direct Plan;Cumulative;INF109K012M7;;247.1470;18-Sep-2026
+153964;Parag Parikh Flexi Cap Fund - Direct Plan - IDCW;Direct Plan;Monthly IDCW Payout;;INF879O01308;89.3125;15-Sep-2026
+153964;Parag Parikh Flexi Cap Fund - Direct Plan - IDCW;Direct Plan;Monthly IDCW Payout;;INF879O01308;89.4425;16-Sep-2026
+153964;Parag Parikh Flexi Cap Fund - Direct Plan - IDCW;Direct Plan;Monthly IDCW Payout;;INF879O01308;89.7169;17-Sep-2026
+153964;Parag Parikh Flexi Cap Fund - Direct Plan - IDCW;Direct Plan;Monthly IDCW Payout;;INF879O01308;89.8569;18-Sep-2026

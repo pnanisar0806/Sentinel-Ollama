@@ -911,7 +911,32 @@ reach `/recommendations`. `ExitCandidate` also carries no `amountPaise`. Phase 2
 supplies a size for *advisor* candidates; nothing covers persisting the deterministic
 engine's own exits.
 
-**4. ORPHAN — mutual funds have no advice path.** `mf_switch` is in the `recommendations`
+**4. ORPHAN — mutual funds have no advice path — PARTLY UNBLOCKED 2026-09-21, still
+blocked on data.** `mf_switch` is NOT built, and cannot be honestly: `rankMfs` scores
+consistency 40 / expense 20 / tenure 15 / aum 15 / style 10, and **four of those five
+have no column and no source anywhere in the schema**. Sixty of a hundred points would
+silently score 0, so every fund would rank on consistency alone.
+
+Done instead — the one component that was fixable:
+- `parseNavHistory` never worked. It split on COMMA and read columns 0,1,2; AMFI serves
+  the report SEMICOLON-delimited, eight columns, NAV at 6 and date at 7. Its fixture had
+  been hand-written to match the parser. Third such fixture found today.
+- `downloadHistory(schemeCode, …)` passed `&sc=`, which AMFI ignores — the full ~15MB
+  report comes down regardless. Replaced by `downloadNavHistory(from, to)`.
+- `pnpm backfill:navs` (`--months=30 --end=YYYY-MM`), chunked by month, resumable.
+
+**Owner input needed before `mf_switch` can exist:** a source for expense ratio, AUM,
+fund tenure and style drift. INDmoney's `get_mf_funds_details` may carry the first two —
+its MCP was down when this was checked.
+
+**Also latent:** AMFI matches on ISIN, which only the seed `MF:*` rows carry; the live
+`IND:*` MF rows have `isin = null`. Both sides share `canonical_id`, so NAVs land on
+instruments that per-account supersession has retired from `positions`. Nothing reads
+NAVs per instrument yet, so nothing is broken today — but MF ranking must resolve NAVs
+through `canonical_id`, not the raw instrument id.
+
+Original entry:
+**ORPHAN — mutual funds have no advice path.** `mf_switch` is in the `recommendations`
 kind CHECK and the `RecKind` union, and nothing constructs one. The engine ranks funds
 (consistency 40 / expense 20) and the ranking goes nowhere. MF is ~₹12L, the second
 largest asset class after EPF, and no phase covers acting on it.

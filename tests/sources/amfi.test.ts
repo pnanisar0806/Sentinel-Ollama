@@ -94,22 +94,53 @@ describe('parseNavText', () => {
   });
 });
 
+/**
+ * The fixture is a verbatim excerpt of AMFI's own historical NAV report for
+ * 15–18 Sep 2026, header untouched.
+ *
+ * It replaces a hand-written `Scheme Code,NAV,Date` CSV. AMFI serves the report
+ * SEMICOLON-delimited with eight columns, NAV at index 6 and date at 7, so the old
+ * parser returned nothing for the real file while its test stayed green — the fixture
+ * had been written to match the parser rather than the source.
+ */
 describe('parseNavHistory', () => {
-  it('parses historical NAV CSV', () => {
-    const csv = `Scheme Code,NAV,Date
-100001,185.50,10-Sep-2026
-100001,186.80,11-Sep-2026
-100002,52.40,10-Sep-2026
-100002,52.85,11-Sep-2026`;
-    
-    const rows = parseNavHistory(csv);
-    
-    expect(rows.length).toBe(4);
-    const firstRow = rows[0];
-    expect(firstRow).toBeDefined();
-    expect(firstRow!.schemeCode).toBe('100001');
-    expect(firstRow!.nav).toBe(185.50);
-    expect(firstRow!.date).toBe('10-Sep-2026');
+  const real = readFileSync(join(FIXTURE_DIR, 'nav_history_15-18SEP2026.txt'), 'utf8');
+
+  it('parses the report AMFI actually serves', () => {
+    const rows = parseNavHistory(real);
+    expect(rows.length).toBeGreaterThan(0);
+
+    const hdfc = rows.find((r) => r.isinDivReinvestment === 'INF179K01XP2' && r.date === '15-Sep-2026');
+    expect(hdfc).toBeDefined();
+    expect(hdfc!.nav).toBe(80.46);
+    expect(hdfc!.schemeCode).toBe('118988');
+  });
+
+  it('reads the NAV column, not a neighbouring one', () => {
+    const rows = parseNavHistory(real);
+    // Every NAV must be a price, never a scheme code or a fragment of a date.
+    for (const r of rows) {
+      expect(Number.isFinite(r.nav)).toBe(true);
+      expect(r.nav).toBeGreaterThan(0);
+      expect(r.nav).toBeLessThan(100_000);
+      expect(r.date).toMatch(/^[0-9]{2}-[A-Za-z]{3}-[0-9]{4}$/);
+    }
+  });
+
+  it('finds columns by header, since history and NAVAll order them differently', () => {
+    // History puts the ISINs AFTER Plan/Option; the daily file puts them second. A
+    // positional reader silently swaps scheme name and ISIN between the two.
+    const swapped = [
+      'Scheme Code;Net Asset Value;Date',
+      '100001;185.5;10-Sep-2026',
+    ].join('\n');
+    const [row] = parseNavHistory(swapped);
+    expect(row!.nav).toBe(185.5);
+    expect(row!.date).toBe('10-Sep-2026');
+  });
+
+  it('returns nothing when the header is absent, rather than guessing', () => {
+    expect(parseNavHistory('100001;185.5;10-Sep-2026')).toEqual([]);
   });
 });
 

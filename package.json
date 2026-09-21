@@ -21,7 +21,8 @@
     "screener:remind": "tsx --env-file-if-exists=.env src/jobs/screener-reminder.ts",
     "watchlist:propose": "tsx --env-file=.env src/jobs/watchlist-propose.ts",
     "backfill:isin": "tsx --env-file=.env src/jobs/backfill-isin.ts",
-    "backfill:prices": "tsx src/jobs/backfill-prices.ts"
+    "backfill:prices": "tsx src/jobs/backfill-prices.ts",
+    "backfill:navs": "tsx src/jobs/backfill-navs.ts"
   },
   "keywords": [],
   "author": "",

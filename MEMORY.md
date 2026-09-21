@@ -2389,3 +2389,49 @@ every model tried with its reason.
 2026-09-21 — the only one of the seven that has gone; the other six are live. **The paid
 `minimax/minimax-m3` slug was deliberately not substituted**: the pool is free by owner
 decision, and adding a billed model is the owner's call.
+
+
+## MF advice is blocked on data, not code (2026-09-21)
+
+`rankMfs` weights consistency 40 / expense 20 / tenure 15 / aum 15 / style 10. **Four of
+the five have no column anywhere in the schema and no ingestion source** — expense
+ratio, AUM, tenure and style drift. Building `mf_switch` on that would rank ~₹12L of
+funds on consistency alone while silently scoring 60 points as 0. It is deliberately not
+built. Owner input needed: a source for those four. INDmoney's `get_mf_funds_details`
+may carry expense ratio and AUM; its MCP was down when checked.
+
+`rankMfs` still has **zero production callers**.
+
+### AMFI history — two defects, fixed
+
+1. `parseNavHistory` split on COMMA and read columns 0, 1, 2 as code/NAV/date. AMFI
+   serves the historical report SEMICOLON-delimited with eight columns, NAV at index 6
+   and date at 7, so it returned nothing for every real file. Now header-driven, because
+   the historical report and the daily NAVAll.txt order their columns differently
+   (history puts the ISINs after Plan/Option) and a positional reader swaps them.
+2. `downloadHistory(schemeCode, …)` sent `&sc=<code>`, which AMFI ignores — verified, the
+   response is the full ~15MB report either way. Replaced by
+   `downloadNavHistory(from, to)`; callers filter via `ingestNavs`, which already
+   resolves ISIN and scheme code against `instruments`. Chunked by month for that reason,
+   not by fund.
+
+**Its fixture had been written to match the parser** (`Scheme Code,NAV,Date`), so the
+test passed while the parser had never read a real AMFI report. That is the **third**
+fabricated fixture found today, after the index bhavcopy one. Treat any remaining
+hand-written source fixture as suspect until checked against the live feed.
+
+`pnpm backfill:navs --months=30 --end=YYYY-MM`. Resumable: a month counts as held when
+every tracked MF instrument has a NAV in it. Verified live — 126 rows for 2026-08
+(21 sessions × 6 funds).
+
+### NAV/holding identity break — latent, not yet biting
+
+AMFI matches on ISIN and scheme code. Only the seed `MF:*` rows carry an ISIN; the live
+`IND:*` MF rows have `isin = null`. Both sides share `canonical_id` (`MF:3229` etc.), and
+per-account supersession retires the `MF:*` rows from `positions` — so NAVs accumulate
+on instruments no position uses. Nothing reads NAVs per instrument yet (only
+`staleness.ts`, and only for `max(as_of)`), so nothing is broken today. **Contract: MF
+NAV lookups must resolve through `canonical_id`, never the raw instrument id.**
+
+Confirmed while checking this: MF is NOT double counted. Live MF total is ₹11,96,695
+across six `IND:*` rows; the six `MF:*` seed rows are correctly superseded.
