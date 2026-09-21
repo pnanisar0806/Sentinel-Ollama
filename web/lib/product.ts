@@ -162,6 +162,22 @@ export const AREAS: Area[] = [
     ],
   },
   {
+    slug: 'funds',
+    name: 'Mutual funds',
+    stage: 'live',
+    what: 'Every fund held, scored on consistency, cost and size.',
+    works: [
+      'Consistency over rolling 12-MONTH windows, downsampled from daily NAVs',
+      'Cost and size from INDmoney, with AUM in rupees crore verified against known fund sizes',
+      'A fund with too little NAV history has its consistency withheld rather than scored 0 silently',
+    ],
+    missing: [
+      'Fund tenure and style drift have no source — 25 of the 100 points are unreachable, so 75 is full marks',
+      'Size scores the same for every fund held: the AUM ramp tops out at 2,000 crore and all six are far above it',
+      'No mf_switch recommendation — a switch needs a candidate universe, which is an owner decision',
+    ],
+  },
+  {
     slug: 'scoring',
     name: 'Scoring & calibration',
     stage: 'live',

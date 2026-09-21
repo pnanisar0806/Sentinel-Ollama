@@ -20,6 +20,7 @@ import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
+import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
@@ -614,4 +615,15 @@ export async function getScoring(): Promise<{ calibration: Calibration; evaluate
  */
 export async function getWeeklyReports(limit = 12): Promise<ReportRunRecord[]> {
   return loadReportRuns(await db(), limit);
+}
+
+/**
+ * The mutual-fund ranking.
+ *
+ * `rankMfs` had no production caller at all, so ~₹12L of MF produced no engine output.
+ * This is the ranking, not a switch recommendation: a switch needs somewhere to switch
+ * TO, and the only funds in the system are the six held.
+ */
+export async function getMfRanking(): Promise<MfRankingResult> {
+  return rankHeldFunds(await db(), new Date().toISOString().slice(0, 10));
 }

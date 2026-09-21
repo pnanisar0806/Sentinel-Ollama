@@ -46,6 +46,7 @@ const GROUPS: {
       // not. Flipping this to 'live' would promise a surface that renders nothing.
       { href: '/narrative', label: 'Narrative', stage: 'live' },
       { href: '/scoring', label: 'Scoring', stage: 'live' },
+      { href: '/funds', label: 'Funds', stage: 'live' },
     ],
   },
   {
