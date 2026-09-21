@@ -78,17 +78,30 @@ export async function heldFunds(db: Db, positions?: Position[]): Promise<HeldFun
   const held = (positions ?? await loadPositions(db)).filter((p) => p.kind === 'MF');
   if (held.length === 0) return [];
 
-  const links = await db.query<{ id: string; canonical_id: string | null; sibling: string | null }>(
+  const links = await db.query<{
+    id: string; canonical_id: string | null; sibling: string | null;
+    amfi_category: string | null; sibling_category: string | null;
+  }>(
     `select i.id, i.canonical_id,
             (select s.id from instruments s
               where s.canonical_id = i.canonical_id and s.id <> i.id
                 and exists (select 1 from navs n where n.instrument_id = s.id)
-              limit 1) as sibling
+              limit 1) as sibling,
+            i.metadata->>'amfiCategory' as amfi_category,
+            (select s.metadata->>'amfiCategory' from instruments s
+              where s.canonical_id = i.canonical_id and s.id <> i.id
+                and s.metadata->>'amfiCategory' is not null
+              limit 1) as sibling_category
        from instruments i
       where i.id = any($1::text[])`,
     [held.map((p) => p.instrumentId)],
   );
   const siblingOf = new Map(links.map((l) => [l.id, l.sibling]));
+  // AMFI classifies every scheme; INDmoney only the ones it has been asked about. The
+  // category may be stamped on either side of the MF:*/IND:* pair.
+  const amfiCategoryOf = new Map(
+    links.map((l) => [l.id, l.amfi_category ?? l.sibling_category]),
+  );
   const metadata = await loadMfMetadata(db);
 
   return held.map((p) => {
@@ -100,7 +113,8 @@ export async function heldFunds(db: Db, positions?: Position[]): Promise<HeldFun
       name: p.name,
       navInstrumentId,
       valuePaise: p.valuePaise,
-      category: metadata.get(p.instrumentId)?.category
+      category: amfiCategoryOf.get(p.instrumentId)
+        ?? metadata.get(p.instrumentId)?.category
         ?? metadata.get(navInstrumentId)?.category ?? null,
     };
   });

@@ -22,7 +22,8 @@
     "watchlist:propose": "tsx --env-file=.env src/jobs/watchlist-propose.ts",
     "backfill:isin": "tsx --env-file=.env src/jobs/backfill-isin.ts",
     "backfill:prices": "tsx src/jobs/backfill-prices.ts",
-    "backfill:navs": "tsx src/jobs/backfill-navs.ts"
+    "backfill:navs": "tsx src/jobs/backfill-navs.ts",
+    "mf:universe": "tsx src/jobs/build-mf-universe.ts"
   },
   "keywords": [],
   "author": "",

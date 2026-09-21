@@ -21,6 +21,7 @@ import { listRedemptionsUntil, type Redemption } from '../../src/domain/redempti
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
+import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src/domain/mf-switch.js';
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
@@ -640,4 +641,19 @@ export async function getWeeklyReports(limit = 12): Promise<ReportRunRecord[]> {
  */
 export async function getMfRanking(): Promise<MfRankingResult> {
   return rankHeldFunds(await db(), new Date().toISOString().slice(0, 10));
+}
+
+/**
+ * Each held fund against its whole AMFI category.
+ *
+ * "No switch" is the expected answer and a first-class one: IPS §3.7's twelve-month
+ * hold is a floor, and a switch has to be worth realising tax for.
+ */
+export async function getMfSwitches(): Promise<{
+  switches: SwitchCandidate[]; margin: number;
+}> {
+  return {
+    switches: await evaluateSwitches(await db(), new Date().toISOString().slice(0, 10)),
+    margin: SWITCH_MARGIN,
+  };
 }

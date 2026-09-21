@@ -273,3 +273,80 @@ export async function ingestNavs(
 
   return { inserted, updated: 0, unknownSchemes };
 }
+
+/**
+ * One scheme in AMFI's daily file, with the SEBI category it is filed under.
+ *
+ * `NAVAll.txt` interleaves two kinds of heading line among the data: a scheme-type
+ * heading (`Open Ended Schemes(Equity Scheme - Mid Cap Fund)`) and an AMC name
+ * (`Axis Mutual Fund`). Every data row belongs to the last scheme-type heading above
+ * it, which is how the whole market gets classified without a paid source.
+ */
+export interface UniverseRow {
+  schemeCode: string;
+  isin: string | null;
+  schemeName: string;
+  plan: string;
+  option: string;
+  nav: number;
+  /** Canonical, e.g. `Equity Scheme - Mid Cap Fund`. */
+  category: string;
+}
+
+/**
+ * AMFI writes the same category two ways — `Equity Scheme - Mid Cap Fund` and
+ * `Equity Schemes - Mid Cap Fund` both appear in one file, splitting Mid Cap into a
+ * 20-fund group and a 13-fund group. Normalising is what makes a category a cohort.
+ */
+export function canonicalCategory(heading: string): string {
+  const inner = heading.replace(/^[^(]*[(]/, '').replace(/[)]\s*$/, '').trim();
+  return inner.replace(/Schemes\b/gi, 'Scheme').replace(/\s+/g, ' ').trim();
+}
+
+/** Every scheme in the daily file, with its category. */
+export function parseNavUniverse(text: string): UniverseRow[] {
+  const lines = text.split('\n').map((l) => l.replace(/\r$/, ''));
+  const rows: UniverseRow[] = [];
+  let category = '';
+
+  for (const line of lines) {
+    if (line.trim() === '') continue;
+    if (!line.includes(';')) {
+      // A scheme-type heading carries the bracketed category; an AMC name does not.
+      if (/Schemes?\s*[(]/.test(line)) category = canonicalCategory(line);
+      continue;
+    }
+    const p = line.split(';');
+    if (p.length < 8 || p[0] === 'Scheme Code') continue;
+
+    // The current layout is Code;ISIN;ISIN;Name;Plan;Option;NAV;Date. The legacy one put
+    // NAV at index 4 and carried no Plan or Option, so it cannot be classified this way.
+    const nav = parseFloat(p[6] ?? '');
+    if (!Number.isFinite(nav) || nav <= 0) continue;
+
+    rows.push({
+      schemeCode: (p[0] ?? '').trim(),
+      isin: normalizeIsin(p[1]) ?? normalizeIsin(p[2]),
+      schemeName: (p[3] ?? '').trim(),
+      plan: (p[4] ?? '').trim(),
+      option: (p[5] ?? '').trim(),
+      nav,
+      category,
+    });
+  }
+  return rows;
+}
+
+/**
+ * The investable slice: Direct plan, growth option.
+ *
+ * Regular plans carry a distributor trail the owner does not pay, and an IDCW option is
+ * a different instrument with a different NAV series — recommending a switch into one
+ * because it looked cheap would be recommending the wrong security.
+ *
+ * `Cumulative` is ICICI's word for Growth on its index funds, and excluding it would
+ * drop the owner's own `MF:ICICI-NIFTY50-IDX` from its cohort.
+ */
+export function isDirectGrowth(r: UniverseRow): boolean {
+  return /direct/i.test(r.plan) && /growth|cumulative/i.test(r.option);
+}

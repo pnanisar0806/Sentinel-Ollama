@@ -1,4 +1,4 @@
-import { getMfRanking } from '@/lib/data';
+import { getMfRanking, getMfSwitches } from '@/lib/data';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
 
@@ -6,6 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function FundsPage() {
   const { ranked, caveats } = await getMfRanking();
+  const { switches, margin } = await getMfSwitches();
   const total = ranked.reduce((a, r) => a + r.valuePaise, 0n);
 
   return (
@@ -63,6 +64,36 @@ export default async function FundsPage() {
             />
           </Card>
 
+          <Card
+            title="Switch check"
+            aside={`${switches.filter((s) => s.challengerId !== null).length} of ${switches.length} clear the bar`}
+          >
+            <p className="muted">
+              Each fund against every Direct growth fund AMFI lists in its category. A
+              challenger must beat the holding by {margin} points on a{' '}
+              {MAX_ACHIEVABLE_COMPOSITE}-point scale before a switch is proposed — a
+              margin a month of NAV noise can cross is not a reason to realise tax.
+            </p>
+            <DataTable
+              rows={switches.map((s) => ({ key: s.heldInstrumentId, s }))}
+              cols={[
+                { label: 'Fund', value: ({ s }) => s.heldName },
+                { label: 'Category', value: ({ s }) => s.category },
+                { label: 'Cohort', value: ({ s }) => (s.cohortSize === 0
+                  ? <span className="dim">none comparable</span> : s.cohortSize) },
+                { label: 'Rank', value: ({ s }) => (s.cohortSize === 0
+                  ? '—' : `${s.heldRank} of ${s.cohortSize + 1}`) },
+                {
+                  label: 'Verdict',
+                  value: ({ s }) => (s.challengerId === null
+                    ? <Badge tone="green">HOLD</Badge>
+                    : <Badge tone="amber">SWITCH</Badge>),
+                },
+                { label: 'Why', value: ({ s }) => <span className="dim">{s.reason}</span> },
+              ]}
+            />
+          </Card>
+
           <Card title="What this score does not include">
             <ul className="notyet-points">
               <li>
@@ -76,10 +107,10 @@ export default async function FundsPage() {
                 one of the two INDmoney facts that separates them.
               </li>
               <li>
-                <strong>This is a ranking, not a switch recommendation.</strong> A switch needs
-                somewhere to switch to, and the only funds on record are the ones held —
-                five of them alone in their category. Choosing a candidate universe is an
-                owner decision, so no <span className="mono">mf_switch</span> is produced.
+                <strong>Index funds are not switch-checked.</strong> AMFI&rsquo;s category
+                says a fund is an index fund, not which index it tracks, so a Nifty 50
+                tracker and a smallcap tracker would be ranked against each other. Their
+                peer set needs same-index matching first.
               </li>
             </ul>
           </Card>
