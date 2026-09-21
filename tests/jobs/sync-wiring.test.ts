@@ -96,7 +96,12 @@ describe('the OAuth INDmoney path is reachable from the entrypoint', () => {
     // a second OAuth path. It is read-only and names no order surface. The guard is now
     // an exhaustive allowlist rather than a single literal, so it still fails on any
     // addition — including a future read-only one, which should be a conscious edit too.
-    const ALLOWED = ['networth_holdings', 'networth_snapshot'];
+    //
+    // Widened again, deliberately, on 2026-09-21: `get_mf_funds_details` carries the
+    // expense ratio and AUM, which are 35 of `rankMfs`'s 100 points and exist in no
+    // other source. It reads one fund's published facts, names no order surface and
+    // takes no amount.
+    const ALLOWED = ['networth_holdings', 'networth_snapshot', 'get_mf_funds_details'];
 
     const match = source.match(/allowedTools:\s*\[([^\]]*)\]/);
     expect(match, 'allowedTools literal not found in sync.ts').not.toBeNull();

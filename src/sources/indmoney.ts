@@ -332,3 +332,75 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
 
   return [...byKey.values()];
 }
+
+/**
+ * Fund metadata for a set of INDmoney fund ids.
+ *
+ * Shape captured from a real `get_mf_funds_details` response on 2026-09-21:
+ * `{ success, data: [ { fund_id, data: { fund_detail: { aum, expense_ratio, category,
+ * benchmark_name, ... } } } ] }`. `aum` is in rupees crore and `expense_ratio` is a
+ * percent — both verified against known fund sizes rather than inferred from the names.
+ *
+ * A fund the tool has nothing for is skipped, not defaulted: a missing expense ratio is
+ * NULL, and scoring it as 0 would read as a free fund and rank it top.
+ */
+export interface RemoteMfDetail {
+  fundId: string;
+  expenseRatioPct: number | null;
+  aumCrore: number | null;
+  category: string | null;
+  benchmarkName: string | null;
+}
+
+export async function fetchMfDetails(
+  client: McpClient,
+  fundIds: readonly string[],
+): Promise<RemoteMfDetail[]> {
+  if (fundIds.length === 0) return [];
+  const envelope = await client.callTool<{ result?: string }>(
+    'get_mf_funds_details', { fund_ids: fundIds.join(',') },
+  );
+  if (typeof envelope?.result !== 'string') {
+    throw new Error(
+      'could not parse INDmoney get_mf_funds_details payload — the tool contract '
+      + 'changed; recapture the fixture before trusting this sync',
+    );
+  }
+
+  const payload = JSON.parse(envelope.result) as {
+    success?: boolean;
+    error?: string;
+    message?: string;
+    data?: { fund_id: number | string; data?: { fund_detail?: Record<string, unknown> } }[];
+  };
+  if (payload.error) {
+    throw new Error(
+      `INDmoney refused get_mf_funds_details: ${payload.error} — ${payload.message ?? '(no message)'}`,
+    );
+  }
+  if (!Array.isArray(payload.data)) {
+    throw new Error(
+      'could not parse INDmoney get_mf_funds_details payload — the tool contract '
+      + 'changed; recapture the fixture before trusting this sync',
+    );
+  }
+
+  const num = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+
+  const out: RemoteMfDetail[] = [];
+  for (const row of payload.data) {
+    const d = row.data?.fund_detail;
+    if (d === undefined) continue;
+    out.push({
+      fundId: String(row.fund_id),
+      expenseRatioPct: num(d['expense_ratio']),
+      aumCrore: num(d['aum']),
+      category: str(d['category']),
+      benchmarkName: str(d['benchmark_name']),
+    });
+  }
+  return out;
+}

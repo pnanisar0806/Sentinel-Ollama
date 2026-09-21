@@ -9,6 +9,10 @@ import { FileIndmoneySource, RemoteIndmoneySource } from '../sources/indmoney.js
 import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
+import { fetchMfDetails } from '../sources/indmoney.js';
+import {
+  aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
+} from '../domain/mf-metadata.js';
 import { ensureAccessToken, discoverMetadata, loadClientSecret, ReauthRequired } from '../sources/oauth.js';
 import { fetchUsdInr } from '../sources/fx.js';
 import { rateMicros } from '../money/fx.js';
@@ -207,7 +211,7 @@ export async function indmoneySource(
       // this client rather than a second OAuth path. Every addition to this list is a
       // deliberate widening of what the process can invoke: read-only tools only, and
       // never anything that could place, modify or cancel an order.
-      allowedTools: ['networth_holdings', 'networth_snapshot'],
+      allowedTools: ['networth_holdings', 'networth_snapshot', 'get_mf_funds_details'],
       getToken: () => ensureAccessToken(db, 'indmoney', {
         md, clientId: registration.client_id, key, allowedScopes: INDMONEY_SCOPES,
         ...(clientSecret ? { clientSecret } : {}),
@@ -265,6 +269,38 @@ if (isMainModule(import.meta.url)) {
       console.log(`balances ${asOf}: ${inserted} new of ${rows.length} (0 new = already captured today)`);
     } catch (error) {
       console.error(`balance capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // MF metadata. Expense ratio and AUM are 35 of `rankMfs`'s 100 points and exist
+  // nowhere else; tenure and style drift INDmoney does not carry and they stay absent.
+  // Like the balance capture, a failure here must not fail the portfolio sync.
+  if (indmoney) {
+    try {
+      const funds = await db.query<{ id: string; fund_id: string }>(
+        `select id, replace(id, 'IND:', '') as fund_id from instruments
+          where kind = 'MF' and id like 'IND:%'`,
+      );
+      const details = await fetchMfDetails(indmoney.client, funds.map((f) => f.fund_id));
+      const byFund = new Map(funds.map((f) => [f.fund_id, f.id]));
+      const asOf = new Date().toISOString().slice(0, 10);
+      const rows: MfMetadata[] = [];
+      for (const d of details) {
+        const instrumentId = byFund.get(d.fundId);
+        if (instrumentId === undefined) continue;
+        rows.push({
+          instrumentId,
+          asOf,
+          expenseRatioBps: d.expenseRatioPct === null ? null : expensePctToBps(d.expenseRatioPct),
+          aumPaise: d.aumCrore === null ? null : aumCroreToPaise(d.aumCrore),
+          category: d.category,
+          benchmarkName: d.benchmarkName,
+        });
+      }
+      const inserted = await persistMfMetadata(db, rows);
+      console.log(`mf metadata ${asOf}: ${inserted} new of ${rows.length} (0 new = already captured today)`);
+    } catch (error) {
+      console.error(`mf metadata capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
