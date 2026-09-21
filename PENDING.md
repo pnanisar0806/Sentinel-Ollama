@@ -861,9 +861,23 @@ be honest about, not as work. Phase 3 is Kite execution, human-in-loop unlock, d
 bridge, tax engine v1, breakers armed and maturity routing. Everything below falls
 between the two and will never be built unless it is tracked here.
 
+### Owner decisions taken 2026-09-21
+
+- Bank statements **not wanted** — surplus trend accumulates from now. Item 6 closed as
+  "waiting", not blocked on the owner.
+- **No paid model.** Six free vision models in the chain, all live.
+- Outstanding owner ask is now exactly one: **a screener export with the Industry
+  column.**
+
 ### New, found while verifying item 2 (2026-09-21)
 
-**A. Valuation scores 0 for every candidate — 30 of 100 points.** With prices backfilled
+**A. Satellite still cannot fire — 68.65 against a 70 threshold.** `fit` was two stubs
+and is now measured (`satelliteFit`); that took the best candidate from 58.65 to 68.65,
+band NONE to WATCH. The last gap is the valuation *relative* leg, which needs sector
+data. Corrected from the earlier entry: valuation has two halves of 15, and the
+`vsGsec` half already works for 20 of 41 names.
+
+**A-old (superseded). Valuation scores 0 for every candidate — 30 of 100 points.** With prices backfilled
 the best composite is 58.65 (`NSE:SIEMENS`), up from 39.8, but MEDIUM is 70 so the
 satellite recommender **still cannot fire**. The gap is the valuation leg: 39 of the 73
 watchlist instruments have `sector = NULL`, and of the sectors that exist several have

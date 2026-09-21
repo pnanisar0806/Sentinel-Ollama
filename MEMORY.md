@@ -2520,3 +2520,76 @@ portfolio fact rather than a data gap.
 **2025-10-02 (Gandhi Jayanti) is missing from the `holidays` table** — the backfill
 reported it as "served nothing". Harmless for the backfill, which records an empty day,
 but `lastCompletedTradingDay` will treat it as a session.
+
+
+## Owner decisions, 2026-09-21
+
+- **Bank statements: not wanted.** Surplus trend accumulates from now. `balance_snapshots`
+  holds one day (2026-09-20); the capture is wired into `sync` and runs on cron. Do not
+  ask for historical statements again.
+- **No paid LLM model.** Six free vision models remain in the chain and work. Three more
+  free ones exist unused (`nex-n2.5-pro`, `nex-n2.5-mini`, `qwen3.8-27b`); `ling-3.0-flash-vl`
+  stays excluded by the earlier owner decision.
+- **Still wanted from the owner:** a screener export carrying the **Industry** column.
+  That is the only outstanding data ask.
+
+## Satellite fit was two stubs, fixed 2026-09-21
+
+`fit` is 20 of the composite's 100 points. `report.ts` passed
+`headroomPaise: 0n` and `sectorWeightPct: {}` as literals, so the headroom half scored 0
+for every candidate and the balance half scored a full 10 for every candidate, on every
+run — one pinned to the floor, one to the ceiling, neither saying anything about the
+name. `satelliteFit(positions)` in `allocation.ts` derives both.
+
+Satellite = agent-recommended **direct stocks** (`kind === 'EQUITY'`), capped at 25% of
+equity per IPS §3.4. The employer RSU counts toward equity but never toward the bucket:
+it is neither agent-recommended nor sellable at will, and counting it would consume the
+whole bucket on a position the advisor did not choose. A sectorless position is excluded
+from the weights rather than pooled into an "unknown" bucket that would compete for the
+sector cap.
+
+Live result: headroom ₹75,032; best candidate 58.65 → **68.65, band NONE → WATCH**.
+MEDIUM is 70, so **the satellite recommender still does not fire.**
+
+### What it would take to reach 70 (measured, `GSEC_YIELD_PCT=7.0`)
+
+| scenario | best | names ≥70 |
+|---|---|---|
+| before today | 39.8 | 0 |
+| prices backfilled | 58.65 | 0 |
+| + real fit | 68.65 | 0 |
+| + sector leg at its theoretical max | — | 16 |
+
+Valuation has **two** halves of 15. `vsGsec` needs only P/E and already works — 20 of
+41 quality-passed names score above 0, max 19.39. A name scoring 0 there is usually
+expensive against a 7% risk-free rate, which is a verdict and not a gap. Only the
+`vsSector` half needs sector data. Sector weights currently see only `Technology`
+(19.7%), so real sector data will LOWER some scores as well as raise others.
+
+## MF metadata from INDmoney, 2026-09-21
+
+`mf_metadata` (migration 0022, append-only, dated). `get_mf_funds_details` gives
+`expense_ratio` (percent) and `aum` (**rupees crore** — verified against known fund
+sizes, not inferred). Captured in `sync`; a failure there does not fail the portfolio
+sync.
+
+**Only expense changes the MF ranking.** `rankMfs` ramps AUM 100 → 2,000 crore and every
+held fund is 17,254–148,429 crore, so all six score the full 15. Expense spreads 25bps
+(ICICI index) to 102bps (ICICI large cap) and does separate them.
+
+**Tenure and style drift stay NULL, deliberately.** MF scoring applies **no band** —
+`bandOf` is satellite-only, `rankMfs` returns only `composite` and `rank`. A component
+null for every fund scores 0 for every fund and cannot change the ordering. Proxying
+tenure from the earliest AMFI NAV would date some funds and not others, which would
+distort it. **Do not add a partial proxy for either.** Max achievable MF composite is
+therefore 75, not 100 — label it wherever it is displayed.
+
+`loadMfMetadata` keys results under both the instrument id and its `canonical_id`.
+
+## /import: model replies are fenced unpredictably
+
+`parseModelJson` takes the first fenced block wherever it sits, falling back to the
+trimmed content. The old strip anchored on `^` + fence, so a reply with a leading space
+produced `Unexpected token '`', " ```json { "... is not valid JSON` and the extraction
+failed outright. Six free models, six habits — some lead with whitespace, some add prose
+around the block, some omit the language tag.
