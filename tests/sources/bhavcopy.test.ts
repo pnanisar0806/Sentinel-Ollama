@@ -146,41 +146,53 @@ describe('parseEquityMaster', () => {
   });
 });
 
+/**
+ * The fixture is a verbatim excerpt of NSE's own
+ * `ind_close_all_18092026.csv` — header untouched, rows unedited.
+ *
+ * It replaces a hand-written one whose header said `Close` and whose names were
+ * `NIFTY 50`. NSE writes `Closing Index Value` and `Nifty 50`. The fixture had been
+ * built to match the parser instead of the source, so these tests passed green while
+ * `parseIndexBhavcopy` returned [] for every real file NSE served — and
+ * `index_prices_eod` was empty from the first sync onward.
+ */
 describe('parseIndexBhavcopy', () => {
-  it('parses index fixture and returns tracked indices', () => {
-    const csv = readFileSync(join(FIXTURE_DIR, 'index_11SEP2026.csv'), 'utf8');
-    const rows = parseIndexBhavcopy(csv, '2026-09-11');
-    
+  it('parses the file NSE actually serves and returns tracked indices', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'ind_close_all_18092026.csv'), 'utf8');
+    const rows = parseIndexBhavcopy(csv, '2026-09-18');
+
     expect(rows.length).toBeGreaterThan(0);
-    
-    // NIFTY 500 should be tracked
+
+    // Every consumer queries the uppercase literal, so the parser must normalise:
+    // scoring.ts and sell-triggers.ts both default to `'NIFTY 500'`.
     const nifty500 = rows.find(r => r.seriesCode === 'NIFTY 500');
     expect(nifty500).toBeDefined();
-    expect(nifty500!.close).toBe(24920.75);
-    
-    // NIFTY 50
+    expect(nifty500!.close).toBe(22840.55);
+
     const nifty50 = rows.find(r => r.seriesCode === 'NIFTY 50');
     expect(nifty50).toBeDefined();
-    expect(nifty50!.close).toBe(25580.50);
-    
-    // NIFTY NEXT 50
+    expect(nifty50!.close).toBe(23346.4);
+
     const niftyNext50 = rows.find(r => r.seriesCode === 'NIFTY NEXT 50');
     expect(niftyNext50).toBeDefined();
-    expect(niftyNext50!.close).toBe(75050.25);
-    
-    // Only tracked indices included
-    const untracked = rows.find(r => r.seriesCode === 'NIFTY BANK');
-    expect(untracked).toBeUndefined();
+    expect(niftyNext50!.close).toBe(72025.4);
+
+    // Nifty Bank is present in the file and must not be tracked.
+    expect(rows.find(r => r.seriesCode === 'NIFTY BANK')).toBeUndefined();
   });
 
-  it('mutation check: index close from fixture', () => {
-    const csv = readFileSync(join(FIXTURE_DIR, 'index_11SEP2026.csv'), 'utf8');
-    const rows = parseIndexBhavcopy(csv, '2026-09-11');
-    
-    const nifty500 = rows.find(r => r.seriesCode === 'NIFTY 500');
-    expect(nifty500).toBeDefined();
-    expect(nifty500!.close).toBe(24920.75);
-    expect(nifty500!.close).not.toBe(24800.00); // wrong value
+  it('reads the close column, not the open', () => {
+    const csv = readFileSync(join(FIXTURE_DIR, 'ind_close_all_18092026.csv'), 'utf8');
+    const nifty500 = parseIndexBhavcopy(csv, '2026-09-18')
+      .find(r => r.seriesCode === 'NIFTY 500');
+    expect(nifty500!.close).toBe(22840.55);
+    expect(nifty500!.close).not.toBe(22709.7);  // open
+    expect(nifty500!.close).not.toBe(22860.25); // high
+  });
+
+  it('returns nothing when the close column is missing, rather than guessing', () => {
+    const noClose = ['Index Name,Index Date,Open Index Value', 'Nifty 500,18-09-2026,1'].join('\n');
+    expect(parseIndexBhavcopy(noClose, '2026-09-18')).toEqual([]);
   });
 });
 
@@ -189,7 +201,7 @@ describe('ingestPrices', () => {
     const equityCsv = readFileSync(join(FIXTURE_DIR, 'cm11SEP2026bhav.csv'), 'utf8');
     const equityRows = parseEquityBhavcopy(equityCsv, '2026-09-11');
     
-    const indexCsv = readFileSync(join(FIXTURE_DIR, 'index_11SEP2026.csv'), 'utf8');
+    const indexCsv = readFileSync(join(FIXTURE_DIR, 'ind_close_all_18092026.csv'), 'utf8');
     const indexRows = parseIndexBhavcopy(indexCsv, '2026-09-11');
     
     const result = await ingestPrices(db, equityRows, indexRows, '2026-09-11T17:30:00+05:30');
@@ -220,7 +232,7 @@ describe('ingestPrices', () => {
     const equityCsv = readFileSync(join(FIXTURE_DIR, 'cm11SEP2026bhav.csv'), 'utf8');
     const equityRows = parseEquityBhavcopy(equityCsv, '2026-09-11');
     
-    const indexCsv = readFileSync(join(FIXTURE_DIR, 'index_11SEP2026.csv'), 'utf8');
+    const indexCsv = readFileSync(join(FIXTURE_DIR, 'ind_close_all_18092026.csv'), 'utf8');
     const indexRows = parseIndexBhavcopy(indexCsv, '2026-09-11');
     
     // First ingest

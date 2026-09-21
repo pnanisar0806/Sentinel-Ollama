@@ -2301,3 +2301,38 @@ through `checkPortfolioRails`, which the digest and `/rails` both call.
 
 **Not done:** `getTacticalUsedThisMonth` is still a `0n` stub (`order_intents` has no
 amount column). Freeze, breaker and paper mode still have no caller in `orders.ts`.
+
+
+## Index prices — three silent defects, fixed 2026-09-21
+
+`index_prices_eod` was empty because `downloadIndexSeries` had never once returned a
+row, not because nobody had backfilled. All three failures were silent:
+
+1. **Wrong URL.** `buildIndexUrl` pointed at
+   `archives.nseindia.com/content/historical/EQUITIES/<yyyy>/<MMM>/ind<DDMMMYYYY>.zip`.
+   NSE does not serve that and never did. The real file is
+   `nsearchives.nseindia.com/content/indices/ind_close_all_<DDMMYYYY>.csv` — a plain
+   CSV, not a zip. `downloadIndexSeries` swallows a 404 as an empty day, so every sync
+   since the first reported success.
+2. **Wrong column.** The parser looked up `headers.indexOf('close')`. NSE's header is
+   `Closing Index Value`, so `closeIdx` was -1 and the parser returned `[]` even when
+   handed the right file.
+3. **Wrong casing.** It stored the file's own `Nifty 500`, while `scoring.ts`,
+   `engine.ts` and `sell-triggers.ts` all query `series_code = 'NIFTY 500'`. Rows would
+   have matched nothing. `seriesCode` is now uppercased.
+
+**The fixture had been written to match the parser, not the source.** `index_11SEP2026.csv`
+carried a `Close` header and `NIFTY 50` names — neither of which NSE emits — so the
+tests were green throughout. Replaced by `ind_close_all_18092026.csv`, a verbatim NSE
+excerpt. Any future bhavcopy fixture must be a real excerpt for the same reason.
+
+Verified live: equity and index both download for 2026-09-18, 2026-03-12 and
+2025-11-14; 8 tracked index series per day, NIFTY 500 close 22840.55 on 2026-09-18.
+
+**`pnpm backfill:prices`** (`src/jobs/backfill-prices.ts`) drives the existing
+downloaders over past trading days — `--days=260` (a year, enough for the 200DMA),
+`--end=YYYY-MM-DD`. Resumable: a date is skipped only when it has rows in **both**
+tables, since equity-without-index is exactly the state the tables were found in.
+`as_of` is stamped with the session, not the run, so a backfill alone cannot make FR-31
+read a dead feed as fresh. **Not yet run against production.**
+

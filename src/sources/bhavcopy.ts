@@ -13,7 +13,7 @@ class SourceError extends Error {
 }
 
 const NSE_EQUITY_BASE = 'https://archives.nseindia.com/content/historical/EQUITIES';
-const NSE_INDEX_BASE = 'https://archives.nseindia.com/content/historical/EQUITIES'; // indices also under EQUITIES
+const NSE_INDEX_BASE = 'https://nsearchives.nseindia.com/content/indices';
 const NSE_FULL_MARKET_BASE = 'https://nsearchives.nseindia.com/products/content';
 const NSE_MASTER_BASE = 'https://nsearchives.nseindia.com/content/equities';
 
@@ -61,9 +61,18 @@ function buildEquityUrl(date: Date): string {
   return `${NSE_EQUITY_BASE}/${year}/${month}/cm${day}${month}${year}bhav.csv.zip`;
 }
 
+/**
+ * ind_close_all_<DDMMYYYY>.csv — the all-index close file.
+ *
+ * This pointed at `.../historical/EQUITIES/<yyyy>/<MMM>/ind<DDMMMYYYY>.zip`, which NSE
+ * does not serve and never did on that path: every request 404'd, `downloadIndexSeries`
+ * swallows a 404 as an empty day, and so `index_prices_eod` stayed empty from the first
+ * sync onward. Every relative-strength and trend number reads that table, which is why
+ * the satellite composite scored 0 on trend for every name.
+ */
 function buildIndexUrl(date: Date): string {
-  const { year, month, day } = formatNseDate(date);
-  return `${NSE_INDEX_BASE}/${year}/${month}/ind${day}${month}${year}.zip`;
+  const { year, month, day } = formatNseDateNumeric(date);
+  return `${NSE_INDEX_BASE}/ind_close_all_${day}${month}${year}.csv`;
 }
 
 /** sec_bhavdata_full_<DDMMYYYY>.csv — the whole-market file (SYMBOL/SERIES, no ISIN). */
@@ -213,8 +222,9 @@ export async function downloadIndexSeries(dateIso: string): Promise<{ rows: Inde
     date: dateIso, totalRows: 0, inserted: 0, updated: 0, unknownSymbols: [], errors: [],
   };
   try {
+    // Plain CSV, not a zip — the old URL's `.zip` was part of the same wrong guess.
     const response = await fetchWithRetry(buildIndexUrl(new Date(`${dateIso}T00:00:00Z`)));
-    const rows = parseIndexBhavcopy(unzipFirstEntry(Buffer.from(await response.arrayBuffer())), dateIso);
+    const rows = parseIndexBhavcopy(await response.text(), dateIso);
     report.totalRows = rows.length;
     return { rows, report };
   } catch (e) {
@@ -402,9 +412,13 @@ export function parseIndexBhavcopy(csvText: string, tradeDate: string): IndexBha
   const headers = headerRow.map(h => h.trim().toLowerCase());
   const rows: IndexBhavcopyRow[] = [];
   
-  // Index bhavcopy columns: Index Name, Index Date, Open, High, Low, Close, ...
+  // Real columns: Index Name, Index Date, Open Index Value, High Index Value,
+  // Low Index Value, Closing Index Value, ... The close was looked up as an exact
+  // `'close'`, which NSE has never used, so this returned [] for every real file. The
+  // fixture that made the tests pass had been written to match the parser rather than
+  // the source.
   const nameIdx = headers.findIndex(h => h.includes('index') && h.includes('name'));
-  const closeIdx = headers.indexOf('close');
+  const closeIdx = headers.findIndex(h => h === 'close' || h.startsWith('closing'));
   
   if (nameIdx === -1 || closeIdx === -1) return [];
   
@@ -423,7 +437,10 @@ export function parseIndexBhavcopy(csvText: string, tradeDate: string): IndexBha
     if (!trackedIndices.some(idx => name.toUpperCase().includes(idx.toUpperCase()))) continue;
     
     rows.push({
-      seriesCode: name,
+      // NSE writes 'Nifty 500'; every consumer queries `series_code = 'NIFTY 500'`
+      // (scoring.ts, engine.ts, sell-triggers.ts all default to that literal). Storing
+      // the file's own casing would have matched nothing even once the rows arrived.
+      seriesCode: name.toUpperCase(),
       close,
       tradeDate,
     });

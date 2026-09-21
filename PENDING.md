@@ -877,7 +877,15 @@ Still open from this item, deliberately not done here:
 - `RAIL_CONSTRAINTS` in `rails.ts` is now dead — nothing reads it. Left in place; deleting
   pre-existing dead code is a separate call.
 
-**2. ORPHAN — price history depth and the empty `index_prices_eod`.** `prices_eod` holds
+**2. ~~ORPHAN — price history depth and the empty `index_prices_eod`~~ — ROOT CAUSE FIXED
+2026-09-21, backfill still to run.** The index table was not empty for want of a
+backfill: `downloadIndexSeries` had never worked. Three silent defects, see MEMORY.md
+§ Index prices. `pnpm backfill:prices` now exists (`--days=260 --end=YYYY-MM-DD`,
+resumable). **Still to do: run it against the production database**, then confirm the
+satellite composite clears MEDIUM.
+
+Original entry:
+**ORPHAN — price history depth and the empty `index_prices_eod`.** `prices_eod` holds
 4 trading days; the index table is empty. Trend is 30 of 100 and scores 0 for every name,
 so the best composite is 39.8 against a MEDIUM threshold of 70 and **the satellite
 recommender cannot fire at all**. Phase 2.5 Task 6 has the LLM choose among *eligible
