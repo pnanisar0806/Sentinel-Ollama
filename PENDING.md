@@ -861,6 +861,33 @@ be honest about, not as work. Phase 3 is Kite execution, human-in-loop unlock, d
 bridge, tax engine v1, breakers armed and maturity routing. Everything below falls
 between the two and will never be built unless it is tracked here.
 
+### THE COMPLETE OWNER ASK (2026-09-21) — nothing else is waiting on you
+
+1. **Screener export with the `Industry` column.** Unblocks the valuation relative leg
+   (15 pts), `fit`'s sector balance and the §3.5 sector cap. Only 34 of 73 watchlist
+   instruments carry a sector today. Note it cuts both ways: real sector weights will
+   LOWER some scores, because `fit`'s balance half currently scores a full 10 for
+   everything.
+2. **Exits: promotable on demand?** A button on `/cleanup` turning one exit candidate
+   into an FR-11 recommendation. Default today is no — promotion spends the FR-12
+   monthly action budget and the same standing breach re-fires every month.
+3. **MF switch universe.** `mf_switch` is NOT built and this is why: a switch needs
+   somewhere to switch TO, and the only funds on record are the six held, five alone in
+   their category. INDmoney's `get_mf_by_category` could supply peers. Decide whether the
+   advisor may recommend funds outside the current set.
+4. **Confirm `MIN_EVALS_FOR_CALIBRATION = 20`.**
+5. **Confirm `GSEC_YIELD_PCT = 7.0`** and a review cadence.
+6. **Credit-rating source (IPS §3.8)** — manual quarterly review, or a Phase 2 source.
+7. **`milestones.raised_on`** — the date each protection milestone was set.
+8. **₹82,124 vs PRD ₹76,000** — is the PRD figure the surplus AFTER existing SIPs?
+9. **A real Fidelity statement** — resolves the RSU split true-up (model ₹57.05L vs PRD
+   ₹53.25L).
+10. **Run `pnpm watchlist:propose` and prune** — the 40 static `'advisor'` names are
+    LLM-recall from the Task 6 session.
+
+Bank statements are NOT wanted (owner, 2026-09-21): the surplus trend accumulates from
+now. No paid LLM model: six free vision models remain in the chain.
+
 ### Owner decisions taken 2026-09-21
 
 - Bank statements **not wanted** — surplus trend accumulates from now. Item 6 closed as
