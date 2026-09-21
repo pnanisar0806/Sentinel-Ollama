@@ -11,8 +11,9 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-/** Owner uploads one or more statement pages. The file is archived immediately (a
- *  permanent record), then — if LLM_API_KEY is configured — either the brokerage or
+/** Owner uploads one or more statement pages. The file is archived where the host has
+ *  a writable disk (on Vercel it cannot be, and the upload records that rather than
+ *  failing), then — if LLM_API_KEY is configured — either the brokerage or
  *  the Fidelity pipeline proposes costs/vests. Nothing is written until the owner
  *  confirms from /import. */
 export async function POST(req: NextRequest): Promise<NextResponse> {

@@ -111,21 +111,54 @@ export function mimeFor(name: string, fallback: string): string {
 }
 
 export interface ArchivedPage {
-  storedPath: string;
+  /** NULL when the host has no writable archive — see `archiveFiles`. */
+  storedPath: string | null;
   fileName: string;
   mime: string;
   base64: string;
 }
 
-/** Writes each upload to data/screenshots/web-<uuid>.<ext> and base64s it for the LLM. */
+/** What `stored_path` records when there was nowhere to archive to. The column is NOT
+ *  NULL, and a real-looking path to a file that does not exist is worse than a sentence
+ *  saying so. */
+export const NOT_ARCHIVED = 'not archived — read-only filesystem';
+
+/**
+ * Writes each upload to data/screenshots/web-<uuid>.<ext> and base64s it for the LLM.
+ *
+ * On Vercel this ran as `mkdir /var/task/data` and failed the whole upload with
+ * `ENOENT: no such file or directory` — the lambda filesystem is read-only apart from
+ * `/tmp`, and `/tmp` does not outlive the invocation, so writing there would record a
+ * `stored_path` pointing at nothing.
+ *
+ * Extraction reads the bytes from memory, never from the archive, so a host that cannot
+ * archive can still import. It says so rather than failing the upload or inventing a
+ * path. The local CLI and Telegram paths are unaffected: they run where the directory
+ * is writable and still get a real file.
+ */
 export async function archiveFiles(files: { name: string; bytes: Buffer; mime: string }[]): Promise<ArchivedPage[]> {
   const dir = screenshotsDir();
-  await mkdir(dir, { recursive: true });
+  let archivable = true;
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch (e) {
+    archivable = false;
+    console.warn(`web ingest: not archiving uploads — ${(e as Error).message}`);
+  }
+
   const out: ArchivedPage[] = [];
   for (const f of files) {
     const mime = mimeFor(f.name, f.mime);
-    const storedPath = join(dir, `web-${randomUUID()}${extname(f.name).toLowerCase() || '.' + (mime === 'image/png' ? 'png' : 'jpg')}`);
-    await writeFile(storedPath, f.bytes);
+    const ext = extname(f.name).toLowerCase() || '.' + (mime === 'image/png' ? 'png' : 'jpg');
+    let storedPath: string | null = archivable ? join(dir, `web-${randomUUID()}${ext}`) : null;
+    if (storedPath !== null) {
+      try {
+        await writeFile(storedPath, f.bytes);
+      } catch (e) {
+        console.warn(`web ingest: could not archive ${f.name} — ${(e as Error).message}`);
+        storedPath = null;
+      }
+    }
     out.push({ storedPath, fileName: f.name, mime, base64: f.bytes.toString('base64') });
   }
   return out;
@@ -134,18 +167,24 @@ export async function archiveFiles(files: { name: string; bytes: Buffer; mime: s
 export interface UploadInsert {
   kind: IngestKind;
   fileName: string;
-  storedPaths: string[];
+  storedPaths: (string | null)[];
   pageCount: number;
   status: UploadStatus;
   proposals: StoredProposal[];
   error?: string;
 }
 
+/** `stored_path` is NOT NULL, so an unarchived upload says so in words. */
+function archivedPathList(paths: (string | null)[]): string {
+  const real = paths.filter((x): x is string => x !== null);
+  return real.length > 0 ? real.join('\n') : NOT_ARCHIVED;
+}
+
 export async function insertUpload(db: Db, u: UploadInsert): Promise<string> {
   const rows = await db.query<{ id: string }>(
     `insert into web_uploads (kind, file_name, stored_path, page_count, status, proposals, error)
      values ($1,$2,$3,$4,$5,$6::jsonb,$7) returning id`,
-    [u.kind, u.fileName, u.storedPaths.join('\n'), u.pageCount, u.status, u.proposals, u.error ?? null],
+    [u.kind, u.fileName, archivedPathList(u.storedPaths), u.pageCount, u.status, u.proposals, u.error ?? null],
   );
   return rows[0]!.id;
 }

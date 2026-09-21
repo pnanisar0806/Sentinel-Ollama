@@ -2336,3 +2336,16 @@ tables, since equity-without-index is exactly the state the tables were found in
 `as_of` is stamped with the session, not the run, so a backfill alone cannot make FR-31
 read a dead feed as fresh. **Not yet run against production.**
 
+
+## Web uploads on a read-only filesystem, fixed 2026-09-21
+
+`/import` → Fidelity RSU failed on Vercel with
+`ENOENT: no such file or directory, mkdir '/var/task/data'`. The lambda filesystem is
+read-only apart from `/tmp`, and `/tmp` does not outlive the invocation, so there is
+nowhere to durably archive an upload. `archiveFiles` now degrades: it keeps the bytes
+in memory (which is all the extractor ever used), sets `storedPath` to NULL, and
+`stored_path` records the sentence `not archived — read-only filesystem` rather than a
+path to a file that does not exist. Local CLI and Telegram paths are unchanged.
+
+**Open:** an upload made through the deployed app leaves no image on disk at all. If the
+archive matters, the bytes need a column or a bucket — neither exists today.
