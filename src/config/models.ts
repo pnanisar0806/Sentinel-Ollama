@@ -29,7 +29,11 @@ export const TEXT_MODEL = 'inclusionai/ling-3.0-flash-fin:free';
  */
 export const VISION_MODEL_CHAIN = [
   'google/gemma-4-31b-it:free',
-  'minimax/minimax-m3:free',
+  // `minimax/minimax-m3:free` sat here until 2026-09-21, when OpenRouter retired the
+  // free tier: "This model is unavailable for free. The paid version is available now".
+  // Checked against OpenRouter's catalogue on that date — it is the only one of the
+  // seven that has gone, and the paid slug is deliberately NOT substituted: this pool
+  // is free by the owner's decision, and adding a billed model is the owner's call.
   'dots-studio/dots-3-note-preview:free',
   'google/gemma-4-26b-a4b-it:free',
   'thinkingmachines/inkling:free',

@@ -67,7 +67,9 @@ export async function extractJsonFromImage(deps: {
     image_url: { url: `data:${im.mimeType};base64,${im.base64}` },
   }));
 
-  let lastRaw = '';
+  // Why each model was given up on, so a total failure names what was tried rather than
+  // reporting only whichever one happened to be last.
+  const failures: string[] = [];
   for (let m = 0; m < models.length; m++) {
     const model = models[m]!;
     // Primary model earns one retry (transient upstream blips); the rest get one shot
@@ -94,17 +96,22 @@ export async function extractJsonFromImage(deps: {
         error?: { message?: string; code?: number; metadata?: { raw?: string } };
       };
       if (!res.ok || body.error) {
-        lastRaw = JSON.stringify(body.error ?? { status: res.status });
         const code = body.error?.code ?? res.status;
+        failures.push(`${model}: ${code} ${body.error?.message ?? `HTTP ${res.status}`}`);
+        // The primary earns one quick retry on saturation, since the free pool frees up
+        // in bursts.
         if (code === 429 && attempt === 0 && m === 0) {
-          await sleep(2_000); // free-pool saturation: one quick retry, then next model
+          failures.pop();
+          await sleep(2_000);
           continue;
         }
-        if (code === 429 && m < models.length - 1) {
-          await sleep(1_500); // be polite to the next free pool
-          break; // next model
-        }
-        throw new Error(`OpenRouter failed: ${lastRaw}`);
+        // Everything else moves to the next model. This used to walk the chain ONLY on
+        // 429 and throw on anything else, so when OpenRouter retired
+        // `minimax/minimax-m3:free` the 404 killed the whole extraction and the five
+        // healthy models behind it were never tried — a fallback chain that gave up on
+        // the second most likely failure it exists to survive.
+        if (code === 429) await sleep(1_500); // be polite to the next free pool
+        break;
       }
 
       const content = body.choices?.[0]?.message?.content;
@@ -114,7 +121,9 @@ export async function extractJsonFromImage(deps: {
       return JSON.parse(content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
     }
   }
-  throw new Error(`OpenRouter failed after walking the model chain: ${lastRaw}`);
+  throw new Error(
+    `OpenRouter failed after trying ${models.length} model(s) — ${failures.join('; ')}`,
+  );
 }
 
 /** Brokerage-schema extraction: `{items:[{line,name,totalCostInr,acquiredOn,confidence}]}`. */

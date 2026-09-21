@@ -118,3 +118,50 @@ describe('extractHoldingsFromImage', () => {
     expect(proposals[0]!.costPaise).toBe(6_300_000n);
   });
 });
+
+/**
+ * OpenRouter retired `minimax/minimax-m3:free` on 2026-09-21 and the /import page died
+ * with `OpenRouter failed: {"message":"This model is unavailable for free...","code":404}`.
+ * The chain walked only on 429, so a 404 threw and the five healthy models behind it
+ * were never tried — a fallback chain that gave up on the second most likely failure it
+ * exists to survive.
+ */
+describe('the model chain survives a retired model', () => {
+  const ok = {
+    ok: true,
+    json: async () => ({ choices: [{ message: { content: '{"items":[]}' } }] }),
+  } as unknown as Response;
+  const gone = (model: string) => ({
+    ok: false,
+    status: 404,
+    json: async () => ({
+      error: { code: 404, message: `${model} is unavailable for free.` },
+    }),
+  } as unknown as Response);
+
+  it('moves to the next model on a 404 instead of abandoning the chain', async () => {
+    const tried: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const model = JSON.parse(String(init.body)).model as string;
+      tried.push(model);
+      return model === LLM_MODEL_CHAIN[0] ? gone(model) : ok;
+    }) as unknown as typeof fetch;
+
+    await expect(extractHoldingsFromImage({
+      fetchImpl, apiKey: 'k', images: [{ base64: 'x', mimeType: 'image/png' }], positions: [],
+    })).resolves.toEqual([]);
+    expect(tried).toEqual([LLM_MODEL_CHAIN[0], LLM_MODEL_CHAIN[1]]);
+  });
+
+  it('names every model it tried when the whole chain is gone', async () => {
+    const fetchImpl = (async (_url: string, init: RequestInit) =>
+      gone(JSON.parse(String(init.body)).model as string)) as unknown as typeof fetch;
+
+    // The old message reported only whichever model happened to be last.
+    const err = await extractHoldingsFromImage({
+      fetchImpl, apiKey: 'k', images: [{ base64: 'x', mimeType: 'image/png' }], positions: [],
+    }).then(() => null, (e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    for (const model of LLM_MODEL_CHAIN) expect(err!.message).toContain(model);
+  });
+});
