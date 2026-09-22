@@ -2680,3 +2680,61 @@ INF179K01XQ0 — independently matching the value derived by hand for the identi
 **Remaining for `mf_switch`:** create `instruments` rows for resolved peers, backfill
 their NAVs (the existing monthly AMFI download already contains them), score held and
 peer together per category, and emit the recommendation.
+
+
+## mf_switch is live against the whole AMFI market (2026-09-22)
+
+Owner decision: use the full universe, not a peer list. AMFI publishes all 14,138
+schemes daily and files each under a SEBI category heading, so the whole Indian market
+is classifiable for free. The advisor does not browse and the LLM never originates a
+rank (PRD §6.7) — the engine scores real NAVs instead.
+
+Pipeline: `pnpm mf:universe` builds it. 150 candidates across the four equity
+categories the owner holds, month-end NAVs only (consistency reads 12-MONTH windows, so
+daily rows for candidates would be ~90,000 inserts nothing reads). `enrichUniverse`
+then pages `get_mf_by_category` and prices each candidate. 124 of 153 matched.
+
+**Index funds are excluded.** AMFI's category says a fund IS an index fund, not WHICH
+index it tracks, so a Nifty 50 tracker and a smallcap tracker would be ranked against
+each other. Needs same-index matching on the scheme name first.
+
+### First real verdicts, 2026-09-22
+
+| fund | score | rank | verdict |
+|---|---|---|---|
+| Motilal Oswal Midcap | 46.76 | 23/28 | **SWITCH** to Invesco India Mid Cap (72.21) |
+| Bandhan Small Cap | 63.26 | 3/28 | hold, best alt +2.30 |
+| HDFC Mid Cap | 66.72 | 5/28 | hold, best alt +5.49 |
+| ICICI Large Cap | 54.56 | 8/30 | hold, best alt +8.68 |
+| Parag Parikh Flexi Cap | 60.78 | 14/39 | hold, best alt +9.82 |
+
+The Motilal case decomposes as consistency 20.0 vs 40.0 and expense 11.76 (93bps) vs
+17.21 (48bps); AUM ties at 15. **Corroborated independently**: INDmoney's own ranking
+puts Invesco 2/25 rated 5 and Motilal 13/25 tagged "Lagging" — the engine reached the
+same conclusion from AMFI NAVs without reading that rank.
+
+**PPFC is 0.18 points from the bar** (+9.82 against a 10-point margin). Watch it; do not
+move the margin to make it fire.
+
+### Two traps this uncovered, both fixed
+
+1. **A one-month history difference emptied every cohort.** Holdings carry a daily NAV
+   series and candidates a month-end one, so 31 against 30 failed a `>=` test and all
+   150 candidates were dropped. Candidates now need 90% of the holding's history and
+   every series is trimmed to one common span — 31 rolling windows against 30 is not a
+   comparison.
+2. **Only holdings were priced, so the holding won by construction** by 20-28 points for
+   having metadata. Both sides are priced now; verify symmetry before trusting any
+   future verdict.
+
+**`new Date('18 Sep 2026')` parses as LOCAL midnight**, so `toISOString()` returns the
+previous day in IST. The NAV fingerprint then ran against the wrong session and matched
+2 of 153. `isoFromIndmoneyDate` reads the components directly.
+
+### Known gap in the MF model
+
+`consistencyRatio` counts the SHARE of rolling windows that gained, with **no
+return-magnitude term anywhere in the 100 points** (consistency 40 / expense 20 /
+tenure 15 / aum 15 / style 10). A fund up 0.1% a month scores exactly as one up 2%. That
+may be deliberate for a long-horizon quality metric, but it means the score cannot
+separate a steady laggard from a steady compounder. Owner decision outstanding.
