@@ -268,11 +268,23 @@ describe('rankMfs (§6 MF scoring)', () => {
     expect(ranked.map((r) => r.instrumentId)).toEqual(['MF:GOOD']);
     const c = ranked[0]!.components;
     expect(c.consistency).toBeLessThanOrEqual(MF_WEIGHTS.consistency);
+    expect(c.returns).toBeLessThanOrEqual(MF_WEIGHTS.returns);
     expect(c.expense).toBeLessThanOrEqual(MF_WEIGHTS.expense);
     expect(c.tenure).toBeLessThanOrEqual(MF_WEIGHTS.tenure);
     expect(c.aum).toBeLessThanOrEqual(MF_WEIGHTS.aum);
     expect(c.style).toBeLessThanOrEqual(MF_WEIGHTS.style);
-    expect(ranked[0]!.composite).toBeCloseTo(c.consistency + c.expense + c.tenure + c.aum + c.style, 2);
+    // Every component, or a new one can be added and silently left out of the total —
+    // which is exactly what this caught when `returns` arrived.
+    expect(ranked[0]!.composite).toBeCloseTo(
+      c.consistency + c.returns + c.expense + c.tenure + c.aum + c.style, 2);
+  });
+
+  it('weights still sum to 100', () => {
+    // `returns` took its 25 points from `tenure` and `style`, which have no source and
+    // scored 0 for every fund. Taking them from `consistency` would have diluted the
+    // one component that works.
+    const total = (Object.values(MF_WEIGHTS) as number[]).reduce((a, b) => a + b, 0);
+    expect(total).toBe(100);
   });
 
   it('computes returns from nav micros without leaving integer arithmetic', () => {

@@ -19,8 +19,39 @@ import type { Db } from '../db/client.js';
 /** §6 composite weights. PRD-fixed; the components they weight are falsifiable. */
 export const SATELLITE_WEIGHTS = { valuation: 30, trend: 30, earnings: 20, fit: 20 } as const;
 
-/** §6 MF scoring weights. */
-export const MF_WEIGHTS = { consistency: 40, expense: 20, tenure: 15, aum: 15, style: 10 } as const;
+/**
+ * §6 MF scoring weights.
+ *
+ * `returns` was added on 2026-09-22 at the owner's request. Until then NOTHING in the
+ * hundred points rewarded the SIZE of a return: `consistency` counts the share of
+ * rolling windows that gained, so a fund up 0.1% a month scored exactly as one up 2%,
+ * and the model could not separate a steady laggard from a steady compounder.
+ *
+ * Its 25 points come from `tenure` and `style`, which are kept at zero rather than
+ * deleted. Neither has an ingestion source — INDmoney publishes no fund inception date
+ * and no style drift — so both scored 0 for every fund already. Taking their weight
+ * dilutes nothing that works, and the components stay named so the intent survives for
+ * whoever finds a source. Restoring them means taking points BACK from `returns`, not
+ * from `consistency`.
+ */
+export const MF_WEIGHTS = {
+  consistency: 40, returns: 25, expense: 20, aum: 15, tenure: 0, style: 0,
+} as const;
+
+/**
+ * How far above or below its cohort's median CAGR a fund must sit to score nothing or
+ * everything on `returns`.
+ *
+ * Measured, not chosen: across the 122 candidate funds with enough history on
+ * 2026-09-22 the CAGR spread was min -7.3, p10 3.3, median 7.5, p90 13.1, max 20.4
+ * percent. That puts p10 at 4.2 below the median and p90 at 5.6 above, so a symmetric
+ * six-point band covers the real cohort with a little room at each end.
+ *
+ * The comparison is to the COHORT median rather than an absolute return, because a
+ * small-cap median and a large-cap median are different numbers in the same year and an
+ * absolute bar would rank whole categories against each other by accident.
+ */
+export const RETURN_SPREAD_PP = 6;
 
 /** §6 band thresholds on the composite. Below `watch` the name is not scored into anything. */
 export const BANDS = { high: 85, medium: 70, watch: 60 } as const;
@@ -331,8 +362,13 @@ export interface MfRanking {
   scoreDate: string;
   composite: number;
   rank: number;
-  components: { consistency: number; expense: number; tenure: number; aum: number; style: number };
+  components: {
+    consistency: number; returns: number; expense: number;
+    tenure: number; aum: number; style: number;
+  };
   windowsEvaluated: number;
+  /** Annualised return over the scored span, percent. NULL without enough history. */
+  cagrPct: number | null;
 }
 
 /** Share of rolling windows clearing the hurdle. Pure integer math on nav micros. */
@@ -352,16 +388,56 @@ function consistencyRatio(navs: bigint[], window: number, hurdleBps: number): { 
 
 const CRORE_PAISE = 10_000_000_00n;
 
+/**
+ * Annualised return across a month-end NAV series.
+ *
+ * NULL rather than 0 below a year: a fund with six months of history has no annual
+ * return, and calling that zero would rank it beside one that genuinely went nowhere.
+ */
+export function cagrPct(navs: readonly bigint[]): number | null {
+  if (navs.length < 13) return null;
+  const first = Number(navs[0]!);
+  const last = Number(navs[navs.length - 1]!);
+  if (first <= 0 || last <= 0) return null;
+  const years = (navs.length - 1) / 12;
+  return round2((Math.pow(last / first, 1 / years) - 1) * 100);
+}
+
+/** The middle value, or the mean of the middle pair. */
+function median(xs: readonly number[]): number | null {
+  if (xs.length === 0) return null;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]!
+    : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
 export function rankMfs(candidates: readonly MfCandidate[], ctx: MfContext): MfRanking[] {
   const window = ctx.rollingWindow ?? 12;
   const hurdle = ctx.hurdleBps ?? 0;
 
-  const scored = candidates
-    .filter((m) => !ctx.blockedIds.includes(m.instrumentId))
+  const eligible = candidates.filter((m) => !ctx.blockedIds.includes(m.instrumentId));
+
+  // The cohort's own median return. A small-cap median and a large-cap median are
+  // different numbers in the same year, so an absolute bar would rank whole categories
+  // against each other by accident.
+  const cagrs = new Map(eligible.map((m) => [m.instrumentId, cagrPct(m.navMicros)]));
+  const cohortMedian = median(
+    [...cagrs.values()].filter((v): v is number => v !== null),
+  );
+
+  const scored = eligible
     .map((m) => {
       const { ratio, windows } = consistencyRatio(m.navMicros, window, hurdle);
+      const own = cagrs.get(m.instrumentId) ?? null;
       const components = {
         consistency: round2(ratio * MF_WEIGHTS.consistency),
+        // NULL history scores 0, like every other absent input here. It is not a claim
+        // that the fund returned nothing — `cagrPct` on the row says which it is.
+        returns: own === null || cohortMedian === null ? 0 : round2(ramp(
+          own - cohortMedian, -RETURN_SPREAD_PP, RETURN_SPREAD_PP, MF_WEIGHTS.returns,
+        )),
         // 190bps (a pricey regular plan) scores nothing; 25bps (a lean index fund) scores full.
         expense: round2(m.expenseRatioBps === null ? 0 : ramp(m.expenseRatioBps, 190, 25, MF_WEIGHTS.expense)),
         tenure: round2(m.tenureMonths === null ? 0 : ramp(m.tenureMonths, 0, 60, MF_WEIGHTS.tenure)),
@@ -371,9 +447,13 @@ export function rankMfs(candidates: readonly MfCandidate[], ctx: MfContext): MfR
         style: round2(m.styleDriftPct === null ? 0 : ramp(m.styleDriftPct, 20, 0, MF_WEIGHTS.style)),
       };
       const composite = round2(
-        components.consistency + components.expense + components.tenure + components.aum + components.style,
+        components.consistency + components.returns + components.expense
+        + components.tenure + components.aum + components.style,
       );
-      return { instrumentId: m.instrumentId, scoreDate: ctx.scoreDate, composite, components, windowsEvaluated: windows, rank: 0 };
+      return {
+        instrumentId: m.instrumentId, scoreDate: ctx.scoreDate, composite, components,
+        windowsEvaluated: windows, rank: 0, cagrPct: own,
+      };
     });
 
   scored.sort((a, b) => b.composite - a.composite || a.instrumentId.localeCompare(b.instrumentId));

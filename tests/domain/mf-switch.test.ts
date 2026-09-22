@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { evaluateSwitches, SWITCH_MARGIN } from '../../src/domain/mf-switch.js';
+import { MAX_ACHIEVABLE_COMPOSITE } from '../../src/domain/mf-ranking.js';
 import { persistMfMetadata, CRORE_PAISE } from '../../src/domain/mf-metadata.js';
 
 /**
@@ -92,7 +93,7 @@ describe('evaluating a switch against the whole category', () => {
     const [s] = await evaluateSwitches(db, '2026-09-21');
     // "No action" is a first-class answer, not a failure to decide.
     expect(s!.challengerId).toBeNull();
-    expect(s!.reason).toMatch(/short of the 10-point margin|no candidate/);
+    expect(s!.reason).toMatch(new RegExp(`short of the ${SWITCH_MARGIN}-point margin|no candidate`));
     await db.close();
   });
 
@@ -166,5 +167,11 @@ describe('evaluating a switch against the whole category', () => {
     expect(s!.challengerId).toBeNull();
     expect(s!.edge!).toBeLessThan(0);
     await db.close();
+  });
+
+  it('keeps the margin a fixed share of the scale', () => {
+    // 10 points when the achievable maximum was 75. Adding `returns` moved the scale to
+    // 100, and a margin left at 10 would have quietly become a looser bar.
+    expect(SWITCH_MARGIN / MAX_ACHIEVABLE_COMPOSITE).toBeCloseTo(10 / 75, 4);
   });
 });

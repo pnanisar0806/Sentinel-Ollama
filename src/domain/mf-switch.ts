@@ -17,13 +17,20 @@ import { loadUniverse } from './mf-universe.js';
  */
 
 /**
- * Points a challenger must beat the held fund by.
+ * Share of the scale a challenger must beat the held fund by.
  *
- * `BETTER_ALTERNATIVE_MARGIN` in `sell-triggers.ts` sets the same idea for equities.
- * This mirrors it rather than inventing a second number, and is expressed against a
- * 75-point achievable maximum, not 100.
+ * `BETTER_ALTERNATIVE_MARGIN` in `sell-triggers.ts` sets the same idea for equities: 10
+ * points when the achievable maximum here was 75, so 13.3% of the scale.
+ *
+ * It is a SHARE and not a fixed number of points because the scale moved once already.
+ * Adding `returns` took the achievable maximum from 75 to 100, and a margin left at 10
+ * would have quietly become a looser bar — the sort of drift that shows up as "the
+ * advisor started recommending more switches" with no decision behind it.
  */
-export const SWITCH_MARGIN = 10;
+export const SWITCH_MARGIN_SHARE = 10 / 75;
+
+/** The margin in points, on the current scale. */
+export const SWITCH_MARGIN = Math.round(MAX_ACHIEVABLE_COMPOSITE * SWITCH_MARGIN_SHARE * 100) / 100;
 
 export interface SwitchCandidate {
   heldInstrumentId: string;

@@ -2738,3 +2738,57 @@ return-magnitude term anywhere in the 100 points** (consistency 40 / expense 20 
 tenure 15 / aum 15 / style 10). A fund up 0.1% a month scores exactly as one up 2%. That
 may be deliberate for a long-horizon quality metric, but it means the score cannot
 separate a steady laggard from a steady compounder. Owner decision outstanding.
+
+
+## `returns` added to MF scoring (owner request, 2026-09-22)
+
+Nothing in the hundred points rewarded the SIZE of a return. `consistency` counts the
+share of rolling windows that gained, so a fund up 0.1% a month scored exactly as one
+up 2%. The model could not separate a steady laggard from a steady compounder.
+
+`MF_WEIGHTS` is now consistency 40 / **returns 25** / expense 20 / aum 15 /
+tenure 0 / style 0. **The 25 points came from `tenure` and `style`, not from
+`consistency`.** Neither has an ingestion source, so both already scored 0 for every
+fund; taking their weight diluted nothing that works. They are kept NAMED at zero so
+the intent survives — restoring one means taking points back from `returns`.
+
+`MAX_ACHIEVABLE_COMPOSITE` is therefore **100**, not 75.
+
+**The metric is CAGR over the scored span, relative to the COHORT MEDIAN**, ramped over
+±6 percentage points. Measured, not chosen: across the 122 candidates with enough
+history the CAGR spread was min −7.3, p10 3.3, median 7.5, p90 13.1, max 20.4 percent,
+putting p10 4.2 below the median and p90 5.6 above. Relative rather than absolute
+because a small-cap median and a large-cap median are different numbers in the same
+year, and an absolute bar would rank whole categories against each other by accident.
+
+`cagrPct` is **NULL below a year**, never 0 — a six-month-old fund has no annual return,
+and calling that zero would rank it beside one that genuinely went nowhere.
+
+### `SWITCH_MARGIN` is now a SHARE of the scale
+
+It was 10 points against a 75-point maximum. Adding `returns` moved the maximum to 100,
+and leaving the margin at 10 would have quietly become a looser bar — drift that shows
+up later as "the advisor started recommending more switches" with no decision behind it.
+`SWITCH_MARGIN_SHARE = 10/75`, giving **13.33 points of 100**. Re-run the numbers if the
+scale ever moves again; do not pin the margin to a point value.
+
+### Verdicts after the change, 2026-09-22
+
+| fund | score | rank | edge | verdict |
+|---|---|---|---|---|
+| Bandhan Small Cap | 84.55 | 3/28 | +3.63 | hold |
+| HDFC Mid Cap | 79.42 | 8/28 | +17.79 | **switch** → Invesco India Mid Cap 97.21 |
+| Parag Parikh Flexi Cap | 72.20 | 16/39 | +14.94 | **switch** → Helios Flexi Cap 87.14 |
+| ICICI Large Cap | 65.85 | 9/30 | +17.58 | **switch** → Invesco India Large Cap 83.43 |
+| Motilal Oswal Midcap | 58.89 | 22/28 | +38.32 | **switch** → Invesco India Mid Cap 97.21 |
+| ICICI Nifty 50 Index | 68.55 | — | — | index funds not switch-checked |
+
+**Four switches is a lot and the owner should be told so plainly.** FR-12 caps
+recommendations at four a month, so promoting all of them would spend the entire budget
+in one go, and the standing instruction is that the default answer is hold. The margin
+was NOT raised to reduce the count — it was made scale-relative for its own reasons, and
+the count is unchanged by that. The engine surfaces; promotion stays on demand.
+
+`Invesco India Mid Cap` scores 97.21 = consistency 40 + returns 25 + expense 17.21
+(48bps) + aum 15. It wins its category on every component that has a source, which is
+why it is named for two different holdings.

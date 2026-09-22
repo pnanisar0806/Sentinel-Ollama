@@ -131,10 +131,13 @@ export interface RankedFund extends MfRanking {
 }
 
 /**
- * The maximum a fund can score today. `tenure` and `styleDrift` have no source, so 25 of
- * the 100 points are unreachable and a "75" is a full mark, not a mediocre one.
+ * The maximum a fund can score.
+ *
+ * It was 75 while `tenure` and `style` carried 15 and 10 points with no source to fill
+ * them. Those 25 points moved to `returns` on 2026-09-22, so the scale is whole again
+ * and a 75 now means what it says rather than being full marks.
  */
-export const MAX_ACHIEVABLE_COMPOSITE = 75;
+export const MAX_ACHIEVABLE_COMPOSITE = 100;
 
 export interface MfRankingResult {
   ranked: RankedFund[];
@@ -169,6 +172,8 @@ export async function rankHeldFunds(db: Db, scoreDate: string): Promise<MfRankin
   }).map((r) => {
     const f = byId.get(r.instrumentId)!;
     const months = (navs.get(f.navInstrumentId) ?? []).length;
+    // Still nameable, still sourceless — but they no longer cost the fund anything,
+    // because their weight went to `returns`.
     const withheld = ['fund tenure', 'style drift'];
     if (months <= MONTHS_PER_WINDOW) withheld.push('consistency (too little NAV history)');
     return {

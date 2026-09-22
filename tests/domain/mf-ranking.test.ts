@@ -49,7 +49,8 @@ describe('month-end downsampling', () => {
 describe('uneven history is called out, not ranked over', () => {
   const fund = (name: string, months: number): RankedFund => ({
     instrumentId: `MF:${name}`, scoreDate: '2026-09-21', composite: 40, rank: 1,
-    components: { consistency: 0, expense: 20, tenure: 0, aum: 15, style: 0 },
+    components: { consistency: 0, returns: 0, expense: 20, tenure: 0, aum: 15, style: 0 },
+    cagrPct: null,
     windowsEvaluated: 0, name, valuePaise: 0n, category: 'flexi cap',
     monthsOfHistory: months, withheld: [],
   });
