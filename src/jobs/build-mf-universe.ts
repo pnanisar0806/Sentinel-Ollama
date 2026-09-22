@@ -9,6 +9,15 @@ import {
 } from '../domain/mf-universe.js';
 import { monthBounds, monthsBack, amfiDate } from './backfill-navs.js';
 import { isMainModule } from '../util/main-module.js';
+import { indmoneySource } from './sync.js';
+import { RemoteIndmoneySource } from '../sources/indmoney.js';
+import type { McpClient } from '../sources/mcp-client.js';
+import {
+  fetchAllInCategory, INDMONEY_CATEGORY_SLUG, isoFromIndmoneyDate, resolvePeerToAmfi,
+} from '../sources/mf-peers.js';
+import {
+  aumCroreToPaise, expensePctToBps, persistMfMetadata,
+} from '../domain/mf-metadata.js';
 
 /**
  * Builds the `mf_switch` candidate universe and gives it enough NAV history to score.
@@ -92,6 +101,63 @@ export async function buildMfUniverse(
   };
 }
 
+/**
+ * Gives the candidates the cost and size the holdings already have.
+ *
+ * Without it a cohort scores the holding 35 points ahead of everything else purely
+ * because only the holding has INDmoney metadata — a comparison that always says hold,
+ * for a reason that has nothing to do with the funds.
+ *
+ * INDmoney's fund id is not an AMFI scheme code and its payload carries no ISIN, so
+ * each listing is matched to a scheme by NAV fingerprint against AMFI's file for the
+ * peer's OWN nav_date. Anything that does not match is left without metadata rather
+ * than guessed at.
+ */
+export async function enrichUniverse(
+  db: Db,
+  client: McpClient,
+  categories: readonly string[],
+): Promise<{ matched: number; unmatched: string[] }> {
+  const universe = await loadUniverse(db);
+  const bySchemeCode = new Map(universe.map((u) => [u.schemeCode, u]));
+  const asOf = new Date().toISOString().slice(0, 10);
+
+  let matched = 0;
+  const unmatched: string[] = [];
+  const historyFor = new Map<string, NavRow[]>();
+
+  for (const category of categories) {
+    const slug = INDMONEY_CATEGORY_SLUG[category];
+    if (slug === undefined) continue;
+    const peers = await fetchAllInCategory(client, slug);
+
+    for (const peer of peers) {
+      if (peer.navDate === null) { unmatched.push(peer.name); continue; }
+      // One download per distinct quote date, not per fund.
+      let rows = historyFor.get(peer.navDate);
+      if (rows === undefined) {
+        const iso = isoFromIndmoneyDate(peer.navDate);
+        rows = iso === null ? [] : (await downloadNavHistory(amfiDate(iso), amfiDate(iso))).rows;
+        historyFor.set(peer.navDate, rows);
+      }
+      const hit = resolvePeerToAmfi(peer, rows);
+      const candidate = hit === null ? undefined : bySchemeCode.get(hit.schemeCode);
+      if (candidate === undefined) { unmatched.push(peer.name); continue; }
+
+      await persistMfMetadata(db, [{
+        instrumentId: candidate.instrumentId,
+        asOf,
+        expenseRatioBps: peer.expenseRatioPct === null ? null : expensePctToBps(peer.expenseRatioPct),
+        aumPaise: peer.aumCrore === null ? null : aumCroreToPaise(peer.aumCrore),
+        category,
+        benchmarkName: null,
+      }]);
+      matched += 1;
+    }
+  }
+  return { matched, unmatched };
+}
+
 export const ENV_PURPOSES: Purpose[] = [];
 
 if (isMainModule(import.meta.url)) {
@@ -109,5 +175,16 @@ if (isMainModule(import.meta.url)) {
   console.log(`  ${report.categories.join(' | ')}`);
   console.log(`  ${report.created} instruments created, ${report.skippedHeld} already held`);
   console.log(`  ${report.navsInserted} month-end NAVs over ${report.monthsFetched} months`);
+  console.log(`  ${report.stamped} holdings given AMFI's category`);
+
+  // Cost and size for the candidates. Without it the holding is 35 points ahead of the
+  // whole cohort for having metadata, and every verdict is HOLD for the wrong reason.
+  const source = await indmoneySource(db, env);
+  if (source instanceof RemoteIndmoneySource) {
+    const enriched = await enrichUniverse(db, source.client, report.categories);
+    console.log(`  ${enriched.matched} candidates priced, ${enriched.unmatched.length} unmatched`);
+  } else {
+    console.error('candidate cost/size skipped: INDmoney is on the file fallback');
+  }
   await db.close();
 }

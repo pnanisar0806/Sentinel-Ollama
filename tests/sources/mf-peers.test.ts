@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseAumCrore, resolvePeerToAmfi, resolvePeers, type PeerFund } from '../../src/sources/mf-peers.js';
+import {
+  isoFromIndmoneyDate, parseAumCrore, resolvePeerToAmfi, resolvePeers, type PeerFund,
+} from '../../src/sources/mf-peers.js';
 import type { NavRow } from '../../src/sources/amfi.js';
 
 /**
@@ -80,5 +82,30 @@ describe('resolving a peer to its AMFI scheme', () => {
     );
     expect(resolved.map((r) => r.schemeCode)).toEqual(['118989']);
     expect(unresolved).toEqual(['Nonexistent Fund']);
+  });
+});
+
+/**
+ * `new Date('18 Sep 2026').toISOString()` parses as LOCAL midnight and converts to UTC,
+ * which in IST hands back the PREVIOUS day. The enrichment then downloaded the wrong
+ * session's AMFI file and every NAV fingerprint missed: 2 of 153 candidates matched.
+ */
+describe('isoFromIndmoneyDate', () => {
+  it('does not shift the day, whatever the local timezone', () => {
+    expect(isoFromIndmoneyDate('18 Sep 2026')).toBe('2026-09-18');
+    expect(isoFromIndmoneyDate('1 Jan 2026')).toBe('2026-01-01');
+    expect(isoFromIndmoneyDate('30 Nov 2025')).toBe('2025-11-30');
+  });
+
+  it('is null on anything it cannot read, rather than a wrong date', () => {
+    expect(isoFromIndmoneyDate('garbage')).toBeNull();
+    expect(isoFromIndmoneyDate('')).toBeNull();
+    expect(isoFromIndmoneyDate('2026-09-18')).toBeNull();
+  });
+
+  it('agrees with Date for a case the timezone cannot corrupt', () => {
+    // Mid-month, mid-year: a UTC-negative offset would shift this one instead.
+    const d = new Date(Date.UTC(2026, 5, 15));
+    expect(isoFromIndmoneyDate('15 Jun 2026')).toBe(d.toISOString().slice(0, 10));
   });
 });

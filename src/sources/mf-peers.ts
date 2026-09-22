@@ -132,3 +132,70 @@ export function resolvePeers(
   }
   return { resolved, unresolved };
 }
+
+/** AMFI's category heading mapped to INDmoney's category slug. */
+export const INDMONEY_CATEGORY_SLUG: Record<string, string> = {
+  'Equity Scheme - Flexi Cap Fund': 'flexi-cap',
+  'Equity Scheme - Large Cap Fund': 'large-cap',
+  'Equity Scheme - Mid Cap Fund': 'mid-cap',
+  'Equity Scheme - Small Cap Fund': 'small-cap',
+};
+
+/**
+ * Every fund INDmoney lists in a category, paged out.
+ *
+ * `get_mf_by_category` returns 6 per page by default and reports `count`. Without this
+ * the candidate universe has AMFI's NAV history but no cost or size, and a cohort where
+ * only the holding has those two scores the holding 35 points ahead by construction —
+ * a comparison that always says hold, for a reason that is not about the funds.
+ */
+export async function fetchAllInCategory(
+  client: McpClient,
+  category: string,
+  pageSize = 50,
+  maxPages = 6,
+): Promise<PeerFund[]> {
+  const out: PeerFund[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const envelope = await client.callTool<{ result?: string }>(
+      'get_mf_by_category',
+      { categories: [category], size: pageSize, page, sort_key: 'aum', sort_asc: false },
+    );
+    if (typeof envelope?.result !== 'string') break;
+    const payload = JSON.parse(envelope.result) as {
+      data?: Record<string, unknown>[]; next_page?: boolean;
+    };
+    if (!Array.isArray(payload.data) || payload.data.length === 0) break;
+    for (const d of payload.data) {
+      out.push({
+        fundId: String(d['id']),
+        name: String(d['name'] ?? '').trim(),
+        category: String(d['category'] ?? category).trim(),
+        expenseRatioPct: typeof d['expense_ratio'] === 'number' ? d['expense_ratio'] : null,
+        aumCrore: parseAumCrore(d['aum']),
+        nav: typeof d['nav'] === 'number' ? d['nav'] : null,
+        navDate: typeof d['nav_date'] === 'string' ? d['nav_date'] : null,
+        purchaseAllowed: d['purchase_allowed'] !== false,
+      });
+    }
+    if (payload.next_page !== true) break;
+  }
+  return out;
+}
+
+/**
+ * `'18 Sep 2026'` -> `'2026-09-18'`.
+ *
+ * `new Date('18 Sep 2026').toISOString()` parses as LOCAL midnight and then converts to
+ * UTC, which in IST hands back the PREVIOUS day. Downloading that day's AMFI file made
+ * every NAV fingerprint miss: 2 of 153 candidates matched instead of nearly all.
+ */
+export function isoFromIndmoneyDate(v: string): string | null {
+  const m = v.trim().match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\s+(\d{4})$/);
+  if (!m) return null;
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const mi = months.indexOf(m[2]!.toLowerCase());
+  if (mi === -1) return null;
+  return `${m[3]}-${String(mi + 1).padStart(2, '0')}-${m[1]!.padStart(2, '0')}`;
+}

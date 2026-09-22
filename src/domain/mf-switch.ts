@@ -50,12 +50,26 @@ interface Scored {
 }
 
 /**
+ * A candidate must have at least this share of the holding's NAV history to be compared.
+ *
+ * A young fund is not a like-for-like alternative: `consistencyRatio` would score its
+ * short record as if it were the whole one, and a spectacular fourteen months is
+ * precisely what a switch should not chase. The bar is a SHARE rather than "at least as
+ * much", because held funds carry a daily series and candidates a month-end one built
+ * by a separate job — a one-month difference between the two backfills is an artefact,
+ * and requiring equality emptied every cohort.
+ */
+export const MIN_HISTORY_SHARE = 0.9;
+
+/** The trailing `n` points of a series. */
+const tail = (xs: readonly bigint[], n: number): bigint[] => xs.slice(Math.max(0, xs.length - n));
+
+/**
  * Scores one category: the held fund plus every candidate AMFI lists in it.
  *
- * A candidate with less NAV history than the held fund is dropped rather than scored.
- * `consistencyRatio` returns 0 below the window, so a young fund would score 0 on the
- * largest component and look terrible for a reason that is not about the fund —
- * and, worse, a young fund with a low expense ratio could outrank on cost alone.
+ * Every series is trimmed to the same number of month-ends before scoring. Consistency
+ * is the share of rolling windows that gained, so a fund measured over more windows is
+ * not measured on the same thing — comparing 31 windows against 30 is not a comparison.
  */
 export async function evaluateSwitches(
   db: Db,
@@ -81,10 +95,21 @@ export async function evaluateSwitches(
     const heldMonths = (navs.get(h.navInstrumentId) ?? []).length;
     const cohort = h.category === null ? [] : byCategory.get(h.category) ?? [];
 
+    const usable = cohort.filter((c) => {
+      const n = (navs.get(c.instrumentId) ?? []).length;
+      return n > MONTHS_PER_WINDOW && n >= heldMonths * MIN_HISTORY_SHARE;
+    });
+    // The common span: what every fund in this cohort, including the holding, can be
+    // scored over.
+    const span = usable.reduce(
+      (min, c) => Math.min(min, (navs.get(c.instrumentId) ?? []).length),
+      heldMonths,
+    );
+
     const candidates: MfCandidate[] = [
       {
         instrumentId: h.instrumentId,
-        navMicros: navs.get(h.navInstrumentId) ?? [],
+        navMicros: tail(navs.get(h.navInstrumentId) ?? [], span),
         expenseRatioBps: metadata.get(h.instrumentId)?.expenseRatioBps
           ?? metadata.get(h.navInstrumentId)?.expenseRatioBps ?? null,
         aumPaise: metadata.get(h.instrumentId)?.aumPaise
@@ -92,12 +117,10 @@ export async function evaluateSwitches(
         tenureMonths: null,
         styleDriftPct: null,
       },
-      ...cohort
-        .filter((c) => (navs.get(c.instrumentId) ?? []).length >= heldMonths
-          && (navs.get(c.instrumentId) ?? []).length > MONTHS_PER_WINDOW)
+      ...usable
         .map((c) => ({
           instrumentId: c.instrumentId,
-          navMicros: navs.get(c.instrumentId) ?? [],
+          navMicros: tail(navs.get(c.instrumentId) ?? [], span),
           // A candidate has no INDmoney metadata unless it happens to be held, so cost
           // and size score 0 for it. That is a HANDICAP against the challenger, which
           // is the safe direction: it can only ever understate the case for switching.
