@@ -19,6 +19,7 @@ import { extname } from 'node:path';
 import { Telegram, escapeMarkdown } from './telegram.js';
 import { extractRsuVestsFromImage, fidelityVestsToProposals, checkFidelityVestExists, type FidelityProposal } from '../sources/fidelity-ingest.js';
 import { persistVests, confirmVest } from '../domain/rsu.js';
+import { freeze, proposeRailChange, resetBreakerWithPostMortem, unfreeze } from '../domain/controls.js';
 // Order approval imports (Phase 2)
 import {
   handleApprove,
@@ -49,6 +50,11 @@ const COMMANDS = {
   defer: 'Defer a pending order: /defer <order_id> <YYYY-MM-DD> [idempotency_key]',
   reject_order: 'Reject a pending order: /reject_order <order_id> <reason> [idempotency_key]',
   alternates: 'Show alternates for a pending order: /alternates <order_id>',
+  // Safety controls (FR-32/33/34)
+  freeze: 'Halt drafting and cancel every open request: /freeze <reason>',
+  unfreeze: 'Lift a freeze: /unfreeze UNFREEZE',
+  reset_breaker: 'Reset a tripped breaker: /reset_breaker RESET BREAKER',
+  rail: 'Change a rail, effective in 48h: /rail <key> <value>',
 } as const;
 
 type Command = keyof typeof COMMANDS;
@@ -223,6 +229,27 @@ try {
         case 'status':
           await this.handleStatus();
           break;
+        case 'freeze': {
+          const { cancelled } = await freeze(this.db, args.join(' '));
+          await this.telegram.send(`🧊 Frozen. Drafting halted; ${cancelled.length} open request(s) cancelled. Notifications continue.`);
+          break;
+        }
+        case 'unfreeze':
+          await unfreeze(this.db, args.join(' '));
+          await this.telegram.send('Unfrozen. Cancelled requests stay cancelled.');
+          break;
+        case 'reset_breaker': {
+          const note = await resetBreakerWithPostMortem(this.db, args.join(' '));
+          await this.telegram.send(`Breaker reset. Post-mortem recorded:\n${note}`);
+          break;
+        }
+        case 'rail': {
+          const [key, value] = args;
+          if (!key || value === undefined) throw new Error('usage: /rail <key> <value>');
+          const r = await proposeRailChange(this.db, key, Number(value));
+          await this.telegram.send(`${key} → ${value} takes effect ${r.activatesAt}${r.loosening ? ' (a loosening: drawdown is checked again then)' : ''}.`);
+          break;
+        }
         case 'help':
           await this.handleHelp();
           break;

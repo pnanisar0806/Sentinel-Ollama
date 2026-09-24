@@ -152,11 +152,12 @@ export async function checkRails(
     }
   }
 
-  const coolingViolation = await checkRailCooling(db);
-  if (coolingViolation) violations.push(coolingViolation);
-
-  const drawdownViolation = await checkDrawdownLoosening(db);
-  if (drawdownViolation) violations.push(drawdownViolation);
+  // FR-34 rail cooling and the 15% no-loosening rule are NOT order checks any more. They
+  // used to push COOLING_NOT_ELAPSED and DRAWDOWN_LOOSENING_BLOCKED here, which refused
+  // EVERY order for 48 hours after any rail edit. The PRD asks that the EDIT wait, not
+  // the portfolio: `proposeRailChange` / `applyDueRailChanges` in controls.ts now hold a
+  // change back for 48 hours and refuse a loosening above 15% drawdown, at proposal and
+  // again at activation.
 
   const drawdownJustification = await checkDrawdownJustification(db, recommendation);
   if (drawdownJustification) violations.push(drawdownJustification);
@@ -314,41 +315,22 @@ function monthsBetween(fromIso: string, toIso: string): number {
   return (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth()) - (b.getUTCDate() < a.getUTCDate() ? 1 : 0);
 }
 
-async function checkRailCooling(db: Db): Promise<{ code: string; detail: string } | null> {
-  const [row] = await db.query<{ value: { cooling_until: string } | string }>(
-    `select value from settings_rails where key = 'last_rail_change'`
-  );
-  if (!row) return null;
-  const val = typeof row.value === 'string' ? JSON.parse(row.value) : row.value;
-  if (val.cooling_until && new Date(val.cooling_until) > new Date()) {
-    return { code: 'COOLING_NOT_ELAPSED', detail: `Rail change cooling until ${new Date(val.cooling_until).toISOString()}` };
-  }
-  return null;
-}
-
-async function checkDrawdownLoosening(db: Db): Promise<{ code: string; detail: string } | null> {
-  const [drawdown] = await db.query<{ current_pct: number }>(
-    `select current_pct from portfolio_drawdown where as_of = (select max(as_of) from portfolio_drawdown)`
-  );
-  if (!drawdown || drawdown.current_pct <= 15) return null;
-
-  const [lastChange] = await db.query<{ key: string; value: unknown }>(
-    `select key, value from settings_rails where key = 'last_rail_change'`
-  );
-  if (!lastChange) return null;
-
-  const isLoosening = (lastChange.value as any)?.direction === 'loosen';
-  if (isLoosening) {
-    return { code: 'DRAWDOWN_LOOSENING_BLOCKED', detail: `Drawdown ${drawdown.current_pct}% > 15% — rail loosening blocked` };
-  }
-  return null;
-}
-
+/**
+ * FR-35 / IPS §3.10: at a drawdown of 20% or more, a SELL or TRIM needs the §3.10
+ * citation and a typed justification.
+ *
+ * Only a sale. This used to apply to every order, so once `portfolio_drawdown` was
+ * actually written it would have refused BUYs at exactly the moment the owner's own
+ * policy calls a buying opportunity ("drawdowns are buying opportunities", PRD §2.6).
+ * The protocol exists to stop a panic sale, and a REDEEM of a maturing bond is not one.
+ */
 async function checkDrawdownJustification(db: Db, recommendation: Recommendation): Promise<{ code: string; detail: string } | null> {
-  const [drawdown] = await db.query<{ current_pct: number }>(
+  if (recommendation.primary.action !== 'SELL' && recommendation.primary.action !== 'TRIM') return null;
+  const [drawdown] = await db.query<{ current_pct: number | string }>(
     `select current_pct from portfolio_drawdown where as_of = (select max(as_of) from portfolio_drawdown)`
   );
-  if (!drawdown || drawdown.current_pct < 20) return null;
+  // numeric comes back as a string from postgres; compare as a number.
+  if (!drawdown || Number(drawdown.current_pct) < 20) return null;
 
   if (!recommendation.primary.ipsClauseRefs?.includes('3.10')) {
     return { code: 'DRAWDOWN_JUSTIFICATION_REQUIRED', detail: `Drawdown ≥20% — requires §3.10 IPS citation and typed justification` };
@@ -462,13 +444,8 @@ export async function checkPortfolioRails(
   const cashViolation = await checkCashCeiling(db, positions, totalAssets);
   if (cashViolation) violations.push(cashViolation);
 
-  // Cooling period
-  const coolingViolation = await checkRailCooling(db);
-  if (coolingViolation) violations.push(coolingViolation);
-
-  // Drawdown loosening
-  const drawdownViolation = await checkDrawdownLoosening(db);
-  if (drawdownViolation) violations.push(drawdownViolation);
+  // Rail cooling and drawdown loosening are properties of a pending rail EDIT, reported
+  // by `pendingRailChanges` in controls.ts, not standing portfolio breaches.
 
   return violations;
 }

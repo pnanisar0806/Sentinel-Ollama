@@ -2890,3 +2890,47 @@ Positions, `listRedemptionsUntil` and `draftPendingOrders` skip a redeemed bond.
 - Consequence: tomorrow's first drafting run will find nothing to draft — #1/#3 are
   redeemed, #2/#4 name no instrument. The Phase 2 clock needs a genuinely actionable
   recommendation to start.
+
+
+## Safety controls wired, 2026-09-24 (Phase 2 items 3-7)
+
+All four were stored state that `/cleanup` rendered and `checkRails` read, with no
+production writer. `src/domain/controls.ts` now holds them, transport-free, called by
+BOTH the web app (`POST /api/controls`, panel on `/cleanup`) and the Telegram bot.
+
+**The Telegram bot does not run in production.** `pnpm telegram:bot` is local long
+polling; no workflow starts it. The web app is the always-on surface, so every control
+exists there. Approval announcements now point at the web app first.
+
+- **Freeze (FR-32):** `freeze(db, reason)` sets the state AND cancels every open order
+  (DRAFT, PENDING_APPROVAL, MODIFIED, DEFERRED, APPROVED, ACKNOWLEDGED, AWAITING_SESSION,
+  AWAITING_MANUAL_EXECUTION) in one transaction with its audit. `unfreeze` needs the
+  typed phrase `UNFREEZE` and does not revive cancelled requests.
+- **Breaker (FR-33):** `evaluateBreaker` DERIVES the streak rather than incrementing a
+  counter, so replay cannot fabricate one. Counted: owner-approved recommendations
+  (order reached APPROVED/ACKNOWLEDGED by actor `owner`) with a falsification condition.
+  HIT = condition fired, recorded once and never un-recorded. NOT_HIT = 12 months passed
+  without it. UNKNOWN neither extends nor breaks a run. Ordered by approval time; the
+  streak is the run of HITs at the end. Only approvals after the last reset count.
+  Runs in the daily schedule job BEFORE drafting, so a trip stops that day's drafts.
+  Reset needs `RESET BREAKER`; the post-mortem is written from the record.
+  `recordFalsification` (the old counter) remains only because tests use it.
+- **Drawdown (FR-34/35):** `src/domain/drawdown.ts`, recorded by `sync` daily.
+  FLOW-NEUTRAL unit index: each day's return uses YESTERDAY's quantities, so deposits,
+  SIPs and redemptions are not gains; CASH and EPF (quantity 0 in INDmoney) are held at
+  zero return. **Excludes the ServiceNow RSU** (no daily history) — ~23% of the book, so
+  a fall in NOW is UNDER-reported. Evidence older than 7 days counts as no evidence.
+  Production on 2026-09-24: 31 days, 1.72% below the 2026-08-26 peak.
+- **Rail cooling (FR-34):** `proposeRailChange` writes `settings_rails.pending_value` /
+  `pending_since` (columns that existed since Phase 0 and were never used);
+  `applyDueRailChanges` activates after 48h in the schedule job. A loosening is refused
+  above 15% drawdown AND when there is no recent drawdown evidence, at proposal and again
+  at activation. Every current rail is looser when HIGHER; an unknown rail is refused.
+  `COOLING_NOT_ELAPSED` and `DRAWDOWN_LOOSENING_BLOCKED` were REMOVED from the order
+  gate: they refused every order for 48h after any rail edit. The edit waits, not the
+  portfolio. `last_rail_change` is now dead.
+- **20% protocol (FR-35):** `DRAWDOWN_JUSTIFICATION_REQUIRED` now applies to SELL and
+  TRIM only. It applied to every order, which would have refused BUYs at exactly the
+  point the owner's own policy calls a buying opportunity.
+- **Backup (item 7):** owner said not needed. `backup.yml`'s weekly cron is commented
+  out; `workflow_dispatch` kept so re-enabling is restoring one line.

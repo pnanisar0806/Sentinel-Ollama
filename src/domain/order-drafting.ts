@@ -140,13 +140,17 @@ export function draftAnnouncement(report: DraftReport): string | null {
     const amount = o.quantity !== null && o.quantity !== '0'
       ? ` · ₹${(Number(o.quantity) / 100).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
       : '';
-    return `• ${o.intent} ${o.instrumentId}${amount}\n  /approve ${o.id}   /alternates ${o.id}`;
+    return `• ${o.intent} ${o.instrumentId}${amount}  (id ${o.id})`;
   });
   return [
     `🗳 ${report.drafted.length} new approval request${report.drafted.length === 1 ? '' : 's'} (PAPER)`,
     '',
     ...lines,
     '',
+    // The web app is the surface that is always up. The Telegram bot runs only while
+    // the owner has `pnpm telegram:bot` open locally, so /approve is the fallback.
+    'Review and approve on the web app: Approvals.',
+    'With the Telegram bot running: /approve <id> or /alternates <id>.',
     'Nothing executes without your approval. Unanswered requests expire on schedule.',
   ].join('\n');
 }

@@ -130,11 +130,13 @@ describe('the announcement', () => {
     expect(draftAnnouncement({ drafted: [], refused: [], notActionable: [], duplicates: [] })).toBeNull();
   });
 
-  it('gives the command to act on each request', async () => {
+  it('points at the web app first, since the Telegram bot runs only locally', async () => {
     await persist();
     const report = await draftPendingOrders(db, NOW);
     const text = draftAnnouncement(report)!;
-    expect(text).toContain(`/approve ${report.drafted[0]!.id}`);
+    expect(text).toContain(report.drafted[0]!.id);
+    expect(text).toContain('web app');
+    expect(text).toContain('/approve <id>');
     expect(text).toContain('PAPER');
     await db.close();
   });

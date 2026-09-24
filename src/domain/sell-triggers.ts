@@ -470,7 +470,7 @@ function relative(closes: bigint[], benchmark: bigint[], offset: number): number
  * Evaluates one stored condition. `null` means UNTESTABLE — the datum it names is not in
  * our data — which is not the same as false and must never read as an exit.
  */
-async function testCondition(
+export async function testCondition(
   db: Db,
   instrumentId: string,
   cond: FalsificationCondition,

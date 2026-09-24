@@ -2,11 +2,12 @@ import { getCleanupCalendar } from '@/lib/data';
 import { Badge, Card, DataTable, Notice, PageHead, Pct } from '@/lib/ui';
 import { fmtDateTime, relTime, rupees } from '@/lib/format';
 import PromoteExit from './promote-exit';
+import ControlsPanel from './controls-panel';
 
 export const dynamic = 'force-dynamic';
 
 export default async function CleanupPage() {
-  const { redemptions, freezeState, breakerState, railCoolingUntil, exitCandidates, drawdownPct } = await getCleanupCalendar();
+  const { redemptions, freezeState, breakerState, railChanges, exitCandidates, drawdownPct } = await getCleanupCalendar();
 
   const statusMap: Record<string, { label: string; tone: 'green' | 'amber' | 'indigo' | 'gray' | 'red' }> = {
     falsification: { label: 'FALSIFICATION', tone: 'red' },
@@ -61,6 +62,15 @@ export default async function CleanupPage() {
       <div className="grid">
         <section className="card span-2">
           <header className="card-head">
+            <span className="card-title">Controls</span>
+            <span className="card-aside">freeze · breaker · rails</span>
+          </header>
+          <div className="card-body">
+            <ControlsPanel frozen={freezeState.active} breakerTripped={breakerState.active} />
+          </div>
+        </section>
+        <section className="card span-2">
+          <header className="card-head">
             <span className="card-title">Freeze state</span>
             <span className="card-aside">{freezeState.active ? 'ACTIVE' : 'INACTIVE'}</span>
           </header>
@@ -97,24 +107,36 @@ export default async function CleanupPage() {
 
         <section className="card span-2">
           <header className="card-head">
-            <span className="card-title">Rail cooling & Drawdown</span>
+            <span className="card-title">Rail changes &amp; drawdown</span>
             <span className="card-aside">
-              {railCoolingUntil ? `Cooling until ${fmtDateTime(railCoolingUntil)}` : 'No cooling'}
+              {railChanges.length === 0 ? 'No change pending' : `${railChanges.length} pending`}
               {drawdownPct !== null && ` · Drawdown: ${drawdownPct}%`}
             </span>
           </header>
           <div className="card-body">
-            {railCoolingUntil && (
-              <Badge tone="amber">Rail change cooling until {fmtDateTime(railCoolingUntil)}</Badge>
-            )}
-            {!railCoolingUntil && <Badge tone="green">No cooling period active</Badge>}
-            {drawdownPct !== null && (
+            {railChanges.length === 0
+              ? <Badge tone="green">No rail change waiting out its 48 hours</Badge>
+              : railChanges.map((c) => (
+                <div key={c.key}>
+                  <Badge tone="amber">{c.key}: {c.current} → {c.proposed}</Badge>{' '}
+                  <span className="dim">takes effect {fmtDateTime(c.activatesAt)}</span>
+                </div>
+              ))}
+            {drawdownPct === null ? (
+              <div style={{ marginTop: 8 }} className="dim">
+                No recent drawdown on record, so no rail can be loosened until sync records one.
+              </div>
+            ) : (
               <div style={{ marginTop: 8 }}>
                 <Badge tone={drawdownPct >= 20 ? 'red' : drawdownPct >= 15 ? 'amber' : 'green'}>
                   Portfolio drawdown: {drawdownPct}%
                 </Badge>
-                {drawdownPct >= 20 && <span className="dim"> — §3.10 justification required for any SIP pause/panic sell</span>}
-                {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — Rail loosening blocked at drawdown {'>'}15%</span>}
+                {drawdownPct >= 20 && <span className="dim"> — §3.10: a sale needs the IPS citation and a typed reason</span>}
+                {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — rail loosening is refused above 15%</span>}
+                <div className="dim" style={{ marginTop: 4 }}>
+                  Price-only, so deposits do not mask a fall. Excludes the ServiceNow RSU, which has
+                  no daily history, so a fall in NOW is under-reported here.
+                </div>
               </div>
             )}
           </div>

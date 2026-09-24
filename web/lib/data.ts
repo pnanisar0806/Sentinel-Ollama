@@ -20,6 +20,7 @@ import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
+import { pendingRailChanges, type PendingRailChange } from '../../src/domain/controls.js';
 import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
 import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src/domain/mf-switch.js';
 import { concentration } from '../../src/domain/allocation.js';
@@ -312,7 +313,7 @@ export interface CleanupCalendarData {
   redemptions: Redemption[];
   freezeState: { active: boolean; frozenAt: string | null; reason: string | null };
   breakerState: { active: boolean; consecutiveFalsifications: number; lastFalsificationAt: string | null; demotedAt: string | null; postMortemNote: string | null };
-  railCoolingUntil: string | null;
+  railChanges: PendingRailChange[];
   /** `firstSeen` is the earliest month `exit_candidates` recorded it; NULL before the
    *  weekly job has written one. */
   exitCandidates: (ExitCandidate & { firstSeen: string | null })[];
@@ -330,18 +331,10 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
   const freezeState = await getFreezeState(d);
   const breakerState = await getBreakerState(d);
   
-  // Get rail cooling
-  const [coolingRow] = await d.query<{ value: { cooling_until: string } | string }>(
-    `select value from settings_rails where key = 'last_rail_change'`
-  );
-  let railCoolingUntil: string | null = null;
-  if (coolingRow) {
-    const val = typeof coolingRow.value === 'string' ? JSON.parse(coolingRow.value) : coolingRow.value;
-    if (val.cooling_until && new Date(val.cooling_until) > new Date()) {
-      railCoolingUntil = val.cooling_until;
-    }
-  }
-  
+  // FR-34: rail edits waiting out their 48 hours. `last_rail_change` was never written,
+  // so this card always read "no cooling" whatever the owner had asked for.
+  const railChanges = await pendingRailChanges(d);
+
   // Get drawdown
   const [drawdown] = await d.query<{ current_pct: number }>(
     `select current_pct from portfolio_drawdown where as_of = (select max(as_of) from portfolio_drawdown)`
@@ -371,12 +364,13 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
     redemptions,
     freezeState,
     breakerState,
-    railCoolingUntil,
+    railChanges,
     exitCandidates: exitCandidates.map((c) => ({
       ...c,
       firstSeen: firstSeen.get(`${c.instrumentId}|${c.trigger}`) ?? null,
     })),
-    drawdownPct: drawdown?.current_pct ?? null,
+    // numeric arrives as a string from postgres
+    drawdownPct: drawdown ? Number(drawdown.current_pct) : null,
   };
 }
 // ── Phase 1 surfaces ────────────────────────────────────────────────────────

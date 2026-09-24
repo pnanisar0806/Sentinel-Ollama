@@ -1,9 +1,12 @@
 name: Weekly backup
 
 on:
-  schedule:
-    # Weekly Sunday 05:30 UTC = 11:00 IST
-    - cron: '30 5 * * 0'
+  # The weekly schedule is OFF by owner decision (2026-09-24: "backup not needed").
+  # It failed every week on missing BACKUP_REPO / GH_TOKEN, which is noise that hides
+  # real failures. Manual dispatch is kept, so re-enabling is restoring the cron below:
+  #   schedule:
+  #     - cron: '30 5 * * 0'   # Sunday 11:00 IST
+  # Note the backup is of DATA (audit log, approvals, lots, vests), not of .env.
   workflow_dispatch: {}
 
 permissions:

@@ -876,16 +876,17 @@ passkey", paste `OWNER_SETUP_TOKEN` from the local `.env`. A passkey is bound to
 hostname, so always use that same URL; the `sentinel-web-echodigi` and `git-main` aliases
 are different hosts and will not accept it.
 
-OPEN, each built but never fed, like the rails were:
-1. Breaker can never trip: `recordFalsification` has no caller.
-2. `/freeze` `/unfreeze` `/reset_breaker` Telegram commands missing; freeze does not
-   cancel pending orders.
-3. Nothing writes `portfolio_drawdown`; the 15% and 20% drawdown rails never fire.
-4. Nothing writes `last_rail_change`; the 48h rail cooling never engages.
-5. Rebalance recommendations name no instrument, so they cannot become orders.
-6. Credit-rating data feed (owner decision: feed, not manual).
-7. `backup.yml` fails weekly on missing secrets; owner said backup is not needed. Ask
-   before disabling.
+DONE 2026-09-24 (items 3-7): breaker derived and evaluated daily; freeze cancels open
+requests; /freeze /unfreeze /reset_breaker /rail on Telegram AND a Controls panel on
+/cleanup; drawdown recorded daily (flow-neutral); rail edits cool 48h; weekly backup cron
+off by owner decision.
+
+STILL OPEN for Phase 2:
+1. Rebalance recommendations name no instrument, so they cannot become orders. Until
+   fixed, the daily run may have NOTHING to draft and the DoD clock cannot start.
+2. Credit-rating data feed (owner decision: feed, not manual review).
+3. Drawdown excludes the ServiceNow RSU (~23% of the book): needs a daily NOW price.
+4. Telegram bot runs only locally; the web app is the always-on surface.
 
 Then the DoD itself: 4 clean weeks of paper operation and 5 or more owner approvals end
 to end. The clock starts when approval requests first reach the owner.

@@ -10,6 +10,7 @@ import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { fetchMfDetails } from '../sources/indmoney.js';
+import { recordDrawdown } from '../domain/drawdown.js';
 import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
@@ -318,6 +319,17 @@ if (isMainModule(import.meta.url)) {
     } catch (error) {
       console.error(`mf metadata capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // FR-34/35: the drawdown the rails read. Nothing wrote `portfolio_drawdown` before
+  // 2026-09-24, so the 15% no-loosening rule and the 20% §3.10 protocol never fired.
+  // Runs after the day's snapshot so today's book is in the series.
+  try {
+    const dd = await recordDrawdown(db);
+    console.log(`drawdown: ${dd.written} day(s) recorded; latest ${dd.latest?.drawdownPct ?? 'n/a'}% `
+      + `below the ${dd.latest?.peakDate ?? 'n/a'} peak`);
+  } catch (error) {
+    console.error(`drawdown record failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   await db.close();

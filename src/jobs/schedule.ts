@@ -5,6 +5,7 @@ import { installIps } from '../domain/ips.js';
 import { expireOrders, resurfaceDeferredOrder, recordAdvisoryReminder, getPendingApprovals } from '../domain/orders.js';
 import { isMainModule } from '../util/main-module.js';
 import { draftAnnouncement, draftPendingOrders } from '../domain/order-drafting.js';
+import { applyDueRailChanges, evaluateBreaker } from '../domain/controls.js';
 import { Telegram } from '../notify/telegram.js';
 
 /** This job processes scheduled tasks; it needs DATABASE_URL only. */
@@ -102,7 +103,18 @@ if (isMainModule(import.meta.url)) {
   }
   console.log(`T+2 reminders: ${t2Count}, T+7 reminders: ${t7Count}`);
 
-  // 4. FR-20: every actionable recommendation becomes an approval request. Nothing did
+  // 4a. FR-34: rail edits whose 48 hours are up take effect now; a loosening is checked
+  //     again against today's drawdown before it does.
+  const rails = await applyDueRailChanges(db, new Date());
+  console.log(`Rail changes: ${rails.activated.length} activated, ${rails.refused.length} refused`);
+  for (const r of rails.refused) console.log(`  refused ${r.key}: ${r.reason}`);
+
+  // 4b. FR-33: re-derive the falsification streak BEFORE drafting, so a breaker that
+  //     trips today stops today's drafts rather than tomorrow's.
+  const breaker = await evaluateBreaker(db, new Date());
+  console.log(`Breaker: streak ${breaker.streak}${breaker.tripped ? ' — TRIPPED, advisor is report-only' : ''}`);
+
+  // 4c. FR-20: every actionable recommendation becomes an approval request. Nothing did
   //    this until 2026-09-24 — `createOrder` had no production caller — so the owner's
   //    approval queue was always empty and the Phase 2 DoD could not begin. Runs after
   //    expiry so a request drafted today is not expired by the same run.
