@@ -866,9 +866,15 @@ between the two and will never be built unless it is tracked here.
 DONE 2026-09-24: web passkey auth; recommendations drafted into approval requests
 (FR-20); market-order expiry fixed.
 
-**DEPLOY STEP:** set `SESSION_SECRET` and `OWNER_SETUP_TOKEN` in Vercel from the local
-`.env`, THEN push. Pushing first locks the site (fails closed). Then open /login, choose
-"Register a passkey" and enter the setup token.
+**DEPLOYED 2026-09-24** (commit f915cd2, `sentinel-web`, team `echodigi`). `SESSION_SECRET`
+and `OWNER_SETUP_TOKEN` set in Vercel production via the CLI (the Vercel connector 403s on
+the `echodigi` scope). Verified live: `/` redirects to `/login`, APIs 401 signed out,
+cross-origin POST 403, wrong setup token 403.
+
+**OWNER ACTION:** open https://sentinel-web-liart.vercel.app/login, choose "Register a
+passkey", paste `OWNER_SETUP_TOKEN` from the local `.env`. A passkey is bound to the
+hostname, so always use that same URL; the `sentinel-web-echodigi` and `git-main` aliases
+are different hosts and will not accept it.
 
 OPEN, each built but never fed, like the rails were:
 1. Breaker can never trip: `recordFalsification` has no caller.
