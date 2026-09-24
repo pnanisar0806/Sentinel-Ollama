@@ -11,6 +11,7 @@ import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { fetchMfDetails } from '../sources/indmoney.js';
 import { recordDrawdown } from '../domain/drawdown.js';
+import { recordNowCloses } from '../sources/now-history.js';
 import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
@@ -319,6 +320,16 @@ if (isMainModule(import.meta.url)) {
     } catch (error) {
       console.error(`mf metadata capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // ServiceNow closes, so the drawdown includes the RSU (~23% of the book). Before the
+  // drawdown, so today's close is in the series. A failure leaves the RSU out of today's
+  // point rather than failing the sync.
+  try {
+    const now = await recordNowCloses(db, { range: '1mo' });
+    console.log(`NOW closes: ${now.written} new, latest ${now.latest ?? 'n/a'}`);
+  } catch (error) {
+    console.error(`NOW close fetch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // FR-34/35: the drawdown the rails read. Nothing wrote `portfolio_drawdown` before

@@ -128,7 +128,9 @@ async function getLatestFxAsOf(db: Db): Promise<Map<string, string>> {
  */
 async function getLatestPricesAsOf(db: Db): Promise<string | undefined> {
   const rows = await db.query<{ as_of: string | Date }>(
-    `select max(as_of) as as_of from prices_eod`,
+    // NSE rows only. `prices_eod` also carries the ServiceNow closes (source `yahoo`),
+    // and counting them would make a dead NSE feed read as current.
+    `select max(as_of) as as_of from prices_eod where source = 'nse-bhavcopy'`,
   );
   if (rows.length === 0 || rows[0]?.as_of === null) return undefined;
   const asOf = rows[0]!.as_of;

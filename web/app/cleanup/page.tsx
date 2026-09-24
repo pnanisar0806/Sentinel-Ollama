@@ -134,8 +134,8 @@ export default async function CleanupPage() {
                 {drawdownPct >= 20 && <span className="dim"> — §3.10: a sale needs the IPS citation and a typed reason</span>}
                 {drawdownPct >= 15 && drawdownPct < 20 && <span className="dim"> — rail loosening is refused above 15%</span>}
                 <div className="dim" style={{ marginTop: 4 }}>
-                  Price-only, so deposits do not mask a fall. Excludes the ServiceNow RSU, which has
-                  no daily history, so a fall in NOW is under-reported here.
+                  Price-only, so deposits do not mask a fall. Includes the ServiceNow RSU, priced
+                  from its own daily close.
                 </div>
               </div>
             )}

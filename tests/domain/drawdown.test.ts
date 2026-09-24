@@ -106,3 +106,60 @@ describe('the recorded series', () => {
     await db.close();
   });
 });
+
+/**
+ * The RSU is ~23% of the book and has no daily snapshot history, so until 2026-09-24 the
+ * drawdown left it out and under-reported any fall in NOW. It is now priced from its own
+ * daily close.
+ */
+describe('the ServiceNow RSU is in the drawdown', () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await openDb();
+    await runMigrations(db);
+    await db.query(`insert into instruments (id, kind, name, currency) values
+      ('NSE:A', 'EQUITY', 'A', 'INR'), ('US:NOW', 'RSU', 'ServiceNow', 'USD')`);
+    // An equity book that never moves, and an RSU worth the same.
+    for (const d of ['2026-09-01', '2026-09-02']) {
+      const [s] = await db.query<{ id: string }>(
+        `insert into snapshots (business_date, source) values ($1, 'indmoney') returning id`, [d]);
+      await db.query(
+        `insert into holdings (snapshot_id, instrument_id, account, quantity, value_paise, source, as_of)
+         values ($1, 'NSE:A', 'zerodha', 10, 100000, 'indmoney', $2::timestamptz)`, [s!.id, `${d}T12:00:00Z`]);
+    }
+    const [seedSnap] = await db.query<{ id: string }>(
+      `insert into snapshots (business_date, source) values ('2026-09-02', 'manual-seed') returning id`);
+    await db.query(
+      `insert into holdings (snapshot_id, instrument_id, account, quantity, value_paise, source, as_of)
+       values ($1, 'US:NOW', 'fidelity', 1, 100000, 'manual-seed', timestamptz '2026-09-02T12:00:00Z')`,
+      [seedSnap!.id]);
+  });
+
+  const now = (d: string, paise: number) => db.query(
+    `insert into prices_eod (instrument_id, trade_date, close_paise, source, as_of)
+     values ('US:NOW', $1, $2, 'yahoo', $3::timestamptz)`, [d, paise, `${d}T21:00:00Z`]);
+
+  it('sees a fall in NOW that the INDmoney book alone would miss', async () => {
+    await now('2026-09-01', 10000);
+    await now('2026-09-02', 5000); // NOW halves
+    const s = await drawdownSeries(db);
+    // The RSU's units are anchored on its value TODAY (Rs 1,000 at the halved price), so
+    // it held 20 units and was worth Rs 2,000 yesterday — two-thirds of a Rs 3,000 book.
+    // Halving it is a 33.33% drawdown. Without the RSU leg this read 0%.
+    expect(s[1]!.drawdownPct).toBe(33.33);
+    await db.close();
+  });
+
+  it('carries the last US close across a date with no US session', async () => {
+    await now('2026-08-31', 10000); // no close on 09-01 or 09-02
+    const s = await drawdownSeries(db);
+    expect(s.map((p) => p.drawdownPct)).toEqual([0, 0]);
+    await db.close();
+  });
+
+  it('leaves the series as it was when there is no NOW history yet', async () => {
+    const s = await drawdownSeries(db);
+    expect(s.map((p) => p.drawdownPct)).toEqual([0, 0]);
+    await db.close();
+  });
+});

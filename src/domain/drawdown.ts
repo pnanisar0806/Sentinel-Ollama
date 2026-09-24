@@ -19,10 +19,12 @@ import type { Db } from '../db/client.js';
  * Instruments whose "price" is really a balance — bank cash and EPF, reported as
  * quantity 0 — are held at a return of zero: a deposit is a flow, not a gain.
  *
- * **Known understatement: the ServiceNow RSU is not included.** It has no daily
- * snapshot history (three `manual-seed` rows, quantity 1), so it cannot be priced day
- * over day. At ~23% of the book, a sharp fall in NOW is under-reported here. The fix is
- * a daily NOW price series, not a guess.
+ * **The ServiceNow RSU is priced from its own daily close.** It has no daily snapshot
+ * history (three `manual-seed` rows at quantity 1), so it is added as a separate leg:
+ * the units implied by today's RSU value at today's NOW close, priced each day from
+ * `prices_eod` `US:NOW` (source `yahoo`, converted at that day's USD/INR). Units are held
+ * constant between days, which is exactly the price-only return a vest (a flow) should
+ * not disturb. Until 2026-09-24 the RSU — ~23% of the book — was left out entirely.
  *
  * Built from the `indmoney` snapshot stream alone: chaining across sources would mix
  * two different books.
@@ -96,8 +98,38 @@ export function dayReturn(prev: Map<string, Holding>, next: Map<string, Holding>
   return before > 0 ? after / before - 1 : null;
 }
 
+/**
+ * The RSU as one more holding in each day's book: constant units, that day's NOW close.
+ * Nothing is added when there is no RSU position or no NOW price history, so the series
+ * degrades to the INDmoney book rather than failing.
+ */
+async function addRsuLeg(db: Db, books: Map<string, Map<string, Holding>>): Promise<void> {
+  const [pos] = await db.query<{ value_paise: string | number }>(
+    `select h.value_paise from holdings h join snapshots s on s.id = h.snapshot_id
+      where h.instrument_id = 'US:NOW' order by s.business_date desc, s.id desc limit 1`,
+  );
+  const closes = await db.query<{ d: string; close_paise: string | number }>(
+    `select trade_date::text as d, close_paise from prices_eod
+      where instrument_id = 'US:NOW' and source = 'yahoo' order by trade_date`,
+  );
+  if (!pos || closes.length === 0) return;
+  const latest = Number(closes[closes.length - 1]!.close_paise);
+  if (latest <= 0) return;
+  const units = Number(pos.value_paise) / latest;
+
+  for (const [day, book] of books) {
+    // The last US close on or before this Indian date: US sessions and NSE sessions
+    // do not line up, and a missing US day is not a price of zero.
+    let price: number | null = null;
+    for (const c of closes) { if (c.d <= day) price = Number(c.close_paise); else break; }
+    if (price === null) continue;
+    book.set('US:NOW', { instrumentId: 'US:NOW', kind: 'RSU', quantity: units, valuePaise: units * price });
+  }
+}
+
 export async function drawdownSeries(db: Db): Promise<DrawdownPoint[]> {
   const books = await booksByDay(db);
+  await addRsuLeg(db, books);
   const days = [...books.keys()].sort();
   const out: DrawdownPoint[] = [];
   let index = 100;
