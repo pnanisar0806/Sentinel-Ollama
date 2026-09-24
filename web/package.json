@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.4",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.2",
     "next": "^15.3.5",
+    "postgres": "^3.4.9",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "postgres": "^3.4.9"
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.20.1",

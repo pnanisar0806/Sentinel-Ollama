@@ -9,6 +9,14 @@ import { currentIps, getIpsClauseIndex } from '../../src/domain/ips.js';
 
 let db: Db;
 
+/**
+ * Pinned. These tests read the real clock until 2026-09-24, when Sammaan's 2026-09-26
+ * maturity fell inside the "2-day horizon returns nothing" case and the test went red
+ * on its own. They would all have gone red on 2026-09-27, once the bond had matured.
+ * A horizon is relative to a date; the date is the fixture.
+ */
+const TODAY = new Date('2026-09-05T00:00:00Z');
+
 beforeAll(async () => {
   db = await openDb();
   await runMigrations(db);
@@ -29,7 +37,7 @@ describe('listRedemptionsUntil', () => {
     // But 2026-09-26 is 21 days from 2026-09-05
     // Let me check: the seed date might be different from "today"
     // The function uses actual current date, so we need to check based on the actual current date
-    const redemptions = await listRedemptionsUntil(db, 30);
+    const redemptions = await listRedemptionsUntil(db, 30, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeDefined();
     expect(sammaan!.isin).toBe('INE148I07GL3');
@@ -38,13 +46,13 @@ describe('listRedemptionsUntil', () => {
   });
 
   it('returns nothing for 2-day horizon', async () => {
-    const redemptions = await listRedemptionsUntil(db, 2);
+    const redemptions = await listRedemptionsUntil(db, 2, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeUndefined();
   });
 
   it('derives face_paise and coupon_due_paise from instrument row, not hardcoded', async () => {
-    const redemptions = await listRedemptionsUntil(db, 30);
+    const redemptions = await listRedemptionsUntil(db, 30, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeDefined();
 
@@ -65,7 +73,7 @@ describe('listRedemptionsUntil', () => {
 
 describe('maturityRoutingRec', () => {
   it('produces routing with correct IPS clauses and thesis derived from instrument', async () => {
-    const redemptions = await listRedemptionsUntil(db, 30);
+    const redemptions = await listRedemptionsUntil(db, 30, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeDefined();
 
@@ -87,7 +95,7 @@ describe('maturityRoutingRec', () => {
   });
 
   it('IPS clause refs exist in ips-v1.md', async () => {
-    const redemptions = await listRedemptionsUntil(db, 30);
+    const redemptions = await listRedemptionsUntil(db, 30, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeDefined();
 
@@ -103,7 +111,7 @@ describe('maturityRoutingRec', () => {
   });
 
   it('mutation check: changing expected face value makes test fail', async () => {
-    const redemptions = await listRedemptionsUntil(db, 30);
+    const redemptions = await listRedemptionsUntil(db, 30, TODAY);
     const sammaan = redemptions.find(r => r.instrumentId === 'BOND:SAMMAAN-2026');
     expect(sammaan).toBeDefined();
 
