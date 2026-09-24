@@ -50,7 +50,7 @@ export interface CandidateAction {
   assetClass: AssetClass;
   amountPaise: Paise;
   route: 'sip' | 'fresh-surplus' | 'sell';
-  /** Set only when the action names a specific holding (a trim does). */
+  /** The holding to trim, or the instrument to add to. Absent only when nothing fits. */
   instrumentId?: string;
   taxNote: string;
   rationale: string;
@@ -99,6 +99,40 @@ export function sellCandidates(positions: readonly Position[], assetClass: Asset
   return positions
     .filter((p) => p.assetClass === assetClass && isRebalanceTarget(p))
     .sort((a, b) => rank(a) - rank(b) || a.instrumentId.localeCompare(b.instrumentId));
+}
+
+/**
+ * What to BUY when an asset class is under its floor.
+ *
+ * The rebalance engine said "BUY GOLD ₹2.17L" and named no instrument, so the
+ * recommendation could never become an order. The choice follows the owner's standing
+ * rules rather than a search:
+ *
+ * - **Add to what is already held** ("prefer adding to conviction over rotating between
+ *   names") — the largest existing holding in the class.
+ * - **EQUITY goes to the core** (IPS §3.4: core is ≥75% of equity flows, index
+ *   instruments). A rebalance top-up is a core flow, never a satellite stock pick; those
+ *   come only from the satellite engine with a thesis. So only index-like holdings count.
+ * - Instruments that cannot take money are skipped: EPF (payroll-only) and bonds (a
+ *   primary issue is not a top-up).
+ * - When nothing suitable is held, the plain index ETF for the class, so the result is
+ *   an instrument that exists rather than a gap.
+ */
+const CORE_EQUITY = /index|nifty|bees|sensex/i;
+const NOT_TOP_UPPABLE = new Set(['EPF', 'BOND', 'CASH', 'RSU']);
+export const DEFAULT_ADD_INSTRUMENT: Partial<Record<AssetClass, string>> = {
+  EQUITY: 'NSE:NIFTYBEES',
+  GOLD: 'NSE:GOLDBEES',
+  DEBT: 'NSE:LIQUIDBEES',
+};
+
+export function addTarget(positions: readonly Position[], assetClass: AssetClass): string | null {
+  const held = positions
+    .filter((p) => p.assetClass === assetClass && !NOT_TOP_UPPABLE.has(p.kind))
+    .filter((p) => assetClass !== 'EQUITY' || CORE_EQUITY.test(`${p.instrumentId} ${p.name}`))
+    .sort((a, b) => (b.valuePaise > a.valuePaise ? 1 : b.valuePaise < a.valuePaise ? -1 : 0)
+      || a.instrumentId.localeCompare(b.instrumentId));
+  return held[0]?.instrumentId ?? DEFAULT_ADD_INSTRUMENT[assetClass] ?? null;
 }
 
 const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
@@ -169,10 +203,12 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
   for (const row of breaches) {
     if (row.breach === 'UNDER') {
       const capacity = capacityFor(routes, row.assetClass);
+      const target = addTarget(state.positions, row.assetClass);
       actions.push({
         kind: 'ADD',
         assetClass: row.assetClass,
         amountPaise: row.driftPaise,
+        ...(target !== null ? { instrumentId: target } : {}),
         route: routes.find((r) => r.assetClass === row.assetClass && r.loadFree)?.kind ?? 'fresh-surplus',
         taxNote: NO_REALISATION_NOTE,
         rationale:

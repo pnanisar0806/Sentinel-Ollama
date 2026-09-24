@@ -11,6 +11,8 @@ import {
 } from '../domain/engine.js';
 import { rebalanceRec, type FundingRoute } from '../domain/alloc-engine.js';
 import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../domain/sell-triggers.js';
+import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
+import { railPaise } from '../domain/rails.js';
 import { CAPS, satelliteFit } from '../domain/allocation.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/redemptions.js';
 import {
@@ -269,13 +271,30 @@ export async function buildReportInput(
 
   const signalReview = await runSignalReview(db, asOf, blocked, opts.gsecYieldPct, positions);
 
+  // Buy/sell proposals are made ONCE A MONTH (owner decision 2026-09-24), in the first
+  // run of the month that succeeds. Maturities are dated events and go out regardless.
+  const reviewDue = !(await monthlyReviewDone(db, 'recommendations', month));
+
   // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
   const rebalance = rebalanceRec(
     { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? [] },
     month,
   );
   const built: Recommendation[] = [...(opts.maturityRecommendations ?? [])];
-  for (const action of rebalance.actions) {
+
+  // A top-up is one month's tranche, never the whole gap at once. The gold gap was
+  // ₹2.17L against a ₹1L single-order rail and a ₹50k monthly tactical budget, so a
+  // full-gap BUY could only ever be refused. Closing a band over several months is also
+  // what a long-term investor does with a monthly surplus.
+  const tranche = (await railPaise(db, 'tactical_monthly_paise')) < (await railPaise(db, 'max_order_paise'))
+    ? await railPaise(db, 'tactical_monthly_paise')
+    : await railPaise(db, 'max_order_paise');
+
+  for (const action of (reviewDue ? rebalance.actions : [])) {
+    const amount = action.kind === 'ADD' && action.amountPaise > tranche ? tranche : action.amountPaise;
+    const staged = amount !== action.amountPaise
+      ? ` This is one monthly tranche of ${formatInr(amount as never)} toward a ${formatInr(action.amountPaise)} gap; the rest follows in later months.`
+      : '';
     built.push(
       buildRecommendation({
         kind: 'rebalance',
@@ -284,8 +303,8 @@ export async function buildReportInput(
           intent: `${action.kind === 'ADD' ? 'restore' : 'reduce'} ${action.assetClass} toward its IPS band`,
           instrumentId: action.instrumentId ?? null,
           action: action.kind === 'TRIM' ? 'TRIM' : action.kind === 'ADD' ? 'BUY' : 'REDIRECT',
-          amountPaise: action.amountPaise.toString(),
-          thesis: `${action.rationale}. ${action.taxNote}. Route: ${action.route}.`,
+          amountPaise: amount.toString(),
+          thesis: `${action.rationale}. ${action.taxNote}. Route: ${action.route}.${staged}`,
           ipsClauseRefs: rebalance.ipsClauseRefs,
           falsification: null,
         },
@@ -293,7 +312,7 @@ export async function buildReportInput(
       }),
     );
   }
-  for (const s of signalReview.scored) {
+  for (const s of (reviewDue ? signalReview.scored : [])) {
     if (s.band !== 'HIGH' && s.band !== 'MEDIUM') continue;
     if (blocked.includes(s.instrumentId)) continue;
     built.push(
@@ -304,6 +323,11 @@ export async function buildReportInput(
         engineEvidence: { composite: s.composite, band: s.band, evidence: s.evidence },
       }),
     );
+  }
+  if (reviewDue) {
+    await recordMonthlyReview(db, 'recommendations', month, {
+      asOf, proposed: built.length - (opts.maturityRecommendations?.length ?? 0),
+    });
   }
   for (const rec of built) {
     const { id } = await persistRecommendation(db, rec);

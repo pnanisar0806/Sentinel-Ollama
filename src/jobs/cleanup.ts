@@ -7,6 +7,7 @@ import { generateCleanupRecommendations, toPaperRecommendations, type CleanupRec
 import { persistRecommendation, isPaperMode, type OverrideEvent, buildRecommendation } from '../domain/recommendations.js';
 import { isMainModule } from '../util/main-module.js';
 import { seedSmallcases } from '../seed/seed-smallcases.js';
+import { monthlyReviewDone, nextMonthStart, recordMonthlyReview } from '../domain/cadence.js';
 
 /**
  * Has cleanup already run for this business date?
@@ -44,6 +45,16 @@ if (isMainModule(import.meta.url)) {
   const now = new Date().toISOString();
   const businessDate = now.slice(0, 10);
   const createdOn = businessDate;
+
+  // Once a month (owner decision 2026-09-24). This ran every day from the daily schedule
+  // workflow, so cleanup items could reach the owner on any day of the month. The
+  // per-date guard below stays for same-day reruns.
+  const month = businessDate.slice(0, 7);
+  if (await monthlyReviewDone(db, 'cleanup', month)) {
+    console.log(`cleanup already reviewed for ${month}; next review from ${nextMonthStart(month)}`);
+    await db.close();
+    process.exit(0);
+  }
 
   if (await alreadyCleanedUpFor(db, businessDate)) {
     console.log(`cleanup already ran for ${businessDate} — nothing to do`);
@@ -122,6 +133,8 @@ if (isMainModule(import.meta.url)) {
       console.log(`    ✓ Persisted as recommendation #${result.id} (paper mode)`);
     }
   }
+
+  await recordMonthlyReview(db, 'cleanup', month, { asOf: businessDate, proposed: paperRecs.length });
 
   console.log('\n=== Summary ===');
   console.log(`Micro-orphans (<₹5k): ${cleanup.microOrphans.length}`);

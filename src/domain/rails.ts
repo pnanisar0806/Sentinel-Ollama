@@ -172,7 +172,7 @@ export async function checkRails(
  * either rail in `settings_rails` changed nothing — the same split `checkCashCeiling`
  * already avoids.
  */
-async function railPaise(db: Db, key: string): Promise<bigint> {
+export async function railPaise(db: Db, key: string): Promise<bigint> {
   const [row] = await db.query<{ value: number | string }>(
     `select value from settings_rails where key = $1`,
     [key],
