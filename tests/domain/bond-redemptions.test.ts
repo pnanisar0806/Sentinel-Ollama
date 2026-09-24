@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
-import { loadRedemptions, recordRedemption, redemptionFor } from '../../src/domain/bond-redemptions.js';
+import {
+  loadRedemptions, recordRedemption, redemptionFor, stateRedemptionAmount,
+} from '../../src/domain/bond-redemptions.js';
 import { loadPositions } from '../../src/domain/networth.js';
 import { listRedemptionsUntil } from '../../src/domain/redemptions.js';
 import { draftPendingOrders } from '../../src/domain/order-drafting.js';
@@ -35,6 +37,24 @@ describe('recording a redemption', () => {
   it('keeps the amount unknown until the owner states it, never 0', async () => {
     await record();
     expect((await redemptionFor(db, BOND))!.amountPaise).toBeNull();
+    await db.close();
+  });
+
+  it('takes the amount the owner states later, without editing the first record', async () => {
+    await record();
+    await stateRedemptionAmount(db, BOND, 32_430_000n);
+    expect((await redemptionFor(db, BOND))!.amountPaise).toBe(32_430_000n);
+    // Two append-only events, not one mutated row.
+    const [n] = await db.query<{ n: string }>(
+      `select count(*) as n from audit_log where entity = 'bond_redemption'`);
+    expect(Number(n!.n)).toBe(2);
+    await db.close();
+  });
+
+  it('refuses an amount for a bond not recorded as redeemed, or a non-positive one', async () => {
+    await expect(stateRedemptionAmount(db, BOND, 100n)).rejects.toThrow(/record it first/);
+    await record();
+    await expect(stateRedemptionAmount(db, BOND, 0n)).rejects.toThrow(/positive/);
     await db.close();
   });
 

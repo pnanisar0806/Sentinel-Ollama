@@ -2879,8 +2879,12 @@ owner-confirmed event: `recordRedemption` in `src/domain/bond-redemptions.ts` wr
 `audit_log` `entity='bond_redemption'`, keyed on canonical `ISIN:INE148I07GL3`.
 Positions, `listRedemptionsUntil` and `draftPendingOrders` skip a redeemed bond.
 
-- **Amount credited: NULL — owner has not stated it.** The model expected ₹3,27,000
-  (face ₹3,00,000 + final 9% coupon ₹27,000). Ask; do not assume.
+- **Amount credited: ₹3,24,300** (owner, 2026-09-24; recorded as an `AMOUNT_STATED`
+  event, since the log is append-only). The model expected ₹3,27,000 = face ₹3,00,000 +
+  final 9% coupon ₹27,000. The ₹2,700 gap is exactly 10% TDS on the coupon — a tax
+  credit, claimable against the owner's liability. **Not yet verified against Form
+  26AS**; that is the owner true-up item, and the reconciliation matters for Phase 3's
+  tax engine.
 - **IPS §3.9 pre-approved routing: proceeds to B3 (emergency fund).** B3 target ₹6L,
   was unfunded. The owner moving it is recorded as a `bucket_flows` row once done.
 - Consequence: tomorrow's first drafting run will find nothing to draft — #1/#3 are
