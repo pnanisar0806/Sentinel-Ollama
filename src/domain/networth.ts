@@ -1,3 +1,4 @@
+import { loadRedemptions } from './bond-redemptions.js';
 import type { Db } from '../db/client.js';
 import { addP, subP, formatInr, type Paise } from '../money/paise.js';
 import type { Account } from '../seed/seed-data.js';
@@ -203,7 +204,13 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
   const entries: Entry[] = [];
   const orphanedSeedCost = new Map<string, Paise>();
 
+  // A bond the owner has confirmed redeemed is cash in the bank now, not a holding. The
+  // live feed lags the depository by days, and counting both double-counts the money —
+  // Sammaan's ₹3L sat in the bank AND as a bond from 2026-09-24.
+  const redeemed = new Set((await loadRedemptions(db)).keys());
+
   for (const r of rows) {
+    if (redeemed.has(r.canonical_id ?? r.instrument_id)) continue;
     const key = reconcileKey(r);
     if (r.source === 'manual-seed') {
       const covered = liveAccounts.has(r.account)

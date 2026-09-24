@@ -1,3 +1,4 @@
+import { loadRedemptions } from './bond-redemptions.js';
 import type { Db } from '../db/client.js';
 import type { Paise } from '../money/paise.js';
 
@@ -50,8 +51,16 @@ export async function listRedemptionsUntil(
 
   const todayIso = now.toISOString().slice(0, 10);
   const redemptions: Redemption[] = [];
+  // Paid out already: the digest must stop counting down to it.
+  const paid = await loadRedemptions(db);
+  const canon = await db.query<{ id: string; canonical_id: string | null }>(
+    `select id, canonical_id from instruments where id = any($1::text[])`,
+    [rows.map((r) => r.id)],
+  );
+  const canonicalOf = new Map(canon.map((c) => [c.id, c.canonical_id ?? c.id]));
 
   for (const row of rows) {
+    if (paid.has(canonicalOf.get(row.id) ?? row.id)) continue;
     const maturityDate = row.maturity_date instanceof Date
       ? row.maturity_date.toISOString().slice(0, 10)
       : String(row.maturity_date).slice(0, 10);

@@ -2869,3 +2869,20 @@ First real run (read-only preview): #1 Sammaan maturity routing REDEEM will draf
 
 `tests/domain/maturities.test.ts` read the real clock and went red on 2026-09-24 on its
 own. Pinned to 2026-09-05. Watch for other tests that read `new Date()`.
+
+
+## Sammaan 2026 redeemed, 2026-09-24
+
+Owner reported the credit on 2026-09-24, two days before the 26-Sep maturity date on
+record (26 Sep 2026 is a Saturday). INDmoney still listed the bond. Recorded as an
+owner-confirmed event: `recordRedemption` in `src/domain/bond-redemptions.ts` writes
+`audit_log` `entity='bond_redemption'`, keyed on canonical `ISIN:INE148I07GL3`.
+Positions, `listRedemptionsUntil` and `draftPendingOrders` skip a redeemed bond.
+
+- **Amount credited: NULL — owner has not stated it.** The model expected ₹3,27,000
+  (face ₹3,00,000 + final 9% coupon ₹27,000). Ask; do not assume.
+- **IPS §3.9 pre-approved routing: proceeds to B3 (emergency fund).** B3 target ₹6L,
+  was unfunded. The owner moving it is recorded as a `bucket_flows` row once done.
+- Consequence: tomorrow's first drafting run will find nothing to draft — #1/#3 are
+  redeemed, #2/#4 name no instrument. The Phase 2 clock needs a genuinely actionable
+  recommendation to start.

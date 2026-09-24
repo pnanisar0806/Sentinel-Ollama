@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
 import { createOrder, type OrderIntent } from './orders.js';
+import { redemptionFor } from './bond-redemptions.js';
 import type { Recommendation, RecKind, RecLeg } from './recommendations.js';
 
 /**
@@ -98,6 +99,16 @@ export async function draftPendingOrders(db: Db, now: Date = new Date()): Promis
 
     const why = notActionableReason(rec.primary);
     if (why !== null) { report.notActionable.push({ recommendationId, reason: why }); continue; }
+
+    // Asking the owner to approve redeeming a bond that has already paid out would be
+    // an approval for something that happened without them.
+    const paid = await redemptionFor(db, rec.primary.instrumentId!);
+    if (paid !== null) {
+      report.notActionable.push({
+        recommendationId, reason: `already redeemed — received ${paid.receivedOn}`,
+      });
+      continue;
+    }
 
     const key = actionKey(rec.kind, rec.primary);
     if (taken.has(key)) { report.duplicates.push(recommendationId); continue; }
