@@ -4,6 +4,8 @@ import { loadEnv, type Purpose } from '../config/env.js';
 import { installIps } from '../domain/ips.js';
 import { expireOrders, resurfaceDeferredOrder, recordAdvisoryReminder, getPendingApprovals } from '../domain/orders.js';
 import { isMainModule } from '../util/main-module.js';
+import { draftAnnouncement, draftPendingOrders } from '../domain/order-drafting.js';
+import { Telegram } from '../notify/telegram.js';
 
 /** This job processes scheduled tasks; it needs DATABASE_URL only. */
 export const ENV_PURPOSES: Purpose[] = [];
@@ -100,7 +102,29 @@ if (isMainModule(import.meta.url)) {
   }
   console.log(`T+2 reminders: ${t2Count}, T+7 reminders: ${t7Count}`);
 
-  // 4. (Future) Cleanup queue monthly refresh - run on first trading day ~10:00 IST
+  // 4. FR-20: every actionable recommendation becomes an approval request. Nothing did
+  //    this until 2026-09-24 — `createOrder` had no production caller — so the owner's
+  //    approval queue was always empty and the Phase 2 DoD could not begin. Runs after
+  //    expiry so a request drafted today is not expired by the same run.
+  console.log('\n--- Drafting approval requests ---');
+  const drafts = await draftPendingOrders(db, new Date());
+  console.log(`Drafted ${drafts.drafted.length}, refused ${drafts.refused.length}, `
+    + `not actionable ${drafts.notActionable.length}, duplicates ${drafts.duplicates.length}`);
+  for (const r of drafts.refused) console.log(`  refused #${r.recommendationId}: ${r.reason}`);
+  for (const r of drafts.notActionable) console.log(`  skipped #${r.recommendationId}: ${r.reason}`);
+
+  const announcement = draftAnnouncement(drafts);
+  const botToken = process.env['TELEGRAM_BOT_TOKEN'];
+  const chatId = process.env['TELEGRAM_OWNER_CHAT_ID'];
+  if (announcement !== null && botToken && chatId) {
+    await new Telegram({ botToken, ownerChatId: chatId, dryRun: process.env['DRY_RUN'] === '1' })
+      .send(announcement);
+  } else if (announcement !== null) {
+    // The requests exist either way and are visible on /approvals; only the push is lost.
+    console.error('Telegram not configured: approval requests drafted but not announced');
+  }
+
+  // 5. (Future) Cleanup queue monthly refresh - run on first trading day ~10:00 IST
   // This would call generateCleanupRecommendations and persist new paper recommendations
   // Skipped for now - cleanup is a standing queue refreshed on demand via `pnpm cleanup`
 

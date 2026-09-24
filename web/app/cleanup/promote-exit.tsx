@@ -36,9 +36,14 @@ export default function PromoteExit(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instrumentId, trigger }),
       });
-      const body = await res.json() as { reason?: string; error?: string; id?: number | null };
+      const body = await res.json() as {
+        reason?: string; error?: string; id?: number | null;
+        orderId?: string | null; draftRefused?: string | null;
+      };
       if (res.ok) {
-        setMessage(`recommendation #${body.id}`);
+        setMessage(body.orderId
+          ? `approval request ready — see Approvals`
+          : `recommendation #${body.id}; not drafted: ${body.draftRefused ?? 'nothing to order'}`);
         router.refresh();
       } else {
         // The FR-12 cap and the already-promoted guard both land here. Say which.

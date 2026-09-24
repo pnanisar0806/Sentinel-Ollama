@@ -17,6 +17,10 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+      # Announces newly drafted approval requests (FR-20). Optional: without them the
+      # requests are still drafted and shown on /approvals, just not pushed.
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,7 +29,8 @@ jobs:
           node-version: '20'
           cache: 'pnpm'
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec tsx --env-file-if-exists=.env src/jobs/schedule.ts
+      # Cleanup runs FIRST so the recommendations it writes are drafted into approval
+      # requests by the schedule step below in the same run, not a day later.
       # Cleanup rides this daily slot rather than taking its own: it needs only
       # DATABASE_URL and is a no-op once it has run for the business date. It had no
       # caller at all until 2026-09-20 — no script, no workflow — which left eight
@@ -34,3 +39,4 @@ jobs:
       # which is the job this workflow exists for.
       - run: pnpm cleanup
         continue-on-error: true
+      - run: pnpm exec tsx --env-file-if-exists=.env src/jobs/schedule.ts

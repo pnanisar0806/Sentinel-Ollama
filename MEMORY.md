@@ -2792,3 +2792,80 @@ the count is unchanged by that. The engine surfaces; promotion stays on demand.
 `Invesco India Mid Cap` scores 97.21 = consistency 40 + returns 25 + expense 17.21
 (48bps) + aum 15. It wins its category on every component that has a source, which is
 why it is named for two different holdings.
+
+
+## Phase 2 audit, 2026-09-24 — the ledger overstated Tasks 2, 4 and 5
+
+The progress ledger marks Phase 2 Tasks 1-6 done. Checked against the code, much of it
+was built but never wired — the same pattern as the rails bug:
+
+- **No web authentication** although the app was deployed. FIXED (passkeys).
+- **`createOrder` had zero production callers**, so recommendations never became
+  approval requests and the DoD's "5 owner approvals" could not start. FIXED.
+- **Breaker can never trip:** `recordFalsification` has no caller. OPEN.
+- **`/freeze`, `/unfreeze`, `/reset_breaker` do not exist;** `setFreeze` has no caller;
+  freeze does not cancel pending orders. OPEN.
+- **Drawdown rails can never fire:** nothing writes `portfolio_drawdown`. OPEN.
+- **48h rail cooling can never engage:** nothing writes `last_rail_change`. OPEN.
+
+Do not trust a Phase 2 ledger line without checking for a production caller.
+
+## Owner decisions, 2026-09-24
+
+- **Web auth: passkeys.** Built.
+- **Backup: not wanted** ("everything is in .env"). Recorded with the caveat raised once:
+  `.env` holds credentials, the backup is of DATA (audit log, approvals, lots, vests).
+  Owner's call. `backup.yml` still fails weekly on missing secrets; ask before disabling.
+- **Market orders only.** No limit-order expiry decision needed.
+- **Credit ratings (IPS 3.8): a data feed**, not a manual review. Not yet built.
+
+## Web authentication (passkeys), 2026-09-24
+
+`web/middleware.ts` gates EVERY page and API route except `/login`, `/api/auth/*` and
+static assets. Routes do not re-check; a new route is protected the moment it exists.
+`tests/web/auth.test.ts` walks the real route tree and fails if anything else is public.
+
+- Passkeys via `@simplewebauthn/server` + `/browser` v14 (web dependencies only).
+- Session: stateless HMAC-signed expiry, cookie `sentinel_session`, HttpOnly,
+  SameSite=Strict, 7 days. Rotating `SESSION_SECRET` revokes every session.
+- **Fails CLOSED**: no `SESSION_SECRET` (or one under 32 chars) means nothing is served.
+- **Registration is gated**: an existing session, or `OWNER_SETUP_TOKEN` (constant-time
+  compare, 16+ chars). A login challenge cannot be replayed into registration.
+- Cross-origin mutations refused on the `Origin` header as well as by SameSite.
+- `WEBAUTHN_ORIGIN` optionally pins the relying party; otherwise the request origin. A
+  passkey is bound to its hostname, so a Vercel preview URL will not accept a passkey
+  registered on the production host.
+- Table `web_passkeys` (migration 0025) is NOT append-only, because the signature counter
+  must update on every login. Logins go to `audit_log` (`entity='web_auth'`).
+- **Env the deployment needs:** `SESSION_SECRET`, `OWNER_SETUP_TOKEN`. Both are in the
+  local `.env`; they must be set in Vercel BEFORE the auth commit deploys, or the app
+  serves nothing (by design).
+
+## Approval requests are drafted (FR-20), 2026-09-24
+
+`src/domain/order-drafting.ts`: `draftPendingOrders(db, now)` turns every actionable,
+unsuppressed recommendation from the last `DRAFT_WINDOW_DAYS` (7) that has no order into
+a PENDING_APPROVAL advisory order via `createOrder`, so every rail, freeze, breaker and
+freshness check applies first. A refusal is an `audit_log` row
+(`entity='order_draft'`, `DRAFT_REFUSED`), never an invalid draft row (FR-30).
+
+- Runs in the daily `schedule` job, which also announces new requests on Telegram.
+  `schedule.yml` runs `pnpm cleanup` FIRST so cleanup's recommendations are drafted the
+  same day.
+- Promoting an exit on `/cleanup` drafts immediately.
+- HOLD is not drafted. A leg with no instrument is reported, not drafted.
+- One approval per (kind, action, instrument): the weekly report once ran twice on
+  2026-09-20 and production holds duplicate recommendations.
+
+**Rebalance recommendations name no instrument** ("BUY equity" at asset-class level), so
+they can never become orders. Production recs #2 and #4 are exactly this. OPEN.
+
+**Market-order expiry was wrong**: `15:30 UTC` (21:00 IST) and blind to the trading
+calendar, so a weekend draft expired before any session. Now the close (15:30 IST) of
+the next NSE session that has not ended, via `isTradingDay`.
+
+First real run (read-only preview): #1 Sammaan maturity routing REDEEM will draft;
+#3 is a duplicate of #1; #2 and #4 are rebalance BUYs with no instrument, skipped.
+
+`tests/domain/maturities.test.ts` read the real clock and went red on 2026-09-24 on its
+own. Pinned to 2026-09-05. Watch for other tests that read `new Date()`.

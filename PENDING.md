@@ -861,6 +861,29 @@ be honest about, not as work. Phase 3 is Kite execution, human-in-loop unlock, d
 bridge, tax engine v1, breakers armed and maturity routing. Everything below falls
 between the two and will never be built unless it is tracked here.
 
+### PHASE 2: what is actually left (audited 2026-09-24)
+
+DONE 2026-09-24: web passkey auth; recommendations drafted into approval requests
+(FR-20); market-order expiry fixed.
+
+**DEPLOY STEP:** set `SESSION_SECRET` and `OWNER_SETUP_TOKEN` in Vercel from the local
+`.env`, THEN push. Pushing first locks the site (fails closed). Then open /login, choose
+"Register a passkey" and enter the setup token.
+
+OPEN, each built but never fed, like the rails were:
+1. Breaker can never trip: `recordFalsification` has no caller.
+2. `/freeze` `/unfreeze` `/reset_breaker` Telegram commands missing; freeze does not
+   cancel pending orders.
+3. Nothing writes `portfolio_drawdown`; the 15% and 20% drawdown rails never fire.
+4. Nothing writes `last_rail_change`; the 48h rail cooling never engages.
+5. Rebalance recommendations name no instrument, so they cannot become orders.
+6. Credit-rating data feed (owner decision: feed, not manual).
+7. `backup.yml` fails weekly on missing secrets; owner said backup is not needed. Ask
+   before disabling.
+
+Then the DoD itself: 4 clean weeks of paper operation and 5 or more owner approvals end
+to end. The clock starts when approval requests first reach the owner.
+
 ### THE COMPLETE OWNER ASK (2026-09-21) — nothing else is waiting on you
 
 1. **Screener export with the `Industry` column.** Unblocks the valuation relative leg

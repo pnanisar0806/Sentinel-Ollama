@@ -5,6 +5,7 @@ import { assessStaleness, blockedInstruments, type StalenessRow } from '../sourc
 import { loadPositions, type Position } from '../domain/networth.js';
 import { checkFreeze, checkRails, getBreakerState } from './rails.js';
 import { validateRecommendation } from './recommendations.js';
+import { isTradingDay } from '../seed/seed-holidays.js';
 
 export type OrderStatus =
   | 'DRAFT'
@@ -317,7 +318,7 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
   const { recommendationId, recommendation, createdBy, advisoryPath = true } = input;
   const primary = recommendation.primary;
   const expiresAt = primary.action === 'BUY' || primary.action === 'TRIM'
-    ? computeMarketExpiry()
+    ? await computeMarketExpiry(db, new Date())
     : computeSipMfExpiry();
 
   // FR-30/31: Validate rails and freshness before creating draft
@@ -365,13 +366,32 @@ export async function createOrder(db: Db, input: CreateOrderInput): Promise<Orde
   return order;
 }
 
-function computeMarketExpiry(): Date {
-  const now = new Date();
-  const endOfDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 15, 30, 0));
-  if (now >= endOfDay) {
-    endOfDay.setUTCDate(endOfDay.getUTCDate() + 1);
+/** NSE's equity close, 15:30 IST, expressed in UTC. */
+const NSE_CLOSE_UTC_HOUR = 10;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * FR-22: a market approval expires at the end of the trading day — the close of the
+ * next NSE session that has not yet ended.
+ *
+ * This was `15:30 UTC`, which is 21:00 IST, five and a half hours after NSE shuts; and it
+ * ignored the trading calendar, so an order drafted on a Saturday expired that Saturday
+ * night without a session ever opening. Drafting is now automatic (the daily job turns
+ * recommendations into approval requests), which made both defects live: a weekend
+ * recommendation would have expired before the owner could act on it.
+ */
+export async function computeMarketExpiry(db: Db, now: Date): Promise<Date> {
+  // The IST calendar date: a draft at 23:00 IST on the 5th is on the 5th, not the 6th.
+  let day = new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+  for (let guard = 0; guard < 30; guard++) {
+    const close = new Date(`${day}T${String(NSE_CLOSE_UTC_HOUR).padStart(2, '0')}:00:00Z`);
+    if (close > now && await isTradingDay(db, day)) return close;
+    const next = new Date(`${day}T00:00:00Z`);
+    next.setUTCDate(next.getUTCDate() + 1);
+    day = next.toISOString().slice(0, 10);
   }
-  return endOfDay;
+  // Thirty consecutive non-sessions means the calendar is wrong, not that NSE is shut.
+  throw new Error(`no NSE session found within 30 days of ${now.toISOString()}`);
 }
 
 function computeSipMfExpiry(): Date {

@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
@@ -123,5 +124,29 @@ describe('the OAuth INDmoney path is reachable from the entrypoint', () => {
     ]) {
       expect(source, `sync.ts names ${forbidden}`).not.toContain(forbidden);
     }
+  });
+});
+
+/**
+ * FR-20: every actionable recommendation becomes an approval request. `createOrder` had
+ * zero production callers until 2026-09-24, so the approval queue was always empty and
+ * the Phase 2 DoD could not begin. These pin the wiring, not the behaviour — the
+ * behaviour is in tests/domain/order-drafting.test.ts.
+ */
+describe('approval requests are drafted in production', () => {
+  const read = (rel: string) => readFileSync(join(__dirname, '../..', rel), 'utf8');
+
+  it('the daily job drafts them', () => {
+    expect(read('src/jobs/schedule.ts')).toMatch(/draftPendingOrders\(db/);
+  });
+
+  it('runs cleanup before the schedule step, so its recommendations are drafted the same day', () => {
+    const wf = read('.github/workflows/schedule.yml');
+    expect(wf.indexOf('pnpm cleanup')).toBeGreaterThan(-1);
+    expect(wf.indexOf('pnpm cleanup')).toBeLessThan(wf.indexOf('src/jobs/schedule.ts'));
+  });
+
+  it('promoting an exit drafts it immediately', () => {
+    expect(read('web/app/api/exits/promote/route.ts')).toMatch(/draftPendingOrders\(d/);
   });
 });
