@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     include: ['tests/**/*.test.ts'],
     environment: 'node',
+    setupFiles: ['tests/setup.ts'],
     testTimeout: 20_000,
     // Each beforeEach opens a fresh PGlite (WASM Postgres) and runs the full migration
     // set. Under file parallelism that genuinely exceeds vitest's 10s hook default, and

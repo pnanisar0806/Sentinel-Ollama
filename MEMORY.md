@@ -3003,3 +3003,20 @@ JavaScript-rendered with nothing machine-readable.
 - **B3 lives in ONE IDFC First savings account** (not yet opened). Owner declined the
   AU SFB + split plan in PRD §3 table. Consequence: at the full ₹6L target, ₹1L sits above
   DICGC's ₹5L per-bank cover. Mandate text updated in code and in production `buckets`.
+
+## INCIDENT 2026-09-25: the test suite ran against PRODUCTION
+
+A shell that had sourced `.env` then ran `npx vitest run`. Every `openDb()` with no
+argument read DATABASE_URL and hit Supabase between 13:36 and 13:39 UTC, writing test
+fixtures into production (this is also what the "300 failures" were). Seen so far:
+- recommendations 5–45 are fixtures; `{}` legs crash /recommendations.
+- settings_rails: paper_mode set to false; breaker_state tripped (5 fake falsifications);
+  max_order_paise and cash_ceiling_pct rewritten.
+- Fake rows in bucket_flows (B3 "funded" ₹6L), snapshots, holdings, order_intents
+  (BUY NSE:A), holidays (2026-09-18), watchlist, and audit_log (~339 rows, including
+  REVIEWED, CONFIRMED and AMOUNT_STATED).
+- Stray tables `t` and `multi_a`, plus a schema_migrations row `0001_multi.sql`.
+The 18:15 UTC digest and the evening sync ran on this data.
+**Guard:** `tests/setup.ts` deletes DATABASE_URL before every test file. CI never set it.
+**Cleanup is NOT done** — it needs owner approval, since the append-only triggers
+must be bypassed. Pre-incident values come from this file and the seeds.
