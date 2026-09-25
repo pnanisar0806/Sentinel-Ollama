@@ -2934,3 +2934,60 @@ exists there. Approval announcements now point at the web app first.
   point the owner's own policy calls a buying opportunity.
 - **Backup (item 7):** owner said not needed. `backup.yml`'s weekly cron is commented
   out; `workflow_dispatch` kept so re-enabling is restoring one line.
+
+
+## Advisor cadence: buy/sell proposals ONCE A MONTH (owner, 2026-09-24)
+
+Owner: "the advisor will not tell me every day something to buy or sell right? that
+will be bad. weekly once is fine but monthly once is better."
+
+`src/domain/cadence.ts`: rebalance and satellite proposals (weekly report) and cleanup
+items (daily schedule) are generated only in the FIRST RUN OF THE MONTH THAT SUCCEEDS,
+recorded in `audit_log` (`entity='monthly_review'`, `recommendations:YYYY-MM` /
+`cleanup:YYYY-MM`). Not "the first Sunday": GitHub drops scheduled runs, and a pinned
+date would silently skip a month. Dated events do NOT wait: bond maturities, and exits
+the owner promotes on /cleanup. FR-12's four-a-month cap still applies on top.
+
+**Rebalance top-ups now name an instrument** (`addTarget` in alloc-engine.ts): the
+largest existing holding in the class; an EQUITY top-up goes to the core index (IPS §3.4)
+never a satellite stock; EPF, bonds, cash and the RSU are never topped up; fallback is
+the plain index ETF (NIFTYBEES / GOLDBEES / LIQUIDBEES).
+
+**A top-up is ONE MONTHLY TRANCHE**, capped at min(tactical budget, single-order rail) =
+₹50,000 today. The gold gap was ₹2.17L, over both rails, so a full-gap BUY could only
+ever be refused. The thesis states the whole gap and that the rest follows later.
+
+## ServiceNow daily closes (2026-09-24)
+
+`src/sources/now-history.ts` stores `US:NOW` closes in `prices_eod` (source `yahoo`,
+migration 0026 widened the CHECK), converted at that day's Frankfurter USD/INR, latest
+earlier rate carried across an ECB holiday. 252 closes backfilled. `sync` fetches a
+month each run. **The bhavcopy staleness check now counts only `nse-bhavcopy` rows** —
+otherwise a fresh NOW close would mask a dead NSE feed.
+
+Drawdown now includes the RSU as a constant-units leg priced from its own close. With it:
+**2.46%** below the 2026-08-31 peak (1.72% without), worst in window 3.51%.
+
+## Credit-rating feed (IPS §3.8), 2026-09-25
+
+Source: **BSE Reg 30 "Credit Rating" announcements** (SEBI LODR obliges disclosure within
+24h). `src/sources/credit-ratings.ts`, table `credit_rating_filings` (migration 0027,
+append-only), fetched by `sync` two months back each run. Shown on /cleanup with a link
+to each filing's PDF.
+
+Checked and ruled out: INDmoney's bond payload has no rating; NSDL India Bond Info has no
+public rating endpoint and its portal was down (503); CRISIL/ICRA/CARE/Acuité sites are
+JavaScript-rendered with nothing machine-readable.
+
+- **It detects THAT a rating action happened, not which way.** The direction is in the
+  PDF. Deterministic parsing failed (`unpdf` breaks on these files under Node 22).
+  Next step if wanted: classify via the LLM extraction chain as an owner-confirmed
+  proposal, like statements.
+- BSE returned NOTHING for a ~20-month range but data month by month, so fetches are
+  monthly windows.
+- `ISSUER_BSE_SCRIP` maps ISIN issuer prefix to BSE scrip, each verified live:
+  INE148I → 535789 Sammaan Capital, INE532F → 532922 Edelweiss. An unmapped held issuer
+  is reported loudly, never skipped.
+- Production: 7 filings in 12 months (Sammaan 6, Edelweiss 1). The latest: Sammaan
+  2026-08-26, Edelweiss 2026-08-27 — **not yet read.** Sammaan also filed a Reg 57(1)
+  principal-payment certificate on 2026-09-25, independent confirmation of the redemption.

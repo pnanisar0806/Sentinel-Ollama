@@ -21,6 +21,7 @@ import { listRedemptionsUntil, type Redemption } from '../../src/domain/redempti
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { pendingRailChanges, type PendingRailChange } from '../../src/domain/controls.js';
+import { loadRatingFilings, watchedIssuers, type StoredFiling } from '../../src/sources/credit-ratings.js';
 import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
 import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src/domain/mf-switch.js';
 import { concentration } from '../../src/domain/allocation.js';
@@ -318,6 +319,15 @@ export interface CleanupCalendarData {
    *  weekly job has written one. */
   exitCandidates: (ExitCandidate & { firstSeen: string | null })[];
   drawdownPct: number | null;
+}
+
+/** IPS §3.8: rating filings on the issuers of held bonds, last twelve months. */
+export async function getRatingFilings(): Promise<{
+  filings: StoredFiling[]; unwatched: string[];
+}> {
+  const d = await db();
+  const since = new Date(Date.now() - 365 * 86_400_000).toISOString();
+  return { filings: await loadRatingFilings(d, since), unwatched: (await watchedIssuers(d)).unwatched };
 }
 
 export async function getCleanupCalendar(): Promise<CleanupCalendarData> {

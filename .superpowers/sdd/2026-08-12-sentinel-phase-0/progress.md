@@ -730,3 +730,10 @@ legible when the remaining seven are wired up.
 Verified: 695 tests, tsc clean at root and in web/, `next start` against Supabase serves
 every page 200 with no server errors, /rails shows `cash_ceiling_pct 10%` and no
 CASH_CEILING breach (live cash 7.31%, B3 unfunded).
+
+### 2026-09-25 — "take all of them": instrument-named tranches, monthly cadence, NOW in drawdown, credit-rating feed
+Complete. Rebalance top-ups name an instrument (`addTarget`) and are sized as one monthly
+tranche. Buy/sell proposals once a month (`cadence.ts`, owner decision). `US:NOW` daily
+closes (migration 0026) feed the drawdown, now 2.46% below the peak. Credit-rating feed:
+BSE Reg 30 filings (migration 0027), 7 in production, shown on /cleanup. Direction not
+parsed. Verified: 999 tests, web typecheck clean.

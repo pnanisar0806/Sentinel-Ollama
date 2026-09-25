@@ -881,12 +881,17 @@ requests; /freeze /unfreeze /reset_breaker /rail on Telegram AND a Controls pane
 /cleanup; drawdown recorded daily (flow-neutral); rail edits cool 48h; weekly backup cron
 off by owner decision.
 
+DONE 2026-09-25: rebalance BUYs name an instrument and are one monthly tranche;
+buy/sell proposals come ONCE A MONTH (owner decision); drawdown includes the RSU via
+daily NOW closes; credit-rating filings fetched from BSE and shown on /cleanup.
+
 STILL OPEN for Phase 2:
-1. Rebalance recommendations name no instrument, so they cannot become orders. Until
-   fixed, the daily run may have NOTHING to draft and the DoD clock cannot start.
-2. Credit-rating data feed (owner decision: feed, not manual review).
-3. Drawdown excludes the ServiceNow RSU (~23% of the book): needs a daily NOW price.
-4. Telegram bot runs only locally; the web app is the always-on surface.
+1. Credit-rating DIRECTION is not classified — the owner reads each filing's PDF. The
+   Sammaan (2026-08-26) and Edelweiss (2026-08-27) filings have not been read.
+2. Telegram bot runs only locally; the web app is the always-on surface.
+3. The September recommendations review has NOT run yet (checked 2026-09-25; cleanup's
+   has). The next successful weekly report makes September's proposals; October's come
+   from the first successful weekly run on/after 2026-10-01.
 
 Then the DoD itself: 4 clean weeks of paper operation and 5 or more owner approvals end
 to end. The clock starts when approval requests first reach the owner.

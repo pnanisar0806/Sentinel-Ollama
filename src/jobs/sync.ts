@@ -12,6 +12,7 @@ import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { fetchMfDetails } from '../sources/indmoney.js';
 import { recordDrawdown } from '../domain/drawdown.js';
 import { recordNowCloses } from '../sources/now-history.js';
+import { recordRatingFilings } from '../sources/credit-ratings.js';
 import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
@@ -320,6 +321,19 @@ if (isMainModule(import.meta.url)) {
     } catch (error) {
       console.error(`mf metadata capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  // IPS §3.8: rating actions on the issuers of held bonds, from BSE Reg 30 filings.
+  // Two months back each run, so a missed day is caught up; idempotent on BSE's id.
+  try {
+    const r = await recordRatingFilings(db, { months: 2 });
+    console.log(`credit ratings: ${r.written} new filing(s)`);
+    if (r.unwatched.length > 0) {
+      console.error(`credit ratings: bonds held from UNWATCHED issuers ${r.unwatched.join(', ')} `
+        + '- add them to ISSUER_BSE_SCRIP');
+    }
+  } catch (error) {
+    console.error(`credit rating fetch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // ServiceNow closes, so the drawdown includes the RSU (~23% of the book). Before the

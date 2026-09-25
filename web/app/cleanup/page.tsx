@@ -1,4 +1,4 @@
-import { getCleanupCalendar } from '@/lib/data';
+import { getCleanupCalendar, getRatingFilings } from '@/lib/data';
 import { Badge, Card, DataTable, Notice, PageHead, Pct } from '@/lib/ui';
 import { fmtDateTime, relTime, rupees } from '@/lib/format';
 import PromoteExit from './promote-exit';
@@ -8,6 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function CleanupPage() {
   const { redemptions, freezeState, breakerState, railChanges, exitCandidates, drawdownPct } = await getCleanupCalendar();
+  const ratings = await getRatingFilings();
 
   const statusMap: Record<string, { label: string; tone: 'green' | 'amber' | 'indigo' | 'gray' | 'red' }> = {
     falsification: { label: 'FALSIFICATION', tone: 'red' },
@@ -138,6 +139,43 @@ export default async function CleanupPage() {
                   from its own daily close.
                 </div>
               </div>
+            )}
+          </div>
+        </section>
+
+        <section className="card span-2">
+          <header className="card-head">
+            <span className="card-title">Credit rating actions (IPS §3.8)</span>
+            <span className="card-aside">{ratings.filings.length} in 12 months</span>
+          </header>
+          <div className="card-body">
+            <p className="dim">
+              Every rating action a bond issuer you hold must disclose to BSE (SEBI Reg 30).
+              The filing shows that an action happened; open it to see whether it was a
+              downgrade, an upgrade or a reaffirmation.
+            </p>
+            {ratings.unwatched.length > 0 && (
+              <Notice tone="amber">
+                Not watched: bonds from issuer {ratings.unwatched.join(', ')}. Add the issuer to
+                ISSUER_BSE_SCRIP so its rating actions are fetched.
+              </Notice>
+            )}
+            {ratings.filings.length === 0 ? (
+              <Notice tone="gray">No rating filings on record yet. The daily sync fetches them.</Notice>
+            ) : (
+              <DataTable
+                rows={ratings.filings.map((f, i) => ({ key: `${f.filedAt}-${i}`, f }))}
+                cols={[
+                  { label: 'Filed', value: ({ f }) => fmtDateTime(f.filedAt) },
+                  { label: 'Issuer', value: ({ f }) => f.company },
+                  {
+                    label: 'Filing',
+                    value: ({ f }) => (f.attachmentUrl
+                      ? <a href={f.attachmentUrl} target="_blank" rel="noreferrer">read the PDF</a>
+                      : <span className="dim">no attachment</span>),
+                  },
+                ]}
+              />
             )}
           </div>
         </section>
