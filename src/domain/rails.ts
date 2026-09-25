@@ -458,8 +458,8 @@ export async function checkPortfolioRails(
  * liquid/debt funds are DEBT and are not idle cash, so they do not count here.
  *
  * The **funded B3 balance is subtracted first**. B3 is the emergency fund the IPS
- * requires the owner to hold in bank deposits (AU SFB, then IDFC First, split beyond 5L
- * for DICGC cover), so holding it is compliance, not idleness -- and its 6,00,000 target
+ * requires the owner to hold in bank deposits (one IDFC First account, owner 2026-09-25;
+ * DICGC covers 5L of it), so holding it is compliance, not idleness -- and its 6,00,000 target
  * is 10.7% of the 2026-09-19 portfolio, which would breach a 10% ceiling the day it
  * completed. Only the balance ACTUALLY in `bucket_flows` is excused: excusing the target
  * would exempt 6L of genuinely idle cash for a fund that does not exist yet. As of

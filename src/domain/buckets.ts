@@ -155,7 +155,7 @@ export const BUCKETS: Record<BucketId, Bucket> = {
   B3: {
     id: 'B3',
     name: 'Emergency fund',
-    mandate: 'Liquid savings; AU SFB during build, IDFC First beyond 3L, split beyond 5L for DICGC cover',
+    mandate: 'Liquid savings in one IDFC First savings account (owner decision, Sep 2026); DICGC covers only 5L of the 6L target',
     targetPaise: rupees(600_000),
     targetNote: 'Complete by Dec 2026 from Sammaan maturity + Nov 2026 vest',
     active: true,

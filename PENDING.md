@@ -887,7 +887,7 @@ daily NOW closes; credit-rating filings fetched from BSE and shown on /cleanup.
 
 STILL OPEN for Phase 2:
 1. Credit-rating DIRECTION is not classified — the owner reads each filing's PDF. The
-   Sammaan (2026-08-26) and Edelweiss (2026-08-27) filings have not been read.
+   Aug-2026 Sammaan and Edelweiss filings READ 2026-09-25: upgrade / new-issue, no action.
 2. Telegram bot runs only locally; the web app is the always-on surface.
 3. The September recommendations review has NOT run yet (checked 2026-09-25; cleanup's
    has). The next successful weekly report makes September's proposals; October's come

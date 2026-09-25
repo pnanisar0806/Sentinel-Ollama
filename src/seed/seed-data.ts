@@ -231,7 +231,7 @@ export const SEED_BUCKETS = [
     mandate: 'Capital preservation; duration-matched debt/arbitrage; no equity risk inside 7 years of purchase',
     targetNote: 'Down payment + costs 55-75L for a 2-2.5 Cr Hyderabad home, 2033-35' },
   { id: 'B3', name: 'Emergency fund', targetPaise: rupees(600_000),
-    mandate: 'Liquid savings; AU SFB during build, IDFC First beyond 3L, split beyond 5L for DICGC cover',
+    mandate: 'Liquid savings in one IDFC First savings account (owner decision, Sep 2026); DICGC covers only 5L of the 6L target',
     targetNote: 'Complete by Dec 2026 from Sammaan maturity + Nov 2026 vest' },
   { id: 'B4', name: 'Education corpus', targetPaise: rupees(10_000_000),
     mandate: 'Long-horizon equity glide path, de-risking from ~2040',

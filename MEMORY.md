@@ -2991,3 +2991,15 @@ JavaScript-rendered with nothing machine-readable.
 - Production: 7 filings in 12 months (Sammaan 6, Edelweiss 1). The latest: Sammaan
   2026-08-26, Edelweiss 2026-08-27 — **not yet read.** Sammaan also filed a Reg 57(1)
   principal-payment certificate on 2026-09-25, independent confirmation of the redemption.
+
+## Rating filings read + B3 bank decision (owner, 2026-09-25)
+
+- **Sammaan 2026-08-26:** Brickwork UPGRADED long-term rating to BWR AAA/Stable (first
+  AAA); CRISIL, ICRA, S&P and CARE had already upgraded after IHC's 2026-03-31 investment.
+  No bearing now — the Sammaan bond is redeemed.
+- **Edelweiss 2026-08-27:** Brickwork ASSIGNED BWR A+/Positive to a *proposed* ₹1,000 cr
+  NCD programme. A new-issue rating, not an action on the held Edelweiss 2033 bond; its
+  own rating is not in this filing. Positive outlook, no action.
+- **B3 lives in ONE IDFC First savings account** (not yet opened). Owner declined the
+  AU SFB + split plan in PRD §3 table. Consequence: at the full ₹6L target, ₹1L sits above
+  DICGC's ₹5L per-bank cover. Mandate text updated in code and in production `buckets`.
