@@ -46,7 +46,7 @@ function Leg({ leg, label }: { leg: RecLeg; label: string }) {
         </span>
         <Badge tone={ACTION_TONE[leg.action] ?? 'gray'}>{leg.action}</Badge>
         {leg.instrumentId ? <span className="mono">{leg.instrumentId}</span> : <span className="dim">portfolio-level</span>}
-        {leg.amountPaise !== null
+        {leg.amountPaise != null
           ? <strong><Money p={BigInt(leg.amountPaise) as Paise} /></strong>
           : <span className="dim">amount unsized</span>}
       </div>
@@ -54,9 +54,9 @@ function Leg({ leg, label }: { leg: RecLeg; label: string }) {
       <p style={{ margin: '0.35rem 0 0' }}>{leg.intent}</p>
       {leg.thesis ? <p className="dim" style={{ margin: '0.2rem 0 0' }}>{leg.thesis}</p> : null}
 
-      {leg.ipsClauseRefs.length > 0 ? (
+      {(leg.ipsClauseRefs ?? []).length > 0 ? (
         <p style={{ margin: '0.35rem 0 0' }}>
-          {leg.ipsClauseRefs.map((c) => <Badge key={c} tone="gray">{c}</Badge>)}
+          {(leg.ipsClauseRefs ?? []).map((c) => <Badge key={c} tone="gray">{c}</Badge>)}
         </p>
       ) : (
         <p className="dim" style={{ margin: '0.35rem 0 0' }}>No clause cited — FR-10 requires at least one.</p>

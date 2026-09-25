@@ -3018,5 +3018,14 @@ fixtures into production (this is also what the "300 failures" were). Seen so fa
 - Stray tables `t` and `multi_a`, plus a schema_migrations row `0001_multi.sql`.
 The 18:15 UTC digest and the evening sync ran on this data.
 **Guard:** `tests/setup.ts` deletes DATABASE_URL before every test file. CI never set it.
-**Cleanup is NOT done** — it needs owner approval, since the append-only triggers
-must be bypassed. Pre-incident values come from this file and the seeds.
+**Cleaned 2026-09-26 (owner-approved)** in one transaction with triggers disabled only
+inside it, by xid range 152000..217500 (13:35:54-13:40:25 UTC). Audit row
+`incident/TEST_POLLUTION_CLEANED` holds the counts. Verified: 0 disabled triggers, recs
+1-4 only, 95 lots / 28 open, 21 Fidelity tranches = 400 units, paper_mode true, breaker
+off, cash 10%, max order ₹50k, M1 not completed (owner confirmed).
+- Real lots are exactly those with a pre-incident audit row (ingest / supersededLots /
+  CLEANUP_CLOSED); the 7 fixture lots had none. Old ingest payloads are jsonb STRINGS.
+- `breaker_state` is stored as a jsonb string; `getBreakerState` parses either form.
+- Remaining owner step: `pnpm indmoney:login` (the test run overwrote the token).
+- The price history the tests overwrote (RPOWER, NIFTYBEES, NIFTY 500) is re-downloaded
+  by a one-off refill, because backfill-prices skips any day that already has some rows.
