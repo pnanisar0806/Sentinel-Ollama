@@ -5,6 +5,7 @@ import { ASSUMPTIONS } from '../config/assumptions.js';
 import { persistSchedules } from '../domain/loans.js';
 import { installIps } from '../domain/ips.js';
 import { persistVests, projectVests } from '../domain/rsu.js';
+import { FIDELITY_SOURCE } from '../seed/seed-rsu-actual.js';
 import { FileIndmoneySource, RemoteIndmoneySource } from '../sources/indmoney.js';
 import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
@@ -148,8 +149,12 @@ if (opts.fetchFx) {
 
   await persistSchedules(db, `${businessDate.slice(0, 7)}-01`);
 
+  // A grant with tranches from the owner's statement already has its real schedule. The
+  // model's uniform quarters would add vests that do not exist beside it.
   const grants = await db.query<{ id: string; granted_on: string | Date; units: string; note: string }>(
-    'select id, granted_on, units, note from rsu_grants',
+    `select id, granted_on, units, note from rsu_grants g
+      where not exists (select 1 from rsu_vests v where v.grant_id = g.id and v.source = $1)`,
+    [FIDELITY_SOURCE],
   );
   await persistVests(
     db,

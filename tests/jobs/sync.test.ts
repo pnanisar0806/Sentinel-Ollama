@@ -91,6 +91,24 @@ describe('sync job', () => {
     expect(Number(sched!.n)).toBeGreaterThan(0);
     expect(Number(vests!.n)).toBeGreaterThan(0);
   });
+
+  it('never projects model tranches onto a grant whose schedule comes from the statement', async () => {
+    // The statement's tranches are the schedule for these grants. A quarterly model row
+    // beside them (2026-11-15 on the semi-annual 21RUIN4A1, say) is a vest that does not
+    // exist; three of them were the ~Rs 4L "vesting on 15 Nov" the digest kept showing.
+    await runSync(db, {
+      now: '2026-09-26T17:30:00+05:30',
+      sources: [new FileIndmoneySource('tests/fixtures/indmoney-snapshot.json')],
+    });
+    const statementGrants = await db.query<{ grant_id: string }>(
+      `select distinct grant_id from rsu_vests where source = 'fidelity-awards-details'`);
+    expect(statementGrants.length).toBeGreaterThan(0);
+    const phantom = await db.query<{ grant_id: string; vest_on: string }>(
+      `select grant_id, vest_on::text from rsu_vests
+        where source = 'model'
+          and grant_id in (select grant_id from rsu_vests where source = 'fidelity-awards-details')`);
+    expect(phantom).toEqual([]);
+  });
 });
 describe('EOD quote steps (Phase 1 Task 13)', () => {
   const equityRow = {

@@ -66,7 +66,7 @@ export async function loadReportRuns(db: Db, limit = 20): Promise<ReportRunRecor
   const rows = await db.query<{ entity_id: string; payload: unknown }>(
     `select entity_id, payload from audit_log
       where entity = 'weekly_report' and action = 'REPORT_SENT'
-      order by at desc limit $1`,
+      order by at desc, id desc limit $1`,
     [limit],
   );
   return rows.map((r) => {
