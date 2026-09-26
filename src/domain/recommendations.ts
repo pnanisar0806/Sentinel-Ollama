@@ -270,12 +270,15 @@ export async function gateRecommendation(
   opts: { override?: OverrideEvent } = {},
 ): Promise<GateResult> {
   const month = monthOf(rec.createdOn);
+  // A maturity routing is a dated event with pre-approved routing (IPS §3.9), not a new
+  // idea: it neither counts toward the cap nor is refused by it (owner, 2026-09-26).
   const [{ n } = { n: '0' }] = await db.query<{ n: string }>(
     `select count(*) as n from recommendations
-      where suppressed = false and to_char(created_on, 'YYYY-MM') = $1`,
+      where suppressed = false and kind <> 'maturity_routing'
+        and to_char(created_on, 'YYYY-MM') = $1`,
     [month],
   );
-  if (Number(n) >= MAX_RECS_PER_MONTH) {
+  if (rec.kind !== 'maturity_routing' && Number(n) >= MAX_RECS_PER_MONTH) {
     return {
       allowed: false,
       reason: `FR-12: ${month} already carries ${n} recommendations, the cap is ${MAX_RECS_PER_MONTH}`,

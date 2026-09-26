@@ -174,6 +174,26 @@ describe('FR-12 caps', () => {
     expect(Number(row!.n)).toBe(1);
   });
 
+  it('does not count a maturity routing toward the monthly cap', async () => {
+    // Owner decision 2026-09-26: a maturity is a dated event with pre-approved routing
+    // (IPS §3.9), not a new idea, so it must not crowd out a real proposal.
+    const routing = await persistRecommendation(db, buildRecommendation({
+      kind: 'maturity_routing', createdOn: '2026-08-01',
+      primary: leg({ intent: 'route the redemption', instrumentId: 'BOND:SAMMAAN-2026', action: 'REDEEM' }),
+    }));
+    expect(routing.suppressed).toBe(false);
+    for (let i = 0; i < MAX_RECS_PER_MONTH; i++) {
+      const r = await persistRecommendation(db, rec({ instrumentId: `NSE:N${i}` }, `2026-08-0${i + 2}`));
+      expect(r.suppressed).toBe(false);
+    }
+    // And a maturity is never refused by the cap either.
+    const late = await persistRecommendation(db, buildRecommendation({
+      kind: 'maturity_routing', createdOn: '2026-08-20',
+      primary: leg({ intent: 'route another redemption', instrumentId: 'BOND:EDELWEISS-2033', action: 'REDEEM' }),
+    }));
+    expect(late.suppressed).toBe(false);
+  });
+
   it('counts the cap per calendar month, so the next month starts clean', async () => {
     for (let i = 0; i < MAX_RECS_PER_MONTH; i++) {
       await persistRecommendation(db, rec({ instrumentId: `NSE:N${i}` }, `2026-08-0${i + 1}`));

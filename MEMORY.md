@@ -3038,3 +3038,14 @@ semi-annual 21RUIN4A1/4A3 and the annual 25RUST), model rows were ADDED beside t
 tranches: 15 phantom rows, 111.56 units, 24.7 of them on 15 Nov. That was the "~Rs 4L
 vesting 15 Nov" reappearing after every sync. sync now projects only grants with no
 `fidelity-awards-details` row (test in tests/jobs/sync.test.ts).
+
+## FR-12 cap excludes maturity routings; duplicate proposals refused (owner, 2026-09-26)
+
+- **Maturity routings neither count toward the 4-per-month cap nor are refused by it.**
+  A maturity is a dated event whose routing IPS §3.9 pre-approves, not a new idea;
+  counting it let the Sammaan routings fill September. This amends FR-12 as written.
+- `persistRecommendation` returns the existing row (`duplicate: true`) for the same kind,
+  action, instrument and intent in the same month; the report does not re-benchmark it.
+  The 2026-09-20 report ran twice: #3/#4 were exact copies of #1/#2.
+- #2 (gold BUY with no instrument) retired by the owner — suppressed with a reason, not
+  deleted.
