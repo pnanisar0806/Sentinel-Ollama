@@ -52,18 +52,23 @@ export async function narrate(deps: NarrationDeps): Promise<string | null> {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: deps.model ?? DEFAULT_NARRATION_MODEL,
+        // `||`, not `??`: an unset Actions variable arrives as '', which OpenRouter refuses.
+        model: deps.model || DEFAULT_NARRATION_MODEL,
         messages: [
           { role: 'system', content: NARRATION_PROMPT },
           { role: 'user', content: `${deps.bullets.join('\n')}\n\nENGINE OUTPUT:\n${deps.engineJson}` },
         ],
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.error(`narration: HTTP ${res.status} from the model endpoint`);
+      return null;
+    }
     const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
     const text = body.choices?.[0]?.message?.content?.trim();
     return text === undefined || text === '' ? null : text;
-  } catch {
+  } catch (error) {
+    console.error(`narration failed: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
