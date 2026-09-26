@@ -41,9 +41,11 @@ export function Card({
   );
 }
 
-export function Stat({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: Tone }) {
+export type Accent = 'green' | 'red' | 'amber' | 'teal' | 'violet' | 'sky';
+
+export function Stat({ label, value, sub, tone, accent }: { label: string; value: ReactNode; sub?: ReactNode; tone?: Tone; accent?: Accent }) {
   return (
-    <div className="stat">
+    <div className={`stat${accent ? ` s-${accent}` : ''}`}>
       <div className="stat-label">{label}</div>
       <div className={`stat-value${tone ? ` st-${tone}` : ''}`}>{value}</div>
       {sub ? <div className="stat-sub">{sub}</div> : null}

@@ -6,52 +6,52 @@ import { usePathname } from 'next/navigation';
 /** Live = shipped today. Soon = Phase-1 shelves (rendered dim + disabled-looking). */
 const GROUPS: {
   label: string;
+  color: string;
   items: { href: string; label: string; stage: 'live' | 'soon' }[];
 }[] = [
   {
-    label: 'Portfolio',
+    label: 'Portfolio', color: '#818cf8',
     items: [
       { href: '/', label: 'Overview', stage: 'live' },
       { href: '/holdings', label: 'Holdings', stage: 'live' },
       { href: '/allocation', label: 'Allocation', stage: 'live' },
+      { href: '/buckets', label: 'Goals', stage: 'live' },
+      { href: '/rsu', label: 'RSU', stage: 'live' },
+      { href: '/funds', label: 'Funds', stage: 'live' },
     ],
   },
   {
-    label: 'Intake',
+    label: 'Act', color: '#34d399',
     items: [
-      { href: '/import', label: 'Import statements', stage: 'live' },
+      { href: '/approvals', label: 'Approvals', stage: 'live' },
+      { href: '/recommendations', label: 'Recommendations', stage: 'live' },
+      { href: '/log', label: 'Log what I did', stage: 'live' },
+      { href: '/cleanup', label: 'Cleanup & controls', stage: 'live' },
+      { href: '/maturity', label: 'Maturity', stage: 'live' },
     ],
   },
   {
-    label: 'Governance',
+    label: 'Research', color: '#38bdf8',
+    items: [
+      { href: '/watchlist', label: 'Watchlist', stage: 'live' },
+      { href: '/signals', label: 'Signal review', stage: 'live' },
+      { href: '/scoring', label: 'Scoring', stage: 'live' },
+      { href: '/narrative', label: 'Weekly narrative', stage: 'live' },
+    ],
+  },
+  {
+    label: 'Governance', color: '#fbbf24',
     items: [
       { href: '/rails', label: 'Owner rails', stage: 'live' },
-      { href: '/approvals', label: 'Approvals', stage: 'live' },
-      { href: '/cleanup', label: 'Cleanup', stage: 'live' },
-      { href: '/rsu', label: 'RSU', stage: 'live' },
       { href: '/ips', label: 'IPS', stage: 'live' },
       { href: '/freshness', label: 'Data freshness', stage: 'live' },
       { href: '/audit', label: 'Audit log', stage: 'live' },
     ],
   },
   {
-    label: 'Phase 1',
+    label: 'System', color: '#c084fc',
     items: [
-      { href: '/watchlist', label: 'Watchlist', stage: 'live' },
-      { href: '/signals', label: 'Signal review', stage: 'live' },
-      { href: '/recommendations', label: 'Recommendations', stage: 'live' },
-      { href: '/maturity', label: 'Maturity', stage: 'live' },
-      // Still 'soon' on purpose: the weekly report and its narration ship to Telegram
-      // but are never persisted, so this page has no row to read. Engine built, table
-      // not. Flipping this to 'live' would promise a surface that renders nothing.
-      { href: '/narrative', label: 'Narrative', stage: 'live' },
-      { href: '/scoring', label: 'Scoring', stage: 'live' },
-      { href: '/funds', label: 'Funds', stage: 'live' },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
+      { href: '/import', label: 'Import statements', stage: 'live' },
       { href: '/product', label: 'Product map', stage: 'live' },
     ],
   },
@@ -79,6 +79,7 @@ export default function Nav() {
                   className={it.stage === 'soon' ? 'nav-planned' : undefined}
                   aria-current={active ? 'page' : undefined}
                 >
+                  <span className="nav-dot" style={{ background: g.color }} aria-hidden="true" />
                   <span className="nav-label">{it.label}</span>
                   {it.stage === 'soon' ? <span className="nav-chip chip-soon">soon</span> : null}
                 </Link>

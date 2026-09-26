@@ -27,6 +27,7 @@ import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
+import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -659,5 +660,28 @@ export async function getMfSwitches(): Promise<{
   return {
     switches: await evaluateSwitches(await db(), new Date().toISOString().slice(0, 10)),
     margin: SWITCH_MARGIN,
+  };
+}
+
+export interface LogData {
+  timeline: TimelineEntry[];
+  buckets: { id: string; name: string }[];
+  openMilestones: { id: string; name: string }[];
+  bonds: { id: string; name: string }[];
+}
+
+/** What /log needs: the owner's own timeline and the choices each form offers. */
+export async function getLog(): Promise<LogData> {
+  const d = await db();
+  const input = await getDigest();
+  const positions = await loadPositions(d, input.businessDate);
+  const bonds = new Map<string, string>();
+  // loadPositions already drops a redeemed bond, so what is left is still outstanding.
+  for (const p of positions) if (p.kind === 'BOND') bonds.set(p.instrumentId, p.name);
+  return {
+    timeline: await loadOwnerTimeline(d),
+    buckets: input.buckets.map((b) => ({ id: b.id, name: b.name })),
+    openMilestones: input.milestones.filter((m) => m.completedOn === null).map((m) => ({ id: m.id, name: m.name })),
+    bonds: [...bonds].map(([id, name]) => ({ id, name })),
   };
 }

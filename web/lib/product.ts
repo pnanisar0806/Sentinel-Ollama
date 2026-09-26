@@ -18,6 +18,15 @@ export interface Area {
 }
 
 export const AREAS: Area[] = [
+
+  {
+    slug: 'log',
+    name: 'Log what I did',
+    stage: 'live',
+    what: 'The owner tells Sentinel what they did outside it, in the app instead of a chat.',
+    works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry'],
+    missing: ['RSU vest confirmation (Telegram only today)', 'A trade made outside Sentinel is a note, not a structured record'],
+  },
   {
     slug: 'overview',
     name: 'Net worth & day-over-day',
