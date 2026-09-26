@@ -5,14 +5,14 @@
    ───────────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Vivid dark (owner, 2026-09-27): deep navy, never near-black; colour carries meaning. */
-  --bg: #0b1030;
-  --bg-2: #111842;
-  --panel: rgba(30, 40, 92, 0.46);
-  --panel-2: rgba(44, 56, 120, 0.52);
-  --panel-hover: rgba(70, 84, 160, 0.40);
-  --border: rgba(148, 163, 255, 0.16);
-  --border-strong: rgba(148, 163, 255, 0.30);
+  /* Backgrounds from LeetCode's dark theme (owner, 2026-09-27): neutral greys, no tint. */
+  --bg: #1a1a1a;
+  --bg-2: #1a1a1a;
+  --panel: #282828;
+  --panel-2: #282828;
+  --panel-hover: #333333;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.18);
   --text: #f3f5ff;
   --text-dim: #c3c9ea;
   --text-faint: #939bc6;
@@ -49,8 +49,7 @@
 html, body { margin: 0; padding: 0; }
 
 body {
-  background: var(--glow), linear-gradient(180deg, var(--bg-2), var(--bg) 40%);
-  background-attachment: fixed;
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-size: 15px;
@@ -265,13 +264,11 @@ a:hover { color: #f0abfc; }
 
 .card {
   position: relative;
-  background: linear-gradient(160deg, var(--panel-2), var(--panel));
+  background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px 22px;
   margin-bottom: 18px;
-  box-shadow: 0 10px 34px rgba(4, 6, 30, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(14px);
 }
 
 /* Inside a grid the container gap provides spacing — never a double margin. */
@@ -314,22 +311,21 @@ a:hover { color: #f0abfc; }
 .stat {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(150deg, rgba(99, 102, 241, 0.30), rgba(30, 40, 92, 0.50));
+  background: linear-gradient(150deg, rgba(99, 102, 241, 0.30), #282828);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px 20px;
-  box-shadow: 0 10px 30px rgba(4, 6, 30, 0.40);
 }
 .stat::after {
   content: ''; position: absolute; right: -40px; top: -40px; width: 130px; height: 130px;
   border-radius: 50%; background: rgba(255, 255, 255, 0.06);
 }
-.stat.s-green { background: linear-gradient(150deg, rgba(16, 185, 129, 0.34), rgba(30, 40, 92, 0.50)); }
-.stat.s-red { background: linear-gradient(150deg, rgba(244, 63, 94, 0.34), rgba(30, 40, 92, 0.50)); }
-.stat.s-amber { background: linear-gradient(150deg, rgba(245, 158, 11, 0.32), rgba(30, 40, 92, 0.50)); }
-.stat.s-teal { background: linear-gradient(150deg, rgba(20, 184, 166, 0.34), rgba(30, 40, 92, 0.50)); }
-.stat.s-violet { background: linear-gradient(150deg, rgba(168, 85, 247, 0.34), rgba(30, 40, 92, 0.50)); }
-.stat.s-sky { background: linear-gradient(150deg, rgba(56, 189, 248, 0.32), rgba(30, 40, 92, 0.50)); }
+.stat.s-green { background: linear-gradient(150deg, rgba(16, 185, 129, 0.34), #282828); }
+.stat.s-red { background: linear-gradient(150deg, rgba(244, 63, 94, 0.34), #282828); }
+.stat.s-amber { background: linear-gradient(150deg, rgba(245, 158, 11, 0.32), #282828); }
+.stat.s-teal { background: linear-gradient(150deg, rgba(20, 184, 166, 0.34), #282828); }
+.stat.s-violet { background: linear-gradient(150deg, rgba(168, 85, 247, 0.34), #282828); }
+.stat.s-sky { background: linear-gradient(150deg, rgba(56, 189, 248, 0.32), #282828); }
 
 .stat-label {
   font-size: 11px;
@@ -636,7 +632,7 @@ a:hover { color: #f0abfc; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* ── Revamp 2026-09-27: nav accents, bento grid, allocation bar, progress, timeline, forms ── */
 
-.nav { background: linear-gradient(180deg, rgba(30, 40, 100, 0.55), rgba(11, 16, 48, 0.35)); backdrop-filter: blur(16px); }
+.nav { background: var(--panel); }
 .brand-mark { background: var(--grad); box-shadow: 0 0 22px rgba(168, 85, 247, 0.65); }
 .nav-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; opacity: 0.9; }
 .nav nav a[aria-current='page'] {
@@ -686,7 +682,7 @@ a:hover { color: #f0abfc; }
 .field label { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
 .field input, .field select, .field textarea {
   font: inherit; font-size: 14.5px; color: var(--text);
-  background: rgba(8, 12, 40, 0.55); border: 1px solid var(--border-strong);
+  background: #333333; border: 1px solid var(--border-strong);
   border-radius: 10px; padding: 10px 12px; min-height: 44px;
 }
 .field textarea { min-height: 88px; resize: vertical; }
