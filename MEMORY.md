@@ -3029,3 +3029,12 @@ off, cash 10%, max order ₹50k, M1 not completed (owner confirmed).
 - Remaining owner step: `pnpm indmoney:login` (the test run overwrote the token).
 - The price history the tests overwrote (RPOWER, NIFTYBEES, NIFTY 500) is re-downloaded
   by a one-off refill, because backfill-prices skips any day that already has some rows.
+
+## RSU phantom tranches: sync no longer projects statement grants (2026-09-26, f90a4df)
+
+`persistVests` refused to overwrite a statement row, but `sync.ts` still projected EVERY
+grant over uniform quarters. On dates the statement does not list (2026-11-15 for the
+semi-annual 21RUIN4A1/4A3 and the annual 25RUST), model rows were ADDED beside the real
+tranches: 15 phantom rows, 111.56 units, 24.7 of them on 15 Nov. That was the "~Rs 4L
+vesting 15 Nov" reappearing after every sync. sync now projects only grants with no
+`fidelity-awards-details` row (test in tests/jobs/sync.test.ts).
