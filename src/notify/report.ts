@@ -330,10 +330,10 @@ export async function buildReportInput(
     });
   }
   for (const rec of built) {
-    const { id } = await persistRecommendation(db, rec);
+    const { id, duplicate } = await persistRecommendation(db, rec);
     // §13.2: capture the point of comparison the moment the call is made. A suppressed
-    // recommendation has no id and nothing to score.
-    if (id !== null) {
+    // recommendation has no id and nothing to score; a duplicate was benchmarked already.
+    if (id !== null && !duplicate) {
       await snapshotBenchmark(db, {
         recommendationId: id,
         instrumentId: rec.primary.instrumentId,

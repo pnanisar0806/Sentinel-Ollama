@@ -328,6 +328,8 @@ export interface PersistResult {
   id: number | null;
   suppressed: boolean;
   reason: string | null;
+  /** Already stored this month; nothing was written. */
+  duplicate?: boolean;
 }
 
 /**
@@ -343,6 +345,20 @@ export async function persistRecommendation(
   rec: Recommendation,
   opts: { override?: OverrideEvent } = {},
 ): Promise<PersistResult> {
+  // A report that runs twice must not store its proposals twice: the copy would show on
+  // the page and spend the month's FR-12 cap. Same kind, action, instrument and intent in
+  // the same month is the same proposal.
+  const [existing] = await db.query<{ id: number }>(
+    `select id from recommendations
+      where suppressed = false and kind = $1 and intent = $2
+        and to_char(created_on, 'YYYY-MM') = $3
+        and primary_rec::jsonb ->> 'action' = $4
+        and primary_rec::jsonb ->> 'instrumentId' is not distinct from $5
+      order by id limit 1`,
+    [rec.kind, rec.primary.intent, monthOf(rec.createdOn), rec.primary.action, rec.primary.instrumentId],
+  );
+  if (existing) return { id: Number(existing.id), suppressed: false, reason: null, duplicate: true };
+
   const gate = await gateRecommendation(db, rec, opts);
   const action = `${rec.kind}:${rec.primary.action}:${rec.primary.instrumentId ?? 'portfolio'}`;
 

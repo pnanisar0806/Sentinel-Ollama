@@ -67,7 +67,12 @@ describe('drafting approval requests from recommendations', () => {
     // already stopped by FR-12's repeat-BUY hold, but a REDEEM is not.
     const redeem = { instrumentId: 'BOND:SAMMAAN-2026', action: 'REDEEM' as const, amountPaise: '3000000' };
     const a = await persist(redeem, '2026-09-20', 'maturity_routing' as never);
-    const b = await persist(redeem, '2026-09-20', 'maturity_routing' as never);
+    // persistRecommendation no longer stores a copy, so write the legacy one directly.
+    const [copy] = await db.query<{ id: string }>(
+      `insert into recommendations (created_on, kind, intent, primary_rec, alternates, ips_clause_refs, engine_evidence, source)
+       select created_on, kind, intent, primary_rec, alternates, ips_clause_refs, engine_evidence, source
+         from recommendations where id = $1 returning id`, [a]);
+    const b = Number(copy!.id);
     expect(a).not.toBe(b);
     const report = await draftPendingOrders(db, NOW);
     expect(report.drafted).toHaveLength(1);

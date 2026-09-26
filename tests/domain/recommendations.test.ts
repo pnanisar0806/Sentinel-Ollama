@@ -158,6 +158,22 @@ describe('FR-12 caps', () => {
     expect(logged!.suppressed_by).toBe('FR-12');
   });
 
+  it('stores a proposal once per month, however many times the report runs', async () => {
+    // The 2026-09-20 weekly report ran twice and stored both recommendations twice, which
+    // doubled the page and spent the month's FR-12 cap on copies.
+    const r = () => buildRecommendation({
+      kind: 'rebalance', createdOn: '2026-09-20',
+      primary: leg({ intent: 'restore GOLD toward its IPS band', instrumentId: 'NSE:GOLDBEES' }),
+    });
+    const first = await persistRecommendation(db, r());
+    const again = await persistRecommendation(db, r());
+    expect(again.id).toBe(first.id);
+    expect(again.suppressed).toBe(false);
+    expect(again.duplicate).toBe(true);
+    const [row] = await db.query<{ n: string }>(`select count(*) as n from recommendations`);
+    expect(Number(row!.n)).toBe(1);
+  });
+
   it('counts the cap per calendar month, so the next month starts clean', async () => {
     for (let i = 0; i < MAX_RECS_PER_MONTH; i++) {
       await persistRecommendation(db, rec({ instrumentId: `NSE:N${i}` }, `2026-08-0${i + 1}`));
