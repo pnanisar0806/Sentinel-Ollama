@@ -18,6 +18,14 @@ export interface Area {
 }
 
 export const AREAS: Area[] = [
+  {
+    slug: 'advisor',
+    name: 'Advisor (Phase 2.5)',
+    stage: 'live',
+    what: 'Monthly buy / sell / hold / wait decision by the model among deterministically sized candidates, with news, owner sign-off, quarterly watchlist revision, commentary and track record.',
+    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20'],
+    missing: ['The model reads filing headlines, not the PDFs', 'US holdings have no news source', 'Past rails and cash are not versioned, so replay does not re-size'],
+  },
 
   {
     slug: 'log',

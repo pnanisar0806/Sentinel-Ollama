@@ -23,6 +23,7 @@ const GROUPS: {
   {
     label: 'Act', color: '#34d399',
     items: [
+      { href: '/advisor', label: 'Advisor', stage: 'live' },
       { href: '/approvals', label: 'Approvals', stage: 'live' },
       { href: '/recommendations', label: 'Recommendations', stage: 'live' },
       { href: '/log', label: 'Log what I did', stage: 'live' },

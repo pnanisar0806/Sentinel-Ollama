@@ -29,6 +29,8 @@ import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
 import { getOrder, getOrderHistory, type OrderIntent } from '../../src/domain/orders.js';
 import { humanize, sentence } from './plain';
+import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
+import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
 
 let dbPromise: Promise<Db> | null = null;
@@ -696,4 +698,42 @@ export async function getInstrumentNames(): Promise<Map<string, string>> {
   const rows = await (await db()).query<{ id: string; name: string }>(
     `select id, name from instruments where name is not null and name <> id`);
   return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+export interface AdvisorData {
+  advice: StoredProposal[];
+  revision: (StoredProposal & { decided: Record<number, 'ACCEPTED' | 'DECLINED'> }) | null;
+  commentary: StoredProposal | null;
+  news: { id: number; on: string; name: string; type: string; headline: string; polarity: string | null; materiality: string | null; summary: string | null; url: string | null }[];
+  calibration: Awaited<ReturnType<typeof calibrateByOrigin>>;
+  names: Map<string, string>;
+}
+
+/** /advisor: the model's advice, the watchlist revision, material news, commentary, track record. */
+export async function getAdvisor(): Promise<AdvisorData> {
+  const d = await db();
+  const [revision] = await loadProposals(d, 'WATCHLIST_REVISION', 1);
+  const decided: Record<number, 'ACCEPTED' | 'DECLINED'> = {};
+  if (revision) {
+    const rows = await d.query<{ entity_id: string; action: 'ACCEPTED' | 'DECLINED' }>(
+      `select entity_id, action from audit_log where entity = 'watchlist_revision' and entity_id like $1`, [`${revision.id}:%`]);
+    for (const r of rows) decided[Number(r.entity_id.split(':')[1])] = r.action;
+  }
+  const news = await d.query<{ id: string; published_at: string | Date; name: string | null; instrument_id: string | null; event_type: string; headline: string; polarity: string | null; materiality: string | null; summary: string | null; url: string | null }>(
+    `select e.id, e.published_at, i.name, e.instrument_id, e.event_type, e.headline, s.polarity, s.materiality, s.summary, e.url
+       from news_events e left join instruments i on i.id = e.instrument_id
+       left join lateral (select polarity, materiality, summary from event_sentiment x where x.event_id = e.id order by x.classified_at desc, x.id desc limit 1) s on true
+      where e.published_at >= now() - interval '30 days'
+      order by case s.materiality when 'HIGH' then 0 when 'MEDIUM' then 1 else 2 end, e.published_at desc limit 40`);
+  return {
+    advice: await loadProposals(d, 'ADVISE', 12),
+    revision: revision ? { ...revision, decided } : null,
+    commentary: (await loadProposals(d, 'COMMENTARY', 1))[0] ?? null,
+    news: news.map((n) => ({
+      id: Number(n.id), on: new Date(n.published_at).toISOString().slice(0, 10), name: n.name ?? n.instrument_id ?? 'market',
+      type: n.event_type, headline: n.headline, polarity: n.polarity, materiality: n.materiality, summary: n.summary, url: n.url,
+    })),
+    calibration: await calibrateByOrigin(d),
+    names: await getInstrumentNames(),
+  };
 }

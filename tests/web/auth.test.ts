@@ -156,7 +156,7 @@ describe('public paths', () => {
       '/api/auth/register/options', '/api/auth/register/verify', '/login',
     ]);
     // The mutations that prompted all this must be gated.
-    for (const r of ['/api/approvals/[id]/[action]', '/api/log', '/api/exits/promote', '/api/import']) {
+    for (const r of ['/api/approvals/[id]/[action]', '/api/log', '/api/advisor', '/api/exits/promote', '/api/import']) {
       expect(routes).toContain(r);
       expect(isPublicPath(r.replace(/\[[^\]]+\]/g, 'x'))).toBe(false);
     }

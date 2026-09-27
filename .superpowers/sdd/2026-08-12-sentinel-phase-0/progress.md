@@ -847,3 +847,14 @@ watchlist row or removal event; the revision is signed when every line is decide
 from schedule.ts (LLM_API_KEY added to schedule.yml). Production after migration: the view and
 the table show the same live count. NOTE: `pnpm watchlist:propose` (manual, pre-2.5)
 still writes picks straight into the live watchlist without sign-off — flagged to owner.
+
+### Phase 2.5 Task 10 — /advisor web page (2026-09-28)
+Complete. `web/app/advisor/` (page + client actions) and `/api/advisor` (sign → re-size +
+signAdvice → approval request; dismiss needs a reason; per-line watchlist decisions).
+Shows the latest advice in plain English (decision, amount/shares, why, key risk, what
+would prove it wrong, best case against, horizon, excluded candidates), validated
+commentary, 30 days of material news with the model's reading and filing links, the
+quarterly revision with per-line accept/decline, and the track record (withheld under
+20). System NO_ACTION / UNAVAILABLE carry no buttons. Nav: Act → Advisor; product.ts
+row live. The auth gate test now names /api/advisor. Verified in a local build against
+production data (read-only).
