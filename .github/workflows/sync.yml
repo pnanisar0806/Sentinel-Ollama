@@ -26,3 +26,5 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY }}
+          # Classifies new material filings. Absent => events stay pending, never neutral.
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}

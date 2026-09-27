@@ -15,6 +15,7 @@ import { recordDrawdown } from '../domain/drawdown.js';
 import { recordNowCloses } from '../sources/now-history.js';
 import { recordRatingFilings } from '../sources/credit-ratings.js';
 import { recordNews } from '../sources/news.js';
+import { classifyPending } from '../sources/sentiment.js';
 import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
@@ -351,6 +352,15 @@ if (isMainModule(import.meta.url)) {
       + `${n.failed ? `, ${n.failed} fetch failure(s)` : ''}${n.unresolved ? `, ${n.unresolved} not found on BSE` : ''}`);
   } catch (error) {
     console.error(`news fetch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Phase 2.5 Task 3: the model reads each new material filing. No key or a failed call
+  // leaves events pending (never neutral) and the next run retries them.
+  try {
+    const c = await classifyPending(db, { apiKey: process.env.LLM_API_KEY });
+    console.log(`news classified: ${c.classified}, still pending: ${c.pending}${c.rejected ? `, rejected replies: ${c.rejected}` : ''}`);
+  } catch (error) {
+    console.error(`news classification failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // ServiceNow closes, so the drawdown includes the RSU (~23% of the book). Before the

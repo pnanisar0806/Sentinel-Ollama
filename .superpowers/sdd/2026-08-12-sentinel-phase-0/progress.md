@@ -759,3 +759,14 @@ recovery. Production backfill of 60 days: 322 material events across 100 compani
 unresolved, all genuine (6 US stocks, now excluded as not-on-BSE; BSE Ltd; CDSL; LTIM;
 ZF CV name mismatch; the smallcase placeholder). Verbatim fixture:
 tests/fixtures/bse/crisil-2026-07-08.json. Mutation-checked: SLA, noise filter. 1025 tests.
+
+### Phase 2.5 Task 3 — versioned sentiment classification (2026-09-27)
+Complete. Migration 0030 `event_sentiment` (append-only). `src/sources/sentiment.ts`:
+classifyPending (≤20 events/call, closed vocab, only events shown, ≤80-word summary;
+no key or a failed call leaves events PENDING — no row, never neutral), firstJson
+(takes the first JSON value, ignoring a fence or trailing prose; repairs nothing),
+latestSentiment (latest AS OF a cutoff). Every call is logged to llm_calls. Runs daily in
+sync.ts after news; LLM_API_KEY was added to sync.yml. Live run: 563 of 565 events
+classified. The model answers UNKNOWN often — it sees headlines only, not the PDFs. It
+found 8 NEGATIVE and 49 POSITIVE; the rest are NEUTRAL or UNKNOWN. The cutoff reader
+was mutation-checked.
