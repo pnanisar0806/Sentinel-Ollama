@@ -793,3 +793,24 @@ dataset/code/config hashes and writes replay_runs only; no model, no network. Co
 names what is unreconstructable (rails, cash/reservations, score ingestion time, missing
 snapshots) instead of taking today's values. `pnpm advisor:replay --from --to`. 6 tests;
 the arrival cutoff was mutation-checked.
+
+### Phase 2.5 Task 6 — LLM ADVISE + gated paper handoff (2026-09-27)
+Complete. `src/advisor/recommend.ts` runAdvisor: context = ELIGIBLE sized candidates,
+each with fresh news coverage (7d), 90 days of classified news, and signal parts WITH
+their maxima (the model misread valuation 9.07 as "reasonable value" until told it is
+out of 30). Pre-gates: stale/missing/unresolved coverage or recent unclassified news
+excludes the candidate. Outcomes are distinct: BUY/SELL/HOLD/WAIT; NO_ACTION (nothing
+eligible, no call); UNAVAILABLE (no key, failed or invalid — never HOLD). Validation:
+only offered candidates, the action must match, no numbers from the model, horizon ≥ 1y,
+evidence must have been shown. Owner news rule in code: a BUY with recent NEGATIVE
+MEDIUM/HIGH news becomes WAIT. One retry, each attempt logged.
+`src/domain/advisor-handoff.ts` (outside src/advisor): signAdvice re-sizes and refuses if
+the size changed; BUY → satellite recommendation through persistRecommendation (FR-12)
++ immediate drafting; SELL → promoteExitCandidate; HOLD/WAIT → signed, nothing to
+approve. dismissAdvice needs a reason.
+Wiring: src/jobs/report.ts runs the advisor once a month (cadence 'advice'). The
+report.ts satellite loop was REMOVED — its unsized recommendations could never be
+ordered; stock ideas now go only through signed advice. The report test's stale-block
+proof was updated to a signed recommendation. Live dry run (rolled back): HOLD Bajaj
+Auto — "weak valuation 9.07/30, limited margin of safety". Mutation-checked: news
+defer, number ban, action match. 1061 tests.

@@ -1,3 +1,7 @@
+import { runAdvisor } from '../advisor/recommend.js';
+import { loadSizingInput } from '../domain/sizing-input.js';
+import { sizeCandidates } from '../domain/sizing.js';
+import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -96,7 +100,24 @@ if (isMainModule(import.meta.url)) {
     maturityRecommendations,
     narration: { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL },
   });
-  const text = composeReport(input);
+  // Phase 2.5: the advisor decides once a month, in the same first successful weekly run
+  // as the other proposals. It sizes candidates deterministically, reads their news, and
+  // stores advice for the owner to sign on /advisor. Nothing here creates an order.
+  let adviceLine = '';
+  const month = asOf.slice(0, 7);
+  if (!(await monthlyReviewDone(db, 'advice', month))) {
+    try {
+      const candidates = sizeCandidates(await loadSizingInput(db, asOf));
+      const advice = await runAdvisor(db, { asOf, candidates, apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
+      await recordMonthlyReview(db, 'advice', month, { asOf, proposed: advice.decision === 'BUY' || advice.decision === 'SELL' ? 1 : 0 });
+      adviceLine = `
+
+Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advisor page.`;
+    } catch (error) {
+      console.error(`advisor failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const text = composeReport(input) + adviceLine;
 
   // The dashboard rides along with the weekly run, as it did under `pnpm weekly`.
   const html = generateDashboardHtml(await buildDigestInput(db, input.generatedAt));

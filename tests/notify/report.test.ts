@@ -11,7 +11,7 @@ import {
 } from '../../src/notify/report.js';
 import { narrate } from '../../src/sources/llm-narration.js';
 import { parseAsOf, parseGsecYield } from '../../src/jobs/report.js';
-import { MAX_THESIS_WORDS, thesisWordCount } from '../../src/domain/recommendations.js';
+import { MAX_THESIS_WORDS, buildRecommendation, persistRecommendation, thesisWordCount } from '../../src/domain/recommendations.js';
 import { IPS_V1_TEXT, getIpsClauseIndex } from '../../src/domain/ips.js';
 
 const SEED_DATE = '2026-08-12';
@@ -114,9 +114,14 @@ describe('FR-51 weekly report — the Phase 1 DoD', () => {
     const freshText = composeReport(fresh);
     const scoredFresh = fresh.signalReview.scored.map((s) => s.instrumentId);
     expect(scoredFresh).toContain('NSE:RPOWER');
-    expect(
-      fresh.pipeline.recommendations.some((r) => r.primary.instrumentId === 'NSE:RPOWER'),
-    ).toBe(true);
+    // Stock ideas now reach recommendations only through signed advice (Phase 2.5). Stand
+    // in for one the owner signed while the data was fresh.
+    await persistRecommendation(db, buildRecommendation({
+      kind: 'satellite', createdOn: SEED_DATE,
+      primary: { intent: 'add satellite equity exposure', instrumentId: 'NSE:RPOWER', action: 'BUY', amountPaise: '5000000',
+        thesis: 'Signed advice.', ipsClauseRefs: ['3.4'], falsification: { metric: 'roce_pct', op: 'lt', value: 15 } },
+    }));
+    expect((await build()).pipeline.recommendations.some((r) => r.primary.instrumentId === 'NSE:RPOWER')).toBe(true);
     expect(fresh.staleness.blocked.map((b) => b.instrumentId)).not.toContain('NSE:RPOWER');
 
     // The ONLY change: the price feed ages past its limit.

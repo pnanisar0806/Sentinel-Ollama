@@ -236,23 +236,6 @@ async function runSignalReview(
   return { scored, newlyRecommended, fallen, qualityDrops, comparedWith, skippedReason: null };
 }
 
-function satelliteLeg(s: SatelliteScore, sector: string | null): RecLeg {
-  const c = s.components!;
-  return {
-    intent: 'add satellite equity exposure',
-    instrumentId: s.instrumentId,
-    action: 'BUY',
-    amountPaise: null,
-    thesis:
-      `Composite ${s.composite} of 100 (${s.band}): valuation ${c.valuation}, trend ${c.trend}, ` +
-      `earnings ${c.earnings}, fit ${c.fit}, scored ${s.scoreDate} after passing the quality gate. ` +
-      `${sector === null ? 'Sector unknown from our data.' : `Sector ${sector}.`} ` +
-      `Sizing and the buy price are the owner's call — this is a paper candidate, not an order.`,
-    ipsClauseRefs: ['3.4', '3.6'],
-    falsification: { metric: 'roce_pct', op: 'lt', value: 15 },
-  };
-}
-
 export async function buildReportInput(
   db: Db,
   asOf: string,
@@ -312,18 +295,10 @@ export async function buildReportInput(
       }),
     );
   }
-  for (const s of (reviewDue ? signalReview.scored : [])) {
-    if (s.band !== 'HIGH' && s.band !== 'MEDIUM') continue;
-    if (blocked.includes(s.instrumentId)) continue;
-    built.push(
-      buildRecommendation({
-        kind: 'satellite',
-        createdOn: asOf,
-        primary: satelliteLeg(s, null),
-        engineEvidence: { composite: s.composite, band: s.band, evidence: s.evidence },
-      }),
-    );
-  }
+  // Stock ideas are no longer turned into recommendations here. They go through the
+  // Phase 2.5 advisor (src/jobs/report.ts → runAdvisor), which sizes them, reads their
+  // news and asks for the owner's sign-off. The unsized satellite recommendations this
+  // loop used to write could never become an order (drafting: "has no amount yet").
   if (reviewDue) {
     await recordMonthlyReview(db, 'recommendations', month, {
       asOf, proposed: built.length - (opts.maturityRecommendations?.length ?? 0),

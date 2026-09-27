@@ -22,7 +22,7 @@ import type { Db } from '../db/client.js';
  * maturity, and an exit the owner promotes on /cleanup. Neither is a new opinion; one is
  * a date and the other the owner's own request.
  */
-export type ReviewKind = 'recommendations' | 'cleanup';
+export type ReviewKind = 'recommendations' | 'cleanup' | 'advice';
 
 export async function monthlyReviewDone(db: Db, kind: ReviewKind, month: string): Promise<boolean> {
   const rows = await db.query<{ one: number }>(
