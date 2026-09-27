@@ -823,3 +823,13 @@ MIN_EVALS_FOR_CALIBRATION=20 per bucket (boundary tested at 19/20). Fixed a real
 signed advice was never benchmarked, so it could never have been scored —
 signAdvice now snapshots a benchmark with conviction = signal band at signing.
 Mutation-checked the origin split.
+
+### Phase 2.5 Task 8 — bounded commentary (2026-09-28)
+Complete. `src/advisor/commentary.ts`: ≤3 sections of ≤300 words; every number must be
+bound to a fact (claim.quoted may be a phrase, but each of its numbers must be the
+fact's own), in a sentence naming the fact's subject — so the right number given to the
+wrong subject is rejected. Unbound numbers and unknown facts are rejected. Failing
+sections are dropped; valid ones are stored as COMMENTARY proposals; no key means no
+commentary (the deterministic bullets stand). Wired into src/jobs/report.ts with
+allocation facts only (never funded status). Live dry run: 2 sections kept, 1 dropped
+for an unbound "2026". Subject binding mutation-checked.

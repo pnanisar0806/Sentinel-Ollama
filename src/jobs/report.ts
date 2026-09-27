@@ -1,4 +1,5 @@
 import { runAdvisor } from '../advisor/recommend.js';
+import { writeCommentary, type Fact } from '../advisor/commentary.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
@@ -120,7 +121,21 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   const text = composeReport(input) + adviceLine;
 
   // The dashboard rides along with the weekly run, as it did under `pnpm weekly`.
-  const html = generateDashboardHtml(await buildDigestInput(db, input.generatedAt));
+  const digest = await buildDigestInput(db, input.generatedAt);
+  const html = generateDashboardHtml(digest);
+
+  // Phase 2.5 Task 8: validated commentary on this week's facts, stored for /advisor.
+  // Allocation and the advisor's decision only — funded status is never a fact here.
+  try {
+    const facts: Fact[] = digest.drift.map((d) => ({
+      id: `alloc:${d.assetClass}`, subject: d.assetClass.charAt(0) + d.assetClass.slice(1).toLowerCase(),
+      field: 'allocation', value: `${(d.actual * 100).toFixed(1)}%`, period: asOf,
+    }));
+    const c = await writeCommentary(db, { facts, apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL, asOf });
+    console.log(`commentary: ${c.sections.length} section(s) kept, ${c.dropped.length} dropped${c.unavailable ? ' (model unavailable)' : ''}`);
+  } catch (error) {
+    console.error(`commentary failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   await writeFile(dashboardPath, html, 'utf-8');
 
   const telegram = new Telegram({
