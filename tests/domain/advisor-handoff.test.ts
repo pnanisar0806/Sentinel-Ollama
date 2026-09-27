@@ -42,6 +42,8 @@ describe('signing advice', () => {
     const [rec] = await db.query<{ primary_rec: string }>(`select primary_rec from recommendations where id = $1`, [r.recommendationId]);
     expect(JSON.parse(rec!.primary_rec)).toMatchObject({ action: 'BUY', instrumentId: 'NSE:BAJAJ-AUTO', amountPaise: '4512400' });
     expect(r.approvalRequested).toBe(true);
+    // Signed advice is benchmarked so its outcome can be scored (Task 7).
+    expect(await db.query(`select 1 from benchmarks where recommendation_id = $1`, [r.recommendationId])).toHaveLength(1);
     expect((await loadProposals(db))[0]!.status).toBe('SIGNED');
     await db.close();
   });

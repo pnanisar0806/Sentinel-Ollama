@@ -5,6 +5,8 @@ import { draftPendingOrders } from './order-drafting.js';
 import { loadExitCandidates } from './sell-triggers.js';
 import { promoteExitCandidate } from './exit-promotion.js';
 import type { Candidate } from './sizing.js';
+import { snapshotBenchmark } from './scoring.js';
+import { BANDS } from './engine.js';
 
 /**
  * The owner's sign-off on advice (Phase 2.5 Task 6) — outside src/advisor/, which may not
@@ -73,6 +75,13 @@ export async function signAdvice(
   });
   const persisted = await persistRecommendation(db, rec);
   if (persisted.id === null) throw new Error(`not signed: ${persisted.reason}`);
+  // §13: capture the point of comparison when the call is made, so signed advice is
+  // scored like any other recommendation. Conviction is the signal band at signing.
+  const [sig] = await db.query<{ composite: string }>(
+    `select composite::text from signal_scores where instrument_id = $1 order by score_date desc limit 1`, [fresh.instrumentId]);
+  const composite = sig ? Number(sig.composite) : null;
+  const conviction = composite === null ? 'UNSCORED' : composite >= BANDS.high ? 'HIGH' : composite >= BANDS.medium ? 'MEDIUM' : 'WATCH';
+  await snapshotBenchmark(db, { recommendationId: persisted.id, instrumentId: fresh.instrumentId, asOf: createdOn, conviction });
   const drafted = await draftPendingOrders(db, now);
   const asked = drafted.drafted.some((o) => Number(o.recommendationId) === persisted.id);
   await decideProposal(db, proposalId, 'SIGNED', `recommendation #${persisted.id}`);

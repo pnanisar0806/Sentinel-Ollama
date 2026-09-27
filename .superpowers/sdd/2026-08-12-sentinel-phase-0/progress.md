@@ -814,3 +814,12 @@ ordered; stock ideas now go only through signed advice. The report test's stale-
 proof was updated to a signed recommendation. Live dry run (rolled back): HOLD Bajaj
 Auto — "weak valuation 9.07/30, limited margin of safety". Mutation-checked: news
 defer, number ban, action match. 1061 tests.
+
+### Phase 2.5 Task 7 — calibration by origin, conviction, horizon (2026-09-27)
+Complete. `src/advisor/calibrate.ts` calibrateByOrigin: advisor (engine_evidence carries
+advisorProposalId) vs engine; one recommendation counts once per horizon (earliest
+snapshot); unscoreable outcomes count as excluded, never misses; hit-rate withheld below
+MIN_EVALS_FOR_CALIBRATION=20 per bucket (boundary tested at 19/20). Fixed a real gap:
+signed advice was never benchmarked, so it could never have been scored —
+signAdvice now snapshots a benchmark with conviction = signal band at signing.
+Mutation-checked the origin split.
