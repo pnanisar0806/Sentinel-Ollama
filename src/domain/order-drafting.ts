@@ -63,6 +63,7 @@ function toRecommendation(r: Row): Recommendation {
 export function notActionableReason(primary: RecLeg): string | null {
   if (primary.action === 'HOLD') return 'HOLD needs no approval';
   if (primary.instrumentId === null) return `${primary.action} names no instrument, so there is nothing to order`;
+  if (primary.amountPaise === null) return `${primary.action} has no amount yet, so there is nothing to order`;
   return null;
 }
 

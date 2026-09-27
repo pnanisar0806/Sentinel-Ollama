@@ -27,6 +27,8 @@ import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
+import { getOrder, getOrderHistory, type OrderIntent } from '../../src/domain/orders.js';
+import { humanize, sentence } from './plain';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
 
 let dbPromise: Promise<Db> | null = null;
@@ -203,111 +205,110 @@ export async function getAudit(limit = 80): Promise<AuditRow[]> {
   }));
 }
 
+/**
+ * An approval request as the web renders it. Read through the domain (`getOrder`,
+ * `getOrderHistory`): the order's status lives in `order_transitions`, and the
+ * `order_intents.status` column only ever holds the DRAFT it was inserted with, because
+ * the table is append-only. Reading `select *` here once showed every request as a
+ * stale DRAFT with no instrument or dates (snake_case columns read as camelCase).
+ */
 export interface OrderIntentRow {
   id: string;
-  stableTag: string;
-  createdAt: string;
-  createdBy: 'advisor' | 'owner';
   recommendationId: number;
-  intent: 'BUY' | 'SELL' | 'SWITCH' | 'HOLD';
+  intent: string;
   instrumentId: string;
-  quantity: string;
+  /** The instrument's human name — never make the owner decode an id. */
+  instrumentName: string;
+  /**
+   * Rupee amount in paise. The column is called `quantity` but drafting stores the
+   * recommendation's `amountPaise` there: an advisory order is placed by amount.
+   */
+  amountPaise: string;
+  orderType: string;
   limitPricePaise: string | null;
-  orderType: 'MARKET' | 'LIMIT';
-  deferUntil: string | null;
-  alternateInstrumentId: string | null;
-  payloadSnapshot: Record<string, unknown>;
-  currentRevision: number;
-  expiresAt: string | null;
-  advisoryPath: boolean;
-  asOf: string;
-  source: string;
   status: string;
+  createdAt: string;
+  expiresAt: string | null;
+  deferUntil: string | null;
+  advisoryPath: boolean;
+  /** Why the advisor proposed it, from the recommendation it was drafted from. */
+  why: string | null;
+  thesis: string | null;
+  /** Each alternative as a plain-English sentence. */
+  alternates: string[];
 }
 
 export interface OrderTransitionRow {
-  id: string;
-  orderIntentId: string;
-  revisionNumber: number;
-  fromStatus: string;
-  toStatus: string;
-  actor: 'owner' | 'agent' | 'broker' | 'system';
-  at: string;
-  payloadSnapshot: Record<string, unknown>;
-  expectedRevision: number;
-  idempotencyKey: string | null;
+  key: string; fromStatus: string; toStatus: string; actor: string; at: string;
 }
 
-export interface OrderSimulationRow {
-  id: string;
-  orderIntentId: string;
-  revisionNumber: number;
-  simType: string;
-  simulatedAt: string;
-  inputState: Record<string, unknown>;
-  outcomeState: Record<string, unknown>;
-  note: string;
+const iso = (v: Date | string | null): string | null => (v === null ? null : new Date(v).toISOString());
+
+async function toRow(d: Db, o: OrderIntent, names: Map<string, string>): Promise<OrderIntentRow> {
+  // Read the column itself: `getOrder` hands back the snapshot spread into an object of
+  // single characters, and it is stored via JSON.stringify, so it may be a string twice over.
+  const [raw] = await d.query<{ p: unknown }>(`select payload_snapshot as p from order_intents where id = $1`, [o.id]);
+  let snap: unknown = raw?.p ?? null;
+  while (typeof snap === 'string') snap = JSON.parse(snap);
+  const rec = (snap ?? {}) as { primary?: RecLeg; alternates?: RecLeg[] };
+  return {
+    id: o.id,
+    recommendationId: Number(o.recommendationId),
+    intent: o.intent,
+    instrumentId: o.instrumentId,
+    instrumentName: names.get(o.instrumentId) ?? o.instrumentId,
+    amountPaise: o.quantity,
+    orderType: o.orderType,
+    limitPricePaise: o.limitPricePaise,
+    status: o.status,
+    createdAt: iso(o.createdAt)!,
+    expiresAt: iso(o.expiresAt),
+    deferUntil: o.deferUntil === null ? null : String(o.deferUntil).slice(0, 10),
+    advisoryPath: o.advisoryPath,
+    why: rec.primary?.intent ?? null,
+    thesis: rec.primary?.thesis ? humanize(rec.primary.thesis, names) : null,
+    alternates: (rec.alternates ?? []).map((a) => sentence(a, names)),
+  };
 }
 
-function isDate(v: string | Date | null | undefined): v is Date {
-  return v instanceof Date;
+async function instrumentNames(d: Db): Promise<Map<string, string>> {
+  const rows = await d.query<{ id: string; name: string }>(
+    `select id, name from instruments where name is not null and name <> id`);
+  return new Map(rows.map((r) => [r.id, r.name]));
 }
 
 export async function getOrderIntents(): Promise<OrderIntentRow[]> {
   const d = await db();
-  const rows = await d.query<OrderIntentRow>(
-    'select * from order_intents order by created_at desc',
-  );
-  return rows.map((r) => {
-    const createdAt = isDate(r.createdAt) ? r.createdAt.toISOString() : String(r.createdAt);
-    const expiresAt = r.expiresAt ? (isDate(r.expiresAt) ? r.expiresAt.toISOString() : String(r.expiresAt)) : null;
-    const asOf = isDate(r.asOf) ? r.asOf.toISOString() : String(r.asOf);
-    return { ...r, createdAt, expiresAt, asOf };
-  });
+  const ids = await d.query<{ id: string }>('select id from order_intents order by created_at desc');
+  const names = await instrumentNames(d);
+  const out: OrderIntentRow[] = [];
+  for (const { id } of ids) {
+    const o = await getOrder(d, id);
+    if (o) out.push(await toRow(d, o, names));
+  }
+  return out;
 }
 
 export async function getOrderIntent(id: string): Promise<OrderIntentRow | null> {
   const d = await db();
-  const [row] = await d.query<OrderIntentRow>(
-    'select * from order_intents where id = $1',
-    [id],
-  );
-  if (!row) return null;
-  const createdAt = isDate(row.createdAt) ? row.createdAt.toISOString() : String(row.createdAt);
-  const expiresAt = row.expiresAt ? (isDate(row.expiresAt) ? row.expiresAt.toISOString() : String(row.expiresAt)) : null;
-  const asOf = isDate(row.asOf) ? row.asOf.toISOString() : String(row.asOf);
-  return { ...row, createdAt, expiresAt, asOf };
+  const o = await getOrder(d, id).catch(() => null);
+  return o ? toRow(d, o, await instrumentNames(d)) : null;
 }
 
 export async function getOrderTransitions(orderIntentId: string): Promise<OrderTransitionRow[]> {
-  const d = await db();
-  const rows = await d.query<OrderTransitionRow>(
-    'select * from order_transitions where order_intent_id = $1 order by at desc',
-    [orderIntentId],
-  );
-  return rows.map((r) => {
-    const at = isDate(r.at) ? r.at.toISOString() : String(r.at);
-    return { ...r, at };
-  });
+  const { transitions } = await getOrderHistory(await db(), orderIntentId);
+  return transitions.map((t) => ({
+    key: t.id, fromStatus: t.fromStatus, toStatus: t.toStatus, actor: t.actor, at: iso(t.at)!,
+  })).reverse();
 }
 
-export async function getOrderSimulations(orderIntentId: string): Promise<OrderSimulationRow[]> {
-  const d = await db();
-  const rows = await d.query<OrderSimulationRow>(
-    'select * from order_simulations where order_intent_id = $1 order by simulated_at desc',
-    [orderIntentId],
-  );
-  return rows.map((r) => {
-    const simulatedAt = isDate(r.simulatedAt) ? r.simulatedAt.toISOString() : String(r.simulatedAt);
-    return { ...r, simulatedAt };
-  });
-}
+/** Statuses that still need the owner. */
+export const OPEN_STATUSES = ['PENDING_APPROVAL', 'MODIFIED', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'];
 
 export async function getApprovalData() {
-  const d = await db();
   const intents = await getOrderIntents();
-  const pending = intents.filter((i) => ['PENDING_APPROVAL', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'].includes(i.status));
-  const history = intents.filter((i) => !['PENDING_APPROVAL', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'].includes(i.status));
+  const pending = intents.filter((i) => OPEN_STATUSES.includes(i.status));
+  const history = intents.filter((i) => !OPEN_STATUSES.includes(i.status));
   return { pending, history, all: intents };
 }
 
@@ -684,4 +685,15 @@ export async function getLog(): Promise<LogData> {
     openMilestones: input.milestones.filter((m) => m.completedOn === null).map((m) => ({ id: m.id, name: m.name })),
     bonds: [...bonds].map(([id, name]) => ({ id, name })),
   };
+}
+
+/**
+ * Human names for every instrument a recommendation or order mentions. The table's
+ * seeded `name` is sometimes the id itself (the fixtures set name = id); those fall
+ * through to the id, which `plain.nameOf` then strips of its exchange prefix.
+ */
+export async function getInstrumentNames(): Promise<Map<string, string>> {
+  const rows = await (await db()).query<{ id: string; name: string }>(
+    `select id, name from instruments where name is not null and name <> id`);
+  return new Map(rows.map((r) => [r.id, r.name]));
 }

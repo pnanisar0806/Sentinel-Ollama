@@ -13,8 +13,16 @@ export function fmtDateTime(iso: string): string {
 }
 
 export function relTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diff)) return '';
+  const raw = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(raw)) return '';
+  if (raw < -60_000) {
+    // A deadline, not a past event: "in 23h", never "just now".
+    const ahead = Math.floor(-raw / 60_000);
+    if (ahead < 60) return `in ${ahead}m`;
+    const h = Math.floor(ahead / 60);
+    return h < 48 ? `in ${h}h` : `in ${Math.floor(h / 24)}d`;
+  }
+  const diff = raw;
   const min = Math.floor(diff / 60_000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min}m ago`;

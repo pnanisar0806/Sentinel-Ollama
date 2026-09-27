@@ -701,3 +701,14 @@ a:hover { color: #f0abfc; }
 .btn-sm { min-height: 32px; }
 /* Cards fill their bento cell so a row reads as one band, never a ragged edge. */
 .bento > div > .card, .bento > div > .stat { height: 100%; }
+
+/* Recommendation options: primary first, alternatives beneath, all plain English. */
+.options { display: flex; flex-direction: column; gap: 10px; }
+.option { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; background: rgba(255, 255, 255, 0.03); }
+.option-primary { border-color: rgba(168, 85, 247, 0.45); background: rgba(168, 85, 247, 0.07); }
+.option-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 6px; }
+.option-primary .option-label { color: #d8b4fe; }
+.option-what { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 15.5px; }
+.option-why { margin: 8px 0 0; color: var(--text-dim); }
+.option-kill { margin: 6px 0 0; color: var(--amber); font-size: 13.5px; }
+.section-title { font-size: 17px; margin: 26px 0 8px; }

@@ -98,6 +98,18 @@ describe('drafting approval requests from recommendations', () => {
     await db.close();
   });
 
+  it('reports an unsized leg instead of failing on the database', async () => {
+    // The satellite recommender names a stock but has no sizer yet. On 2026-09-27 the
+    // BAJAJ-AUTO proposal reached the insert and died on "null not-null constraint".
+    const id = await persist({ amountPaise: null });
+    const report = await draftPendingOrders(db, NOW);
+    expect(report.refused).toEqual([]);
+    expect(report.notActionable).toEqual([
+      { recommendationId: id, reason: 'BUY has no amount yet, so there is nothing to order' },
+    ]);
+    await db.close();
+  });
+
   it('records a rail refusal instead of creating an invalid draft', async () => {
     // FR-30: "a draft violating a rail cannot exist"; refusals are auditable.
     const id = await persist({ amountPaise: '20000000' }); // Rs 2L, over the Rs 1L rail

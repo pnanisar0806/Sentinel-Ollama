@@ -1,123 +1,64 @@
-import { getRecommendations, type RecommendationRow } from '../../lib/data';
-import { Badge, Card, Money, Notice, PageHead } from '../../lib/ui';
+import Link from 'next/link';
+import { getInstrumentNames, getRecommendations, type RecommendationRow } from '../../lib/data';
+import { Badge, Card, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
-import type { Paise } from '../../../src/money/paise.js';
+import { humanize, killCondition, kindLabel, sentence, type Names } from '../../lib/plain';
 import type { RecLeg } from '../../../src/domain/recommendations.js';
 
 export const dynamic = 'force-dynamic';
 
 const KIND_TONE: Record<string, Tone> = {
-  satellite: 'indigo',
-  mf_switch: 'indigo',
-  rebalance: 'amber',
-  sell: 'red',
-  prepay: 'green',
-  maturity_routing: 'gray',
-  legacy_note: 'gray',
+  satellite: 'indigo', mf_switch: 'indigo', rebalance: 'amber', sell: 'red',
+  prepay: 'green', maturity_routing: 'gray', legacy_note: 'gray',
+};
+const ACTION_TONE: Record<string, Tone> = {
+  BUY: 'green', TRIM: 'amber', SELL: 'red', REDEEM: 'indigo', PREPAY: 'green', HOLD: 'gray', REDIRECT: 'indigo',
 };
 
-const ACTION_TONE: Record<RecLeg['action'], Tone> = {
-  BUY: 'green',
-  TRIM: 'amber',
-  SELL: 'red',
-  REDEEM: 'indigo',
-  PREPAY: 'green',
-  HOLD: 'gray',
-  REDIRECT: 'indigo',
-};
-
-/** A row whose JSON column could not be parsed arrives as its raw string. Show it as the
- *  unreadable value it is — never render it as a React child, and never claim it empty. */
-function Unparseable({ raw }: { raw: string }) {
-  return <Notice tone="amber">Unparseable value stored: <span className="mono">{raw}</span></Notice>;
-}
-
-/**
- * `primary_rec` and `alternates` store RecLeg objects, not display strings. Rendering a
- * leg directly is React error #31 ("objects are not valid as a React child"), which is
- * exactly how this page first broke.
- */
-function Leg({ leg, label }: { leg: RecLeg; label: string }) {
+/** One option, in plain English: what to do, why, and what would change the advisor's mind. */
+function Option({ leg, label, names, primary }: { leg: RecLeg; label: string; names: Names; primary?: boolean }) {
+  const kill = killCondition(leg.falsification, names, leg.instrumentId);
   return (
-    <div style={{ borderLeft: '2px solid var(--border-strong)', paddingLeft: '0.7rem', margin: '0.6rem 0' }}>
-      <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span className="dim" style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          {label}
-        </span>
-        <Badge tone={ACTION_TONE[leg.action] ?? 'gray'}>{leg.action}</Badge>
-        {leg.instrumentId ? <span className="mono">{leg.instrumentId}</span> : <span className="dim">portfolio-level</span>}
-        {leg.amountPaise != null
-          ? <strong><Money p={BigInt(leg.amountPaise) as Paise} /></strong>
-          : <span className="dim">amount unsized</span>}
+    <div className={primary ? 'option option-primary' : 'option'}>
+      <div className="option-label">{label}</div>
+      <div className="option-what">
+        <Badge tone={ACTION_TONE[leg.action] ?? 'gray'}>{leg.action === 'TRIM' ? 'SELL PART' : leg.action}</Badge>
+        <strong>{sentence(leg, names)}</strong>
       </div>
-
-      <p style={{ margin: '0.35rem 0 0' }}>{leg.intent}</p>
-      {leg.thesis ? <p className="dim" style={{ margin: '0.2rem 0 0' }}>{leg.thesis}</p> : null}
-
-      {(leg.ipsClauseRefs ?? []).length > 0 ? (
-        <p style={{ margin: '0.35rem 0 0' }}>
-          {(leg.ipsClauseRefs ?? []).map((c) => <Badge key={c} tone="gray">{c}</Badge>)}
-        </p>
-      ) : (
-        <p className="dim" style={{ margin: '0.35rem 0 0' }}>No clause cited — FR-10 requires at least one.</p>
-      )}
-
-      {leg.falsification ? (
-        <p className="dim" style={{ margin: '0.35rem 0 0' }}>
-          Kill condition: <span className="mono">{JSON.stringify(leg.falsification)}</span>
-        </p>
-      ) : (
-        <p className="dim" style={{ margin: '0.35rem 0 0' }}>No falsification condition recorded.</p>
-      )}
+      {leg.thesis ? <p className="option-why">{humanize(leg.thesis, names)}</p> : null}
+      {kill ? <p className="option-kill">{kill}</p> : null}
+      {leg.ipsClauseRefs.length > 0
+        ? <p className="muted" style={{ margin: '6px 0 0' }}>Investment policy: <Link href="/ips">§{leg.ipsClauseRefs.join(', §')}</Link></p>
+        : null}
     </div>
   );
 }
 
-function Rec({ r }: { r: RecommendationRow }) {
-  const title = typeof r.primary === 'string' ? `Recommendation #${r.id}` : r.primary.intent;
-
+function Rec({ r, names }: { r: RecommendationRow; names: Names }) {
+  if (typeof r.primary === 'string') {
+    return <Card title={`Recommendation #${r.id}`}><Notice tone="amber">This recommendation could not be read: {r.primary}</Notice></Card>;
+  }
+  const alternates = typeof r.alternates === 'string' ? [] : r.alternates;
   return (
     <Card
-      title={title}
-      aside={<span className="mono dim">#{r.id} · {r.createdOn}</span>}
+      title={<><Badge tone={KIND_TONE[r.kind] ?? 'gray'}>{kindLabel(r.kind)}</Badge>{' '}{sentence(r.primary, names)}</>}
+      aside={<span className="dim">{r.createdOn} · #{r.id}</span>}
       tone={r.suppressed ? 'warn' : undefined}
     >
-      <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.4rem' }}>
-        <Badge tone={KIND_TONE[r.kind] ?? 'gray'}>{r.kind}</Badge>
-        <Badge tone="gray">{r.source}</Badge>
-        {r.suppressed ? <Badge tone="amber">suppressed</Badge> : null}
+      {r.suppressed
+        ? <Notice tone="amber"><strong>Not acted on.</strong> {r.suppressedReason ?? 'No reason was recorded.'}</Notice>
+        : null}
+      <div className="options">
+        <Option leg={r.primary} label="What the advisor recommends" names={names} primary />
+        {alternates.map((leg, i) => <Option key={i} leg={leg} label={`Option ${i + 2}`} names={names} />)}
       </div>
-
-      <p style={{ margin: '0.2rem 0' }}>{r.intent}</p>
-
-      {r.suppressed ? (
-        <Notice tone="amber">
-          <strong>Suppressed.</strong>{' '}
-          {r.suppressedReason ?? 'No reason was recorded, which is itself worth chasing.'}
-        </Notice>
-      ) : null}
-
-      {typeof r.primary === 'string'
-        ? <Unparseable raw={r.primary} />
-        : <Leg leg={r.primary} label="Primary" />}
-
-      {typeof r.alternates === 'string' ? (
-        <Unparseable raw={r.alternates} />
-      ) : r.alternates.length === 0 ? (
-        <p className="dim" style={{ margin: '0.6rem 0 0' }}>
-          No alternates recorded — FR-11 expects two.
-        </p>
-      ) : (
-        r.alternates.map((leg, i) => (
-          <Leg key={`${r.id}:alt:${i}`} leg={leg} label={`Alternate ${i + 1}`} />
-        ))
-      )}
+      {alternates.length === 0 ? <p className="dim">No alternatives were recorded.</p> : null}
     </Card>
   );
 }
 
 export default async function RecommendationsPage() {
-  const recs = await getRecommendations();
+  const [recs, names] = await Promise.all([getRecommendations(), getInstrumentNames()]);
   const live = recs.filter((r) => !r.suppressed);
   const suppressed = recs.filter((r) => r.suppressed);
 
@@ -125,38 +66,29 @@ export default async function RecommendationsPage() {
     <>
       <PageHead
         title="Recommendations"
-        badge={<Badge tone={live.length > 0 ? 'green' : 'gray'}>{live.length} live</Badge>}
-        sub="Paper recommendations only. Nothing here places an order, and nothing executes without a fresh approval taken elsewhere — this page reads the record, it does not act on it."
+        badge={<Badge tone={live.length > 0 ? 'green' : 'gray'}>{live.length} active</Badge>}
+        sub={<>What the advisor suggests, in plain words: the recommended action first, then two alternatives. Nothing here places an order. Anything actionable also appears on <Link href="/approvals">Approvals</Link>, where you decide.</>}
       />
 
-      {recs.length === 0 ? (
-        <Notice tone="amber">
-          <span className="mono">recommendations</span> is empty. The engine writes rows when the
-          recommendation job runs against fresh inputs; FR-31 blocks generation while a required
-          input is stale, so an empty table can mean either.
-        </Notice>
-      ) : (
-        <>
-          <div className="stack">
-            {live.map((r) => <Rec key={r.key} r={r} />)}
-          </div>
-
-          {suppressed.length > 0 ? (
-            <>
-              <h2 className="page-sub" style={{ marginTop: '1rem' }}>
-                Suppressed ({suppressed.length})
-              </h2>
-              <p className="dim" style={{ marginTop: 0 }}>
-                FR-12 caps how many actions a month can carry. A capped action is logged, not
-                discarded — it stays visible so the cap never silently hides advice.
-              </p>
-              <div className="stack">
-                {suppressed.map((r) => <Rec key={r.key} r={r} />)}
-              </div>
-            </>
-          ) : null}
-        </>
-      )}
+      {recs.length === 0
+        ? <Notice>No recommendations yet. The advisor proposes once a month, in the first weekly run of the month.</Notice>
+        : (
+          <>
+            <div className="bento">
+              {live.map((r) => <div className="span-6" key={r.key}><Rec r={r} names={names} /></div>)}
+            </div>
+            {suppressed.length > 0 && (
+              <>
+                <h2 className="section-title">Not acted on ({suppressed.length})</h2>
+                <p className="dim" style={{ marginTop: 0 }}>Kept for the record: each shows why it was set aside.</p>
+                <div className="bento">
+                  {suppressed.map((r) => <div className="span-6" key={r.key}><Rec r={r} names={names} /></div>)}
+                </div>
+              </>
+            )}
+          </>
+        )}
     </>
   );
 }
+
