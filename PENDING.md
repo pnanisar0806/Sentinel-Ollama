@@ -885,6 +885,13 @@ DONE 2026-09-25: rebalance BUYs name an instrument and are one monthly tranche;
 buy/sell proposals come ONCE A MONTH (owner decision); drawdown includes the RSU via
 daily NOW closes; credit-rating filings fetched from BSE and shown on /cleanup.
 
+PHASE 2.5 IN PROGRESS (started 2026-09-27; plan docs/superpowers/plans/2026-09-17-sentinel-phase-2.5.md):
+- [x] T1 advisor schema + firewall · [x] T2 news (BSE material events) · [x] T3 sentiment
+- [ ] T4 deterministic sizing · T5 replay · T6 LLM ADVISE · T7 calibration · T8 commentary
+      · T9 watchlist revision · T10 /advisor page · T11 jobs + docs
+- [ ] AFTER 2.5, only if still needed: the deferred rebalance fixes (MEMORY.md, "Phase 2.5 owner inputs").
+- [ ] UI rollout of the new style to the remaining pages; RSU vest form on /log.
+
 STILL OPEN for Phase 2:
 1. Credit-rating DIRECTION is not classified — the owner reads each filing's PDF. The
    Aug-2026 Sammaan and Edelweiss filings READ 2026-09-25: upgrade / new-issue, no action.
