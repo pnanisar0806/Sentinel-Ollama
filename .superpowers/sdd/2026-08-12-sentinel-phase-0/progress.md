@@ -770,3 +770,15 @@ sync.ts after news; LLM_API_KEY was added to sync.yml. Live run: 563 of 565 even
 classified. The model answers UNKNOWN often — it sees headlines only, not the PDFs. It
 found 8 NEGATIVE and 49 POSITIVE; the rest are NEUTRAL or UNKNOWN. The cutoff reader
 was mutation-checked.
+
+### Phase 2.5 Task 4 — deterministic sizing (2026-09-27)
+Complete. `src/domain/sizing.ts` (pure): sizeCandidates → ELIGIBLE/WITHHELD candidates
+with stable hash ids, whole units for exchange-traded instruments and amounts for funds,
+basis and constraints, policy sizing-v1. BUY = one tranche a month for the whole batch,
+best score first; bounded by free cash (bank cash minus the B3 balance minus open BUY
+requests) and single-stock cap headroom; stale (>5d) or missing price withholds. SELL =
+all units owned; TRIM ≤ units owned; the minimum hold withholds; unknown cost basis is a
+constraint, not a guess. `sizing-input.ts` loads it read-only. Live run: Bajaj Auto
+4 shares ₹45,124 eligible; HAL withheld (budget used). 10 tests; mutation-checked
+budget, cap and owned-units bounds (the owned-units test was strengthened after a
+surviving mutant).
