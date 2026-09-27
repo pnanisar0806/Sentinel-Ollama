@@ -5,6 +5,7 @@ import { installIps } from '../domain/ips.js';
 import { expireOrders, resurfaceDeferredOrder, recordAdvisoryReminder, getPendingApprovals } from '../domain/orders.js';
 import { isMainModule } from '../util/main-module.js';
 import { draftAnnouncement, draftPendingOrders } from '../domain/order-drafting.js';
+import { isRevisionDay, proposeRevision } from '../advisor/watchlist.js';
 import { applyDueRailChanges, evaluateBreaker } from '../domain/controls.js';
 import { Telegram } from '../notify/telegram.js';
 
@@ -134,6 +135,19 @@ if (isMainModule(import.meta.url)) {
   } else if (announcement !== null) {
     // The requests exist either way and are visible on /approvals; only the push is lost.
     console.error('Telegram not configured: approval requests drafted but not announced');
+  }
+
+  // Phase 2.5 Task 9: the quarterly watchlist revision, on the first weekday on or after
+  // the 20th of Feb/May/Aug/Nov (IST). A proposal for the owner to sign line by line on
+  // /advisor; it changes nothing by itself. Idempotent per quarter.
+  const todayIst = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  if (isRevisionDay(todayIst)) {
+    try {
+      const id = await proposeRevision(db, { asOf: todayIst, apiKey: process.env['LLM_API_KEY'] });
+      console.log(id === null ? 'watchlist revision: already proposed this quarter' : `watchlist revision #${id} proposed`);
+    } catch (error) {
+      console.error(`watchlist revision failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // 5. (Future) Cleanup queue monthly refresh - run on first trading day ~10:00 IST

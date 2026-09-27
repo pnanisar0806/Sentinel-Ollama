@@ -362,7 +362,7 @@ export async function buildReportInput(
     source: string;
     reason: string;
   }>(
-    `select instrument_id, added_on, removed_on, source, reason from watchlist
+    `select instrument_id, added_on, removed_on, source, reason from watchlist_effective
       where added_on >= $1 or removed_on >= $1`,
     [daysBefore(asOf, WEEK_DAYS)],
   );

@@ -833,3 +833,17 @@ sections are dropped; valid ones are stored as COMMENTARY proposals; no key mean
 commentary (the deterministic bullets stand). Wired into src/jobs/report.ts with
 allocation facts only (never funded status). Live dry run: 2 sections kept, 1 dropped
 for an unbound "2026". Subject binding mutation-checked.
+
+### Phase 2.5 Task 9 — owner-signed quarterly watchlist revision (2026-09-28)
+Complete. Migration 0031: `watchlist_removals` (append-only) + view `watchlist_effective`
+(effective removed_on = its own, or the first removal event on/after it was added);
+all five readers switched to the view (engine, report, llm-watchlist, news, web). The
+watchlist stays append-only. `src/advisor/watchlist.ts`: isRevisionDay (first weekday on/after the
+20th of Feb/May/Aug/Nov), removalCandidates (latest screened fundamentals fail the
+§6 gate or carry red flags; no fundamentals → not judged), proposeRevision (additions via
+the existing LLM shortlist, restricted to screened, unheld, unwatched names; one per quarter).
+`src/domain/watchlist-signoff.ts` decideWatchlistLine: per-line accept/decline →
+watchlist row or removal event; the revision is signed when every line is decided. Runs
+from schedule.ts (LLM_API_KEY added to schedule.yml). Production after migration: the view and
+the table show the same live count. NOTE: `pnpm watchlist:propose` (manual, pre-2.5)
+still writes picks straight into the live watchlist without sign-off — flagged to owner.

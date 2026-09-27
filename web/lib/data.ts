@@ -421,7 +421,7 @@ export async function getWatchlist(): Promise<{ active: WatchlistRow[]; removed:
     removed_on: unknown; source: string; reason: string;
   }>(
     `select w.instrument_id, i.name, w.added_on, w.removed_on, w.source, w.reason
-       from watchlist w left join instruments i on i.id = w.instrument_id
+       from watchlist_effective w left join instruments i on i.id = w.instrument_id
       order by w.added_on desc, w.instrument_id`,
   );
   const mapped: WatchlistRow[] = rows.map((r) => ({

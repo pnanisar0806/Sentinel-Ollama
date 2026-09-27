@@ -21,6 +21,8 @@ jobs:
       # requests are still drafted and shown on /approvals, just not pushed.
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_OWNER_CHAT_ID: ${{ secrets.TELEGRAM_OWNER_CHAT_ID }}
+      # Drafts the quarterly watchlist shortlist. Absent => removals only, additions marked unavailable.
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

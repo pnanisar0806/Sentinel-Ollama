@@ -49,7 +49,7 @@ async function coveredInstruments(db: Db): Promise<{ id: string; isin: string | 
     `select distinct i.id, i.name, coalesce(i.isin, case when i.id like 'ISIN:%' then substr(i.id, 6) end) as isin
        from instruments i
       where i.kind = 'EQUITY' and coalesce(i.currency, 'INR') = 'INR'  -- US listings file nothing with BSE
-        and (i.id in (select instrument_id from watchlist where removed_on is null)
+        and (i.id in (select instrument_id from watchlist_effective where removed_on is null)
              or i.id in (select h.instrument_id from holdings h
                           where h.snapshot_id in (select distinct on (source) id from snapshots
                                                    order by source, business_date desc, id desc)))

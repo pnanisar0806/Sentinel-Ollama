@@ -526,7 +526,7 @@ export async function loadEngineInputs(
   // double-weight it in any ranking and could surface one instrument as two ideas.
   const watch = await db.query<{ instrument_id: string; sector: string | null }>(
     `select distinct w.instrument_id, i.sector
-       from watchlist w
+       from watchlist_effective w
        join instruments i on i.id = w.instrument_id
       where w.added_on <= $1 and (w.removed_on is null or w.removed_on > $1)`,
     [scoreDate],

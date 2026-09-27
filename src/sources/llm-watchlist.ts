@@ -70,7 +70,7 @@ export async function watchlistCandidates(db: Db, asOf: string): Promise<Watchli
           select 1 from holdings h where h.instrument_id = i.id
         )
         and not exists (
-          select 1 from watchlist w
+          select 1 from watchlist_effective w
            where w.instrument_id = i.id
              and w.added_on <= $1 and (w.removed_on is null or w.removed_on > $1)
         )
@@ -155,7 +155,7 @@ export async function applyWatchlistProposals(
       `insert into watchlist (instrument_id, added_on, source, reason)
        select $1, $2::date, 'llm-advisor', $3
         where not exists (
-          select 1 from watchlist
+          select 1 from watchlist_effective
            where instrument_id = $1 and (removed_on is null or removed_on > $2::date)
         )
        returning instrument_id`,
