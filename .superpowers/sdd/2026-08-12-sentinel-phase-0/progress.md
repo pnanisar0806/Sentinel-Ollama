@@ -745,3 +745,17 @@ has recordProposal, decideProposal (status is derived from decisions), loadPropo
 recordLlmCall (unreported usage is NULL). tests/advisor/firewall.test.ts: the transitive
 import graph refuses orders/drafting/controls/funded-status/recommendation writes, and
 advisor SQL may write only advisor tables. Both were mutation-checked.
+
+### Phase 2.5 Task 2 — news ingestion + fetch coverage (2026-09-27)
+Complete. Source: BSE Reg 30 filings per held/watched INR equity. RSS is NOT ingested:
+under the owner's material-events-only policy, headlines are noise. Migration 0029:
+`news_fetch_runs` (success_empty/success/failed/unresolved) + `news_events`, append-only.
+`src/sources/bse.ts` is the shared fetcher (credit-ratings refactored onto it with
+unchanged behaviour) plus `bseResolver` (ISIN → symbol → unique exact name).
+`src/sources/news.ts`: classifyBseEvent (material types from real categories; an
+unseen category → 'unknown', never dropped), recordNews, newsCoverage (7-day SLA; a
+failure keeps the previous success). Runs daily in sync.ts; `pnpm news --days=N` for
+recovery. Production backfill of 60 days: 322 material events across 100 companies; 11
+unresolved, all genuine (6 US stocks, now excluded as not-on-BSE; BSE Ltd; CDSL; LTIM;
+ZF CV name mismatch; the smallcase placeholder). Verbatim fixture:
+tests/fixtures/bse/crisil-2026-07-08.json. Mutation-checked: SLA, noise filter. 1025 tests.

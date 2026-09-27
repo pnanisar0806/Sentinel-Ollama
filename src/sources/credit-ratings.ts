@@ -1,4 +1,5 @@
 import type { Db } from '../db/client.js';
+import { attachmentUrl, fetchBseAnnouncements } from './bse.js';
 
 /**
  * Credit-rating actions on the issuers of held bonds, from BSE (IPS §3.8).
@@ -27,13 +28,6 @@ export const ISSUER_BSE_SCRIP: Record<string, { scrip: string; company: string }
   INE532F: { scrip: '532922', company: 'Edelweiss Financial Services' },
 };
 
-const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  Accept: 'application/json, text/plain, */*',
-  Referer: 'https://www.bseindia.com/',
-  Origin: 'https://www.bseindia.com',
-};
-
 export interface RatingFiling {
   newsId: string;
   bseScrip: string;
@@ -43,45 +37,20 @@ export interface RatingFiling {
   attachmentUrl: string | null;
 }
 
-const ymd = (d: Date): string => d.toISOString().slice(0, 10).replace(/-/g, '');
-
-/**
- * Rating filings for one scrip over a window.
- *
- * Queried a month at a time: the endpoint returned nothing at all for a twenty-month
- * range on 2026-09-25 while the same months one at a time returned 409 announcements.
- */
+/** Rating filings for one scrip over a window (month-at-a-time paging lives in bse.ts). */
 export async function fetchRatingFilings(
   scrip: string, from: Date, to: Date, fetchImpl: typeof fetch = fetch,
 ): Promise<RatingFiling[]> {
-  const out: RatingFiling[] = [];
-  for (let start = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), 1)); start <= to;
-    start = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))) {
-    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
-    for (let page = 1; page <= 10; page++) {
-      const url = 'https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w'
-        + `?pageno=${page}&strCat=-1&strPrevDate=${ymd(start)}&strScrip=${scrip}`
-        + `&strSearch=P&strToDate=${ymd(end < to ? end : to)}&strType=C&subcategory=-1`;
-      const res = await fetchImpl(url, { headers: HEADERS });
-      if (!res.ok) throw new Error(`BSE announcements ${scrip}: HTTP ${res.status}`);
-      const rows = ((await res.json()) as { Table?: Record<string, unknown>[] }).Table ?? [];
-      for (const r of rows) {
-        if (!/credit rating/i.test(String(r['SUBCATNAME'] ?? r['HEADLINE'] ?? ''))) continue;
-        const attachment = String(r['ATTACHMENTNAME'] ?? '');
-        out.push({
-          newsId: String(r['NEWSID']),
-          bseScrip: scrip,
-          company: String(r['SLONGNAME'] ?? ''),
-          filedAt: String(r['NEWS_DT']),
-          headline: String(r['NEWSSUB'] ?? r['HEADLINE'] ?? ''),
-          attachmentUrl: attachment
-            ? `https://www.bseindia.com/xml-data/corpfiling/AttachLive/${attachment}` : null,
-        });
-      }
-      if (rows.length < 50) break;
-    }
-  }
-  return out;
+  return (await fetchBseAnnouncements(scrip, from, to, fetchImpl))
+    .filter((r) => /credit rating/i.test(String(r['SUBCATNAME'] ?? r['HEADLINE'] ?? '')))
+    .map((r) => ({
+      newsId: String(r['NEWSID']),
+      bseScrip: scrip,
+      company: String(r['SLONGNAME'] ?? ''),
+      filedAt: String(r['NEWS_DT']),
+      headline: String(r['NEWSSUB'] ?? r['HEADLINE'] ?? ''),
+      attachmentUrl: attachmentUrl(r),
+    }));
 }
 
 /** Issuer prefixes of the bonds currently held, split into watched and not. */

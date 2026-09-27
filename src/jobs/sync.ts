@@ -14,6 +14,7 @@ import { fetchMfDetails } from '../sources/indmoney.js';
 import { recordDrawdown } from '../domain/drawdown.js';
 import { recordNowCloses } from '../sources/now-history.js';
 import { recordRatingFilings } from '../sources/credit-ratings.js';
+import { recordNews } from '../sources/news.js';
 import { applyIndustries, downloadIndustries } from '../sources/nse-industry.js';
 import {
   aumCroreToPaise, expensePctToBps, persistMfMetadata, type MfMetadata,
@@ -339,6 +340,17 @@ if (isMainModule(import.meta.url)) {
     }
   } catch (error) {
     console.error(`credit rating fetch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  // Phase 2.5: material corporate events for held and watched companies. After the
+  // portfolio sync, so today's holdings are covered. A failure is recorded per company and
+  // never stops the rest of the sync; the advisor reads coverage, not this log.
+  try {
+    const n = await recordNews(db);
+    console.log(`news: ${n.stored} new material event(s) across ${n.companies} companies`
+      + `${n.failed ? `, ${n.failed} fetch failure(s)` : ''}${n.unresolved ? `, ${n.unresolved} not found on BSE` : ''}`);
+  } catch (error) {
+    console.error(`news fetch failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // ServiceNow closes, so the drawdown includes the RSU (~23% of the book). Before the
