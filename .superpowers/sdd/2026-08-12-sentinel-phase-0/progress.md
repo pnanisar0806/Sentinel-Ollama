@@ -737,3 +737,11 @@ tranche. Buy/sell proposals once a month (`cadence.ts`, owner decision). `US:NOW
 closes (migration 0026) feed the drawdown, now 2.46% below the peak. Credit-rating feed:
 BSE Reg 30 filings (migration 0027), 7 in production, shown on /cleanup. Direction not
 parsed. Verified: 999 tests, web typecheck clean.
+
+### Phase 2.5 Task 1 — advisor schema + capability firewall (2026-09-27)
+Complete. Migration 0028: `advisor_proposals`, `advisor_decisions`, `replay_runs`,
+`llm_calls`, all append-only with RLS, and applied to production. `src/advisor/proposals.ts`
+has recordProposal, decideProposal (status is derived from decisions), loadProposals and
+recordLlmCall (unreported usage is NULL). tests/advisor/firewall.test.ts: the transitive
+import graph refuses orders/drafting/controls/funded-status/recommendation writes, and
+advisor SQL may write only advisor tables. Both were mutation-checked.

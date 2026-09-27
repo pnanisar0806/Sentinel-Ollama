@@ -3049,3 +3049,24 @@ vesting 15 Nov" reappearing after every sync. sync now projects only grants with
   The 2026-09-20 report ran twice: #3/#4 were exact copies of #1/#2.
 - #2 (gold BUY with no instrument) retired by the owner — suppressed with a reason, not
   deleted.
+
+## Phase 2.5 owner inputs (2026-09-27) — Phase 2.5 was NOT started before this date
+
+- **Satellite BUY size:** one tactical tranche = min(tactical_monthly_paise, max_order_paise),
+  ₹50k today. Satellite stays inside IPS §3.4's 25% of equity flows.
+- **News sources:** free only: NSE/BSE corporate announcements + business RSS (ET Markets,
+  Livemint, Moneycontrol). No paid feed.
+- **News role (owner accepted the suggestion):** long-term investor, so ONLY material corporate
+  events count (results/guidance, rating actions, governance red flags — auditor exit,
+  promoter pledge, SEBI order, fraud/default — M&A, management change, buyback/dividend).
+  Headlines and price-move stories are ignored. News may DEFER a BUY (WAIT) or FLAG a thesis
+  for review; it never initiates a BUY and never sells on a headline alone.
+- **News coverage SLA: 7 days** before a monthly decision (not 48h). Fetch still runs daily
+  so a governance red flag surfaces promptly.
+- **Watchlist revision:** first weekday on/after the 20th of Feb/May/Aug/Nov — after the
+  45-day results-filing deadline, so fundamentals include the latest quarter. Not Sunday.
+- **Model:** keep TEXT_MODEL (free finance model); owner may switch to Opus later.
+- **Deferred rebalance fixes (after 2.5, only if still needed):** 2pp sell tolerance; count
+  the monthly surplus as a funding route (report passes `routes: []` today); sales must name
+  where proceeds go; TRIM alternates must not be "BUY NIFTYBEES" (indexRouteLeg misapplied);
+  sell selection by quality before tax; MF legs say "redeem at NAV", not "market order".
