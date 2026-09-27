@@ -782,3 +782,14 @@ constraint, not a guess. `sizing-input.ts` loads it read-only. Live run: Bajaj A
 4 shares ₹45,124 eligible; HAL withheld (budget used). 10 tests; mutation-checked
 budget, cap and owned-units bounds (the owned-units test was strengthened after a
 surviving mutant).
+
+### Phase 2.5 Task 5 — point-in-time replay (2026-09-27)
+Complete. `src/advisor/replay.ts`: replayAt(cutoff) takes news only when BOTH
+published_at and received_at are ≤ the cutoff, and sentiment as classified by the
+cutoff, so a late backfill or a reclassification cannot leak backwards. Engine scores
+are stored artifacts dated on or before the cutoff; the holdings snapshot is the latest
+by business date and arrival. replayWindow does month-end cutoffs with deterministic
+dataset/code/config hashes and writes replay_runs only; no model, no network. Coverage
+names what is unreconstructable (rails, cash/reservations, score ingestion time, missing
+snapshots) instead of taking today's values. `pnpm advisor:replay --from --to`. 6 tests;
+the arrival cutoff was mutation-checked.

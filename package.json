@@ -18,6 +18,7 @@
     "web": "pnpm --dir web dev",
     "cleanup": "tsx --env-file-if-exists=.env src/jobs/cleanup.ts",
     "news": "tsx --env-file-if-exists=.env src/jobs/news-sync.ts",
+    "advisor:replay": "tsx --env-file-if-exists=.env src/jobs/advisor-replay.ts",
     "screener:import": "tsx --env-file=.env src/jobs/screener-import.ts",
     "screener:remind": "tsx --env-file-if-exists=.env src/jobs/screener-reminder.ts",
     "watchlist:propose": "tsx --env-file=.env src/jobs/watchlist-propose.ts",
