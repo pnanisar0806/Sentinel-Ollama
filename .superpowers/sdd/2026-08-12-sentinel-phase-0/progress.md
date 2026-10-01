@@ -858,3 +858,12 @@ quarterly revision with per-line accept/decline, and the track record (withheld 
 20). System NO_ACTION / UNAVAILABLE carry no buttons. Nav: Act → Advisor; product.ts
 row live. The auth gate test now names /api/advisor. Verified in a local build against
 production data (read-only).
+
+### Phase 2.5 Task 11 — jobs, documentation, close (2026-10-01)
+Complete. No new workflow: news + classification ride in sync (daily), the advisor and
+commentary in weekly (advisor monthly via cadence 'advice'), the watchlist revision in
+schedule (revision days). LLM_API_KEY is now passed to sync, weekly and schedule.
+docs/SETUP.md documents the key's optional semantics and the 2.5 steps; index.md lists
+every new module; PENDING records the first live advice (first weekly run of October)
+and the manual `watchlist:propose` bypass. Full suite 1076, root + web typechecks clean.
+PHASE 2.5 COMPLETE. Phase 2's four-week and owner-approval gates still apply.

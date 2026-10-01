@@ -886,10 +886,16 @@ buy/sell proposals come ONCE A MONTH (owner decision); drawdown includes the RSU
 daily NOW closes; credit-rating filings fetched from BSE and shown on /cleanup.
 
 PHASE 2.5 IN PROGRESS (started 2026-09-27; plan docs/superpowers/plans/2026-09-17-sentinel-phase-2.5.md):
-- [x] T1 advisor schema + firewall · [x] T2 news (BSE material events) · [x] T3 sentiment
-- [ ] T4 deterministic sizing · T5 replay · T6 LLM ADVISE · T7 calibration · T8 commentary
-      · T9 watchlist revision · T10 /advisor page · T11 jobs + docs
-- [ ] AFTER 2.5, only if still needed: the deferred rebalance fixes (MEMORY.md, "Phase 2.5 owner inputs").
+- [x] ALL 11 TASKS COMPLETE (2026-09-28): T1 firewall · T2 news · T3 sentiment · T4 sizing
+      · T5 replay · T6 ADVISE + handoff · T7 calibration · T8 commentary · T9 watchlist
+      revision · T10 /advisor · T11 jobs + docs.
+- [ ] First live advice: the monthly advisor runs in the first successful weekly report of
+      October (Sun 4 Oct). September's advice never ran: the feature did not exist yet.
+- [ ] `pnpm watchlist:propose` (manual, pre-2.5) still writes picks straight into the live
+      watchlist without sign-off. Retire it, or route it through the quarterly revision.
+- [ ] NEXT: the deferred rebalance fixes — confirmed STILL NEEDED after 2.5 (the advisor
+      handles stock ideas and exits; rebalance recommendations bypass it). MEMORY.md,
+      "Phase 2.5 owner inputs".
 - [ ] UI rollout of the new style to the remaining pages; RSU vest form on /log.
 
 STILL OPEN for Phase 2:

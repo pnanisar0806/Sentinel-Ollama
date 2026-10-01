@@ -77,6 +77,15 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/domain/cadence.ts` | `monthlyReviewDone`, `recordMonthlyReview`, `nextMonthStart`. Buy/sell proposals once a month, in the first successful run of the month (owner decision). **Added 2026-09-24** |
 | `src/sources/now-history.ts` | `fetchNowCloses`, `fetchUsdInrSeries`, `toPaise`, `recordNowCloses`. Daily `US:NOW` closes in paise, `prices_eod` source `yahoo`. **Added 2026-09-24** |
 | `src/advisor/proposals.ts` | Phase 2.5 advisor evidence: `recordProposal`, `decideProposal`, `loadProposals`, `recordLlmCall`. src/advisor may write only advisor tables (tests/advisor/firewall.test.ts). **Added 2026-09-27** |
+| `src/advisor/recommend.ts` | `runAdvisor`, `validateDecision`: monthly BUY/SELL/HOLD/WAIT among sized candidates; NO_ACTION / UNAVAILABLE distinct; news defers a BUY. **2026-09-27** |
+| `src/advisor/replay.ts` | `replayAt`, `replayWindow`: point-in-time replay (economic + arrival cutoffs), writes replay_runs only. **2026-09-27** |
+| `src/advisor/calibrate.ts` | `calibrateByOrigin`: advisor vs engine × conviction × horizon, withheld under 20. **2026-09-28** |
+| `src/advisor/commentary.ts` | `writeCommentary`, `validateSection`: every number bound to a fact in a sentence naming its subject. **2026-09-28** |
+| `src/advisor/watchlist.ts` | `isRevisionDay`, `removalCandidates`, `proposeRevision`: quarterly revision proposals. **2026-09-28** |
+| `src/domain/sizing.ts` / `sizing-input.ts` | `sizeCandidates` (pure) / `loadSizingInput`: deterministic candidate sizing. **2026-09-27** |
+| `src/domain/advisor-handoff.ts` | `signAdvice` (re-size → recommendation → approval request; benchmark), `dismissAdvice`. **2026-09-27** |
+| `src/domain/watchlist-signoff.ts` | `decideWatchlistLine`: per-line accept/decline; removals are `watchlist_removals` events. **2026-09-28** |
+| `web/app/advisor/` | /advisor page + `/api/advisor`. **2026-09-28** |
 | `src/sources/bse.ts` | Shared BSE fetcher: `fetchBseAnnouncements`, `fetchBseScrips`, `bseResolver` (ISIN → symbol → unique name). **Added 2026-09-27** |
 | `src/sources/news.ts` | Material corporate events: `classifyBseEvent`, `recordNews`, `newsCoverage` (7-day SLA). Daily in sync; `pnpm news --days=N`. **Added 2026-09-27** |
 | `src/sources/sentiment.ts` | LLM reading of each filing: `classifyPending`, `latestSentiment` (as of a cutoff), `firstJson`. **Added 2026-09-27** |

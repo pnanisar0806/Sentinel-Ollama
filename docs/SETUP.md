@@ -130,6 +130,7 @@ Repo → Settings → Secrets and variables → Actions → **New repository sec
 | `BACKUP_REPO` | backup | Private GitHub repo for encrypted backups (e.g., `owner/sentinel-backups`) |
 | `BACKUP_BRANCH` | backup | Branch in backup repo (default: `main`) |
 | `GH_TOKEN` | backup | GitHub PAT with `repo` scope for pushing to backup repo |
+| `LLM_API_KEY` | sync, schedule, weekly (+ Vercel) | OpenRouter key. Absent is supported: filings stay unclassified (never neutral), advice is recorded as UNAVAILABLE, no commentary, and the watchlist revision lists removals only |
 | `KITE_API_KEY`, `KITE_ACCESS_TOKEN` | sync (optional) | developers.kite.trade personal app; order APIs free, market data ₹500/mo — Phase 2 doesn't need market data |
 
 ## Step 7 — Deploy web app to Vercel (single-owner, ~10 min)
@@ -156,6 +157,14 @@ Repo → Settings → Secrets and variables → Actions → **New repository sec
    - `keepalive` — **Sundays 09:30** (04:00 UTC), belt-and-braces Supabase ping
    - `schedule` — **daily 10:00** (04:30 UTC) — expire orders, resurface deferred, T+2/T+7 reminders
    - `backup` — **Sundays 11:00** (05:30 UTC) — encrypted pg_dump to private GitHub repo
+   - Phase 2.5 steps ride on those jobs rather than having their own:
+     - `sync` fetches material BSE filings for held and watched companies (`pnpm news --days=N`
+       to backfill), then has the model read new ones.
+     - `weekly`, in the first successful run of each month, sizes candidates and runs the advisor
+       (advice waits on `/advisor` for sign-off), then writes validated commentary.
+     - `schedule`, on the first weekday on or after the 20th of Feb/May/Aug/Nov, drafts the
+       quarterly watchlist revision for per-line sign-off.
+     - `pnpm advisor:replay --from --to` replays what the advisor could have known at each month end.
 4. Final acceptance check: compare digest figures against Kite / INDmoney / Fidelity —
    they must agree within **±1%**.
 
