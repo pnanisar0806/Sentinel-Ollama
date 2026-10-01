@@ -1,4 +1,5 @@
-import { addP, type Paise } from '../../src/money/paise.js';
+import { addP, formatInr, type Paise } from '../../src/money/paise.js';
+import { redemptionFor } from '../../src/domain/bond-redemptions.js';
 import { openDb, type Db } from '../../src/db/client.js';
 import { buildDigestInput, type DigestInput } from '../../src/notify/digest.js';
 import { loadPositions, type Position } from '../../src/domain/networth.js';
@@ -529,6 +530,8 @@ export interface RecommendationRow {
   source: string;
   suppressed: boolean;
   suppressedReason: string | null;
+  /** Set when what it asked for has already happened (a bond that has paid out). */
+  done: string | null;
 }
 
 export async function getRecommendations(limit = 50): Promise<RecommendationRow[]> {
@@ -542,7 +545,8 @@ export async function getRecommendations(limit = 50): Promise<RecommendationRow[
        from recommendations order by created_on desc, id desc limit $1`,
     [limit],
   );
-  return rows.map((r) => ({
+  const d = await db();
+  const out = rows.map((r) => ({
     key: String(r.id),
     id: String(r.id),
     createdOn: isoDate(r.created_on),
@@ -557,7 +561,16 @@ export async function getRecommendations(limit = 50): Promise<RecommendationRow[
     source: r.source,
     suppressed: r.suppressed,
     suppressedReason: r.suppressed_reason,
+    done: null as string | null,
   }));
+  // A maturity routing whose bond has already paid out is history, not a pending action.
+  for (const r of out) {
+    const leg = r.primary;
+    if (r.kind !== 'maturity_routing' || typeof leg === 'string' || leg.instrumentId === null) continue;
+    const paid = await redemptionFor(d, leg.instrumentId);
+    if (paid) r.done = `Paid out ${paid.receivedOn}${paid.amountPaise !== null ? ` — ${formatInr(paid.amountPaise as Paise)} credited` : ''}.`;
+  }
+  return out;
 }
 
 export interface MaturityInstrument {

@@ -48,6 +48,7 @@ function Rec({ r, names, kinds }: { r: RecommendationRow; names: Names; kinds: M
       {r.suppressed
         ? <Notice tone="amber"><strong>Not acted on.</strong> {r.suppressedReason ?? 'No reason was recorded.'}</Notice>
         : null}
+      {r.done ? <Notice tone="green"><strong>Done.</strong> {r.done}</Notice> : null}
       <div className="options">
         <Option leg={r.primary} label="What the advisor recommends" names={names} kinds={kinds} primary />
         {alternates.map((leg, i) => <Option key={i} leg={leg} label={`Option ${i + 2}`} names={names} kinds={kinds} />)}
@@ -59,7 +60,8 @@ function Rec({ r, names, kinds }: { r: RecommendationRow; names: Names; kinds: M
 
 export default async function RecommendationsPage() {
   const [recs, names, kinds] = await Promise.all([getRecommendations(), getInstrumentNames(), getInstrumentKinds()]);
-  const live = recs.filter((r) => !r.suppressed);
+  const live = recs.filter((r) => !r.suppressed && r.done === null);
+  const done = recs.filter((r) => !r.suppressed && r.done !== null);
   const suppressed = recs.filter((r) => r.suppressed);
 
   return (
@@ -77,6 +79,14 @@ export default async function RecommendationsPage() {
             <div className="bento">
               {live.map((r) => <div className="span-6" key={r.key}><Rec r={r} names={names} kinds={kinds} /></div>)}
             </div>
+            {done.length > 0 && (
+              <>
+                <h2 className="section-title">Already done ({done.length})</h2>
+                <div className="bento">
+                  {done.map((r) => <div className="span-6" key={r.key}><Rec r={r} names={names} kinds={kinds} /></div>)}
+                </div>
+              </>
+            )}
             {suppressed.length > 0 && (
               <>
                 <h2 className="section-title">Not acted on ({suppressed.length})</h2>
