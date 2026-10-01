@@ -157,6 +157,21 @@ function indexRouteLeg(primary: RecLeg): RecLeg {
   };
 }
 
+function withoutSellingLeg(primary: RecLeg): RecLeg {
+  return {
+    intent: primary.intent,
+    instrumentId: null,
+    action: 'REDIRECT',
+    amountPaise: primary.amountPaise,
+    thesis:
+      'Reach the same end without selling: send new money to the under-weight classes over ' +
+      'the coming months instead. Slower, but it realises no gain, pays no tax and no brokerage, ' +
+      'and leaves a long-term holding untouched.',
+    ipsClauseRefs: ['3.3'],
+    falsification: null,
+  };
+}
+
 function doNothingLeg(primary: RecLeg): RecLeg {
   return {
     intent: 'do nothing this cycle',
@@ -178,7 +193,11 @@ function doNothingLeg(primary: RecLeg): RecLeg {
  * exception calls `validateRecommendation` on the pieces itself.
  */
 export function buildRecommendation(input: RecommendationInput): Recommendation {
-  const a1 = input.sameIntentAlternates?.[0] ?? indexRouteLeg(input.primary);
+  // The index route is an alternative to BUYING a single name. For a sale it is nonsense
+  // (sell equity, buy equity), so a sale's default alternative reaches the same end slowly
+  // and without tax: new money elsewhere instead of selling (owner, 2026-09-27).
+  const a1 = input.sameIntentAlternates?.[0]
+    ?? (input.primary.action === 'BUY' ? indexRouteLeg(input.primary) : withoutSellingLeg(input.primary));
   const a2 = input.differentIntent ?? doNothingLeg(input.primary);
 
   const rec: Recommendation = {

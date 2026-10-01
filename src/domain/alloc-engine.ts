@@ -52,11 +52,15 @@ export interface CandidateAction {
   route: 'sip' | 'fresh-surplus' | 'sell';
   /** The holding to trim, or the instrument to add to. Absent only when nothing fits. */
   instrumentId?: string;
+  /** For a TRIM: where the proceeds go. A sale never leaves idle cash unnamed. */
+  proceedsTo?: { assetClass: AssetClass; instrumentId: string | null };
   taxNote: string;
   rationale: string;
 }
 
 export interface AllocationState {
+  /** Quality score per instrument (signal composite / fund score), weakest sold first. */
+  quality?: ReadonlyMap<string, number>;
   /** The Phase 0 net worth — the single basis. Never recomputed here. */
   netWorth: NetWorth;
   positions: Position[];
@@ -88,18 +92,32 @@ export function isRebalanceTarget(p: Position): boolean {
 }
 
 /**
- * Sale candidates within one asset class, cheapest-to-sell in tax terms first:
- * unrealised losses (harvestable), then the smallest gains, then unknown cost basis.
+ * Sale candidates within one asset class. With quality scores (owner, 2026-09-27): the
+ * weakest holding first, scored names before unscored ones (a name that cannot be judged
+ * is not sold on a guess), and tax only to break ties. Without scores: cheapest-to-sell
+ * in tax terms — unrealised losses, then the smallest gains, then unknown cost basis.
  */
-export function sellCandidates(positions: readonly Position[], assetClass: AssetClass): Position[] {
-  const rank = (p: Position): number => {
+export function sellCandidates(
+  positions: readonly Position[], assetClass: AssetClass, quality?: ReadonlyMap<string, number>,
+): Position[] {
+  const tax = (p: Position): number => {
     if (p.avgCostPaise === null) return Number.POSITIVE_INFINITY;
     return Number(p.valuePaise - p.avgCostPaise);
   };
+  const score = (p: Position): number => quality?.get(p.instrumentId) ?? Number.POSITIVE_INFINITY;
   return positions
     .filter((p) => p.assetClass === assetClass && isRebalanceTarget(p))
-    .sort((a, b) => rank(a) - rank(b) || a.instrumentId.localeCompare(b.instrumentId));
+    .sort((a, b) => score(a) - score(b) || tax(a) - tax(b) || a.instrumentId.localeCompare(b.instrumentId));
 }
+
+/**
+ * No sale for an overshoot smaller than this (owner, 2026-09-27): 2 percentage points of
+ * the portfolio. New money closes it; a sale would realise tax and pay brokerage for
+ * nothing a month of surplus cannot do.
+ */
+export const SELL_TOLERANCE = 0.02;
+/** Beyond the tolerance, still prefer new money if it closes the gap within this many months. */
+export const FLOW_HORIZON_MONTHS = 12n;
 
 /**
  * What to BUY when an asset class is under its floor.
@@ -149,11 +167,26 @@ function dilutionRoutes(routes: readonly FundingRoute[], overweight: AssetClass)
   return routes.filter((r) => r.assetClass !== overweight && r.loadFree && r.monthlyCapacityPaise > 0n);
 }
 
-function trimActions(state: AllocationState, row: DriftRow): CandidateAction[] {
+/**
+ * Where new money or sale proceeds should go when `overweight` is over its ceiling: a
+ * class under its floor first (the furthest under), otherwise the class furthest below the
+ * middle of its band. EQUITY is never the destination of money taken out of equity.
+ */
+function destinationFor(drift: readonly DriftRow[], overweight: AssetClass): AssetClass {
+  const others = drift.filter((d) => d.assetClass !== overweight && d.assetClass !== 'CASH');
+  const under = others.filter((d) => d.breach === 'UNDER').sort((a, b) => (a.actual - a.min) - (b.actual - b.min));
+  if (under.length > 0) return under[0]!.assetClass;
+  const byRoom = [...others].sort((a, b) => (a.actual - (a.min + a.max) / 2) - (b.actual - (b.min + b.max) / 2));
+  return byRoom[0]?.assetClass ?? 'DEBT';
+}
+
+function trimActions(
+  state: AllocationState, row: DriftRow, proceedsTo: { assetClass: AssetClass; instrumentId: string | null },
+): CandidateAction[] {
   const actions: CandidateAction[] = [];
   let remaining = row.driftPaise;
 
-  for (const p of sellCandidates(state.positions, row.assetClass)) {
+  for (const p of sellCandidates(state.positions, row.assetClass, state.quality)) {
     if (remaining <= 0n) break;
     // Never past the band edge: the last slice is capped at what is still over.
     const amount = (p.valuePaise < remaining ? p.valuePaise : remaining) as Paise;
@@ -170,7 +203,10 @@ function trimActions(state: AllocationState, row: DriftRow): CandidateAction[] {
           : gain < 0n
             ? `unrealised loss ${formatInr((0n - gain) as Paise)} — harvestable against gains elsewhere`
             : `unrealised gain ${formatInr(gain as Paise)} — realising it is a taxable event`,
-      rationale: `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}); no funding route can absorb the drift`,
+      proceedsTo,
+      rationale: `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}), `
+        + `more than new money can close within ${FLOW_HORIZON_MONTHS} months; the proceeds go into ${proceedsTo.assetClass}`
+        + `${proceedsTo.instrumentId ? ` (${proceedsTo.instrumentId})` : ''}, not idle cash`,
     });
     remaining = (remaining - amount) as Paise;
   }
@@ -220,24 +256,40 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
       continue;
     }
 
-    // OVER: dilute with new money before selling anything.
-    const dilution = dilutionRoutes(routes, row.assetClass);
-    if (dilution.length > 0) {
-      const target = dilution[0]!;
+    // OVER: dilute with new money before selling anything (owner, 2026-09-27).
+    //  - Under SELL_TOLERANCE over the ceiling: never a sale, route or no route.
+    //  - Beyond it: new money still, if it closes the gap within FLOW_HORIZON_MONTHS.
+    //  - Only then a trim, which names where the proceeds go.
+    // New money goes to the class that needs it most, not merely the first route listed.
+    const dest = destinationFor(drift, row.assetClass);
+    const dilution = dilutionRoutes(routes, row.assetClass)
+      .sort((a, b) => Number(b.assetClass === dest) - Number(a.assetClass === dest));
+    // SIPs are separate money and add up; the monthly surplus is one pool that could go to
+    // any class, so it counts once (its largest offer), never once per class.
+    const sip = dilution.filter((r) => r.kind === 'sip').reduce((sum, r) => sum + r.monthlyCapacityPaise, 0n);
+    const surplus = dilution.filter((r) => r.kind === 'fresh-surplus').reduce((m, r) => (r.monthlyCapacityPaise > m ? r.monthlyCapacityPaise : m), 0n);
+    const capacity = sip + surplus;
+    const withinTolerance = row.actual - row.max < SELL_TOLERANCE;
+    const flowCloses = capacity > 0n && row.driftPaise <= capacity * FLOW_HORIZON_MONTHS;
+    if (withinTolerance || flowCloses) {
+      const target = dilution[0];
+      const toClass = target?.assetClass ?? dest;
       actions.push({
         kind: 'DIRECT_FLOW',
-        assetClass: target.assetClass,
+        assetClass: toClass,
         amountPaise: row.driftPaise,
-        route: target.kind,
+        route: target?.kind ?? 'fresh-surplus',
         taxNote: NO_REALISATION_NOTE,
         rationale:
           `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}); ` +
-          `directing ${target.id} into ${target.assetClass} closes the gap without a sale`,
+          (withinTolerance
+            ? `an overshoot under ${Math.round(SELL_TOLERANCE * 100)} points is closed by sending new money into ${toClass}, not by selling`
+            : `sending new money into ${toClass} closes the gap within ${FLOW_HORIZON_MONTHS} months without a sale`),
       });
       taxNotes.push(NO_REALISATION_NOTE);
       continue;
     }
-    actions.push(...trimActions(state, row));
+    actions.push(...trimActions(state, row, { assetClass: dest, instrumentId: addTarget(state.positions, dest) }));
   }
 
   const hasAdd = actions.some((a) => a.kind === 'ADD');

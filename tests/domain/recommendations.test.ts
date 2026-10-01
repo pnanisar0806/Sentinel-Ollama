@@ -60,6 +60,19 @@ describe('FR-11 contract', () => {
     expect(validateRecommendation(rec)).toEqual([]);
   });
 
+  it('never offers "buy the index" as the alternative to a sale', () => {
+    // Owner, 2026-09-27: "sell CRISIL" with alternative "buy NIFTYBEES" sold equity to buy equity.
+    const rec = buildRecommendation({
+      kind: 'rebalance', createdOn: SEED_DATE,
+      primary: leg({ intent: 'reduce EQUITY toward its IPS band', instrumentId: 'NSE:CRISIL', action: 'TRIM' }),
+    });
+    const [a1] = rec.alternates;
+    expect(a1.action).not.toBe('BUY');
+    expect(a1.instrumentId).toBeNull();
+    expect(a1.thesis).toMatch(/new money/i);
+    expect(validateRecommendation(rec)).toEqual([]);
+  });
+
   it('prefers a real same-intent challenger over the index fallback', () => {
     const challenger = leg({ instrumentId: 'NSE:TCS', thesis: 'Challenger thesis.' });
     const rec = buildRecommendation({

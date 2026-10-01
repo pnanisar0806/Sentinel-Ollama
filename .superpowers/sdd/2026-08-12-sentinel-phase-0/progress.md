@@ -867,3 +867,12 @@ docs/SETUP.md documents the key's optional semantics and the 2.5 steps; index.md
 every new module; PENDING records the first live advice (first weekly run of October)
 and the manual `watchlist:propose` bypass. Full suite 1076, root + web typechecks clean.
 PHASE 2.5 COMPLETE. Phase 2's four-week and owner-approval gates still apply.
+
+### Deferred rebalance fixes (2026-10-01)
+Complete, test-first. Engine: 2-point sell tolerance, destination selection, pooled
+surplus capacity, 12-month flow horizon, proceedsTo, quality-first sell order. Report:
+surplus routes from the tactical rail, quality map, DIRECT_FLOW skipped when the same class
+already gets an ADD, intent fixed (it named the destination as the class "reduced"),
+alternates that match the action. recommendations.ts: a sale's default A1 is REDIRECT.
+Web: funds say "redeem/invest at the day's NAV". Mutation-checked: tolerance, horizon,
+quality order. Real data (read-only): October = DIRECT_FLOW + ADD gold, no sales. 1082 tests.

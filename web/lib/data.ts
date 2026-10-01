@@ -221,6 +221,8 @@ export interface OrderIntentRow {
   instrumentId: string;
   /** The instrument's human name — never make the owner decode an id. */
   instrumentName: string;
+  /** 'MF' for a mutual fund: redeemed at NAV, never a market order. */
+  instrumentKind: string | null;
   /**
    * Rupee amount in paise. The column is called `quantity` but drafting stores the
    * recommendation's `amountPaise` there: an advisory order is placed by amount.
@@ -259,6 +261,7 @@ async function toRow(d: Db, o: OrderIntent, names: Map<string, string>): Promise
     intent: o.intent,
     instrumentId: o.instrumentId,
     instrumentName: names.get(o.instrumentId) ?? o.instrumentId,
+    instrumentKind: (await d.query<{ kind: string }>(`select kind from instruments where id = $1`, [o.instrumentId]))[0]?.kind ?? null,
     amountPaise: o.quantity,
     orderType: o.orderType,
     limitPricePaise: o.limitPricePaise,
@@ -736,4 +739,9 @@ export async function getAdvisor(): Promise<AdvisorData> {
     calibration: await calibrateByOrigin(d),
     names: await getInstrumentNames(),
   };
+}
+
+export async function getInstrumentKinds(): Promise<Map<string, string>> {
+  const rows = await (await db()).query<{ id: string; kind: string }>(`select id, kind from instruments`);
+  return new Map(rows.map((r) => [r.id, r.kind]));
 }

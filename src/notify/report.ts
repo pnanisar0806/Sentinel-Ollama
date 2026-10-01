@@ -9,7 +9,7 @@ import {
   scoreSatellite,
   type SatelliteScore,
 } from '../domain/engine.js';
-import { rebalanceRec, type FundingRoute } from '../domain/alloc-engine.js';
+import { DEFAULT_ADD_INSTRUMENT, addTarget, rebalanceRec, type CandidateAction, type FundingRoute } from '../domain/alloc-engine.js';
 import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../domain/sell-triggers.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
 import { railPaise } from '../domain/rails.js';
@@ -236,6 +236,28 @@ async function runSignalReview(
   return { scored, newlyRecommended, fallen, qualityDrops, comparedWith, skippedReason: null };
 }
 
+/**
+ * Alternatives that match the action (owner, 2026-09-27). A top-up's alternative is
+ * another instrument in the same class; a redirect's is buying that class directly. A
+ * trim gets none here: `buildRecommendation` gives every sale the "new money, no sale"
+ * alternative. Never the equity index as the alternative to a gold or debt move.
+ */
+function rebalanceAlternates(action: CandidateAction, primary: RecLeg, positions: readonly Position[]): RecLeg[] {
+  if (action.kind === 'ADD') {
+    const other = [DEFAULT_ADD_INSTRUMENT[action.assetClass], ...positions
+      .filter((p) => p.assetClass === action.assetClass && p.instrumentId !== primary.instrumentId)
+      .map((p) => p.instrumentId)]
+      .find((id): id is string => id !== undefined && id !== primary.instrumentId);
+    return other ? [{ ...primary, instrumentId: other, thesis: `The same top-up through ${other} instead: same asset class, a different fund.` }] : [];
+  }
+  if (action.kind === 'DIRECT_FLOW') {
+    const target = addTarget(positions, action.assetClass);
+    return target ? [{ ...primary, instrumentId: target, action: 'BUY',
+      thesis: `Put this month's tranche straight into ${target} rather than only steering future money.` }] : [];
+  }
+  return [];
+}
+
 export async function buildReportInput(
   db: Db,
   asOf: string,
@@ -258,13 +280,6 @@ export async function buildReportInput(
   // run of the month that succeeds. Maturities are dated events and go out regardless.
   const reviewDue = !(await monthlyReviewDone(db, 'recommendations', month));
 
-  // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
-  const rebalance = rebalanceRec(
-    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? [] },
-    month,
-  );
-  const built: Recommendation[] = [...(opts.maturityRecommendations ?? [])];
-
   // A top-up is one month's tranche, never the whole gap at once. The gold gap was
   // ₹2.17L against a ₹1L single-order rail and a ₹50k monthly tactical budget, so a
   // full-gap BUY could only ever be refused. Closing a band over several months is also
@@ -273,27 +288,53 @@ export async function buildReportInput(
     ? await railPaise(db, 'tactical_monthly_paise')
     : await railPaise(db, 'max_order_paise');
 
+  // The monthly surplus is a real funding route (owner, 2026-09-27). Until then the report
+  // passed none, so the engine concluded "no route can absorb the drift" and proposed
+  // sales for a 0.7-point overshoot. One pool, offered to every non-equity class; the
+  // engine counts it once. Quality scores make it sell the weakest holding, not the
+  // cheapest in tax.
+  const surplusRoutes: FundingRoute[] = (['DEBT', 'GOLD'] as const).map((assetClass) => ({
+    id: `monthly-surplus-${assetClass.toLowerCase()}`, kind: 'fresh-surplus', assetClass,
+    monthlyCapacityPaise: tranche as never, loadFree: true, note: 'the monthly tactical budget',
+  }));
+  const scores = await db.query<{ instrument_id: string; composite: string }>(
+    `select distinct on (instrument_id) instrument_id, composite::text from signal_scores order by instrument_id, score_date desc`);
+  const quality = new Map(scores.map((r) => [r.instrument_id, Number(r.composite)]));
+
+  // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
+  const rebalance = rebalanceRec(
+    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? surplusRoutes, quality },
+    month,
+  );
+  const built: Recommendation[] = [...(opts.maturityRecommendations ?? [])];
+  const addedClasses = new Set(rebalance.actions.filter((a) => a.kind === 'ADD').map((a) => a.assetClass));
+
   for (const action of (reviewDue ? rebalance.actions : [])) {
+    // Redirecting new money into a class that is already getting a BUY is the same money twice.
+    if (action.kind === 'DIRECT_FLOW' && addedClasses.has(action.assetClass)) continue;
     const amount = action.kind === 'ADD' && action.amountPaise > tranche ? tranche : action.amountPaise;
     const staged = amount !== action.amountPaise
       ? ` This is one monthly tranche of ${formatInr(amount as never)} toward a ${formatInr(action.amountPaise)} gap; the rest follows in later months.`
       : '';
-    built.push(
-      buildRecommendation({
-        kind: 'rebalance',
-        createdOn: asOf,
-        primary: {
-          intent: `${action.kind === 'ADD' ? 'restore' : 'reduce'} ${action.assetClass} toward its IPS band`,
-          instrumentId: action.instrumentId ?? null,
-          action: action.kind === 'TRIM' ? 'TRIM' : action.kind === 'ADD' ? 'BUY' : 'REDIRECT',
-          amountPaise: amount.toString(),
-          thesis: `${action.rationale}. ${action.taxNote}. Route: ${action.route}.${staged}`,
-          ipsClauseRefs: rebalance.ipsClauseRefs,
-          falsification: null,
-        },
-        engineEvidence: { drift: rebalance.summary, direction: rebalance.direction },
-      }),
-    );
+    const intent = action.kind === 'ADD'
+      ? `restore ${action.assetClass} toward its IPS band`
+      : action.kind === 'DIRECT_FLOW'
+        ? `send new money into ${action.assetClass} instead of selling`
+        : `reduce ${action.assetClass} toward its IPS band`;
+    const primary: RecLeg = {
+      intent,
+      instrumentId: action.kind === 'DIRECT_FLOW' ? null : action.instrumentId ?? null,
+      action: action.kind === 'TRIM' ? 'TRIM' : action.kind === 'ADD' ? 'BUY' : 'REDIRECT',
+      amountPaise: amount.toString(),
+      thesis: `${action.rationale}. ${action.taxNote}.${staged}`,
+      ipsClauseRefs: rebalance.ipsClauseRefs,
+      falsification: null,
+    };
+    built.push(buildRecommendation({
+      kind: 'rebalance', createdOn: asOf, primary,
+      sameIntentAlternates: rebalanceAlternates(action, primary, positions),
+      engineEvidence: { drift: rebalance.summary, direction: rebalance.direction, ...(action.proceedsTo ? { proceedsTo: action.proceedsTo } : {}) },
+    }));
   }
   // Stock ideas are no longer turned into recommendations here. They go through the
   // Phase 2.5 advisor (src/jobs/report.ts → runAdvisor), which sizes them, reads their

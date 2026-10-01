@@ -19,7 +19,17 @@ const VERB: Record<string, string> = {
 };
 
 /** "Buy ₹50,000 of Zerodha Gold ETF", "Sell part of CRISIL Ltd — about ₹29,711". */
-export function sentence(leg: RecLeg, names: Names): string {
+/** Funds are bought and redeemed at the day's NAV; there is no market order and no share. */
+const FUND = /^(MF:|IND:\d)/;
+export const isFund = (id: string | null, kinds?: Map<string, string>): boolean =>
+  id !== null && (kinds?.get(id) === 'MF' || (kinds === undefined && FUND.test(id)));
+
+export function sentence(leg: RecLeg, names: Names, kinds?: Map<string, string>): string {
+  if (isFund(leg.instrumentId, kinds) && (leg.action === 'TRIM' || leg.action === 'SELL')) {
+    const amount = leg.amountPaise === null ? null : rupees(String(leg.amountPaise));
+    const verb = leg.action === 'TRIM' ? 'Redeem part of' : 'Redeem all of';
+    return `${verb} ${nameOf(leg.instrumentId, names)}${amount ? ` — about ${amount}` : ''} at the day's NAV`;
+  }
   if (leg.action === 'HOLD') {
     return leg.instrumentId === null ? 'Do nothing this month' : `Keep holding ${nameOf(leg.instrumentId, names)}`;
   }

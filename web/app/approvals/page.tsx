@@ -21,7 +21,7 @@ function Request({ o, today }: { o: OrderIntentRow; today: string }) {
       tone={soon && o.status === 'PENDING_APPROVAL' ? 'warn' : undefined}
     >
       <div className="bento" style={{ marginBottom: 0 }}>
-        <div className="span-3"><div className="stat-label">Amount</div><div className="stat-value" style={{ fontSize: 22 }}>{rupees(o.amountPaise)}</div><div className="muted">{o.orderType === 'MARKET' ? 'market order, by amount' : 'limit order'}</div></div>
+        <div className="span-3"><div className="stat-label">Amount</div><div className="stat-value" style={{ fontSize: 22 }}>{rupees(o.amountPaise)}</div><div className="muted">{o.instrumentKind === 'MF' ? (o.intent === 'BUY' ? "invested at the day's NAV" : "redeemed at the day's NAV") : o.orderType === 'MARKET' ? 'market order, by amount' : 'limit order'}</div></div>
         <div className="span-3"><div className="stat-label">Instrument</div><div className="mono">{o.instrumentId}</div><div className="muted">recommendation #{o.recommendationId}</div></div>
         <div className="span-3"><div className="stat-label">Decide by</div><div>{o.expiresAt ? fmtDateTime(o.expiresAt) : '—'}</div><div className={soon ? 'tone-amber' : 'muted'}>{o.expiresAt ? relTime(o.expiresAt) : ''}</div></div>
         <div className="span-3"><div className="stat-label">Raised</div><div>{fmtDateTime(o.createdAt)}</div><div className="muted"><Link href={`/approvals/${o.id}`}>full details</Link></div></div>

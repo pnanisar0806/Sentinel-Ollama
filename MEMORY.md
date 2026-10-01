@@ -3070,3 +3070,16 @@ vesting 15 Nov" reappearing after every sync. sync now projects only grants with
   the monthly surplus as a funding route (report passes `routes: []` today); sales must name
   where proceeds go; TRIM alternates must not be "BUY NIFTYBEES" (indexRouteLeg misapplied);
   sell selection by quality before tax; MF legs say "redeem at NAV", not "market order".
+
+## Rebalance fixes shipped (2026-10-01)
+
+- `SELL_TOLERANCE = 0.02`: an OVER breach under 2 points never sells; DIRECT_FLOW to the
+  class that needs it (`destinationFor`: under-floor first, else furthest below band middle).
+- Report now passes the monthly surplus as `fresh-surplus` routes (capacity = one tactical
+  tranche). The engine pools fresh-surplus (max, not sum) and adds SIPs.
+- Beyond tolerance, sell only if `driftPaise > capacity × FLOW_HORIZON_MONTHS (12)`.
+- TRIM carries `proceedsTo`; `sellCandidates(…, quality)` = weakest signal score first,
+  unscored after scored, tax as tie-break.
+- `buildRecommendation`: a non-BUY primary's default A1 is "new money, no sale" (REDIRECT),
+  never the NIFTYBEES index route. This also made NIFTYBEES itself exitable (the old
+  exit-promotion test pinned the refusal; it was updated).

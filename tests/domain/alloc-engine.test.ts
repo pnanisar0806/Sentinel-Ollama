@@ -6,6 +6,7 @@ import { loadPositions, netWorth, type Position } from '../../src/domain/networt
 import { allocationDrift } from '../../src/domain/allocation.js';
 import { rupees, type Paise } from '../../src/money/paise.js';
 import {
+  SELL_TOLERANCE,
   TAX_POLICY_NOTE,
   isRebalanceTarget,
   rebalanceRec,
@@ -197,5 +198,76 @@ describe('rebalanceRec — one net-worth basis', () => {
       routes: [],
     };
     expect(() => rebalanceRec(mismatched, '2026-09')).toThrow(/disagrees/i);
+  });
+});
+
+describe('rebalanceRec — owner fixes 2026-09-27', () => {
+  // Equity 60.7% against a 60% ceiling — the case that produced two needless sales.
+  const slightlyOver = () => [
+    position({ instrumentId: 'NSE:A', valuePaise: rupees(30_350), avgCostPaise: rupees(30_000) }),
+    position({ instrumentId: 'NSE:B', valuePaise: rupees(30_350), avgCostPaise: rupees(30_000) }),
+    position({ instrumentId: 'BOND:A', kind: 'BOND', assetClass: 'DEBT', valuePaise: rupees(32_000) }),
+    position({ instrumentId: 'GOLD:ETF', kind: 'GOLD', assetClass: 'GOLD', valuePaise: rupees(1_200) }),
+    position({ instrumentId: 'CASH:S', kind: 'CASH', assetClass: 'CASH', valuePaise: rupees(6_100) }),
+  ];
+
+  it('never sells for an overshoot under 2 percentage points, even with no route at all', () => {
+    const rec = rebalanceRec(stateOf(slightlyOver()), '2026-09');
+    const equity = rec.drift.find((d) => d.assetClass === 'EQUITY')!;
+    expect(equity.breach).toBe('OVER');
+    expect(equity.actual - equity.max).toBeLessThan(SELL_TOLERANCE);
+    expect(rec.actions.some((a) => a.kind === 'TRIM')).toBe(false);
+    const flow = rec.actions.find((a) => a.kind === 'DIRECT_FLOW')!;
+    // New money goes to the class that is short — gold, under its 5% floor — not just anywhere.
+    expect(flow.assetClass).toBe('GOLD');
+  });
+
+  it('sends new money to an under-floor class before any other', () => {
+    const rec = rebalanceRec(stateOf(slightlyOver(), [sipRoute('DEBT', 30_000), sipRoute('GOLD', 30_000)]), '2026-09');
+    expect(rec.actions.find((a) => a.kind === 'DIRECT_FLOW')!.assetClass).toBe('GOLD');
+  });
+
+  it('sells only when new money could not close the gap within a year, and says where the proceeds go', () => {
+    // Equity 10 points over (₹10,000 of ₹1,00,000) against ₹500 a month of new money.
+    const tiny = [sipRoute('GOLD', 500)];
+    const positions = [
+      position({ instrumentId: 'NSE:WINNER', valuePaise: rupees(70_000), avgCostPaise: rupees(20_000) }),
+      position({ instrumentId: 'BOND:A', kind: 'BOND', assetClass: 'DEBT', valuePaise: rupees(26_000) }),
+      position({ instrumentId: 'GOLD:ETF', kind: 'GOLD', assetClass: 'GOLD', valuePaise: rupees(4_000) }),
+    ];
+    const rec = rebalanceRec(stateOf(positions, tiny), '2026-09');
+    const trim = rec.actions.find((a) => a.kind === 'TRIM')!;
+    expect(trim).toBeDefined();
+    expect(trim.proceedsTo).toEqual({ assetClass: 'GOLD', instrumentId: 'GOLD:ETF' });
+    expect(trim.rationale).toMatch(/proceeds/i);
+    // With enough new money the same gap is closed by flows instead.
+    const ample = rebalanceRec(stateOf(positions, [sipRoute('GOLD', 5_000)]), '2026-09');
+    expect(ample.actions.some((a) => a.kind === 'TRIM')).toBe(false);
+  });
+
+  it('counts the monthly surplus once, however many classes it could go to', () => {
+    // ₹10,000 over, ₹500 a month of surplus offered to two classes: still ₹500, not ₹1,000.
+    // 12 × ₹500 = ₹6,000 cannot close ₹10,000, so a trim is right; double-counting would hide it.
+    const surplus = (assetClass: FundingRoute['assetClass']): FundingRoute => ({
+      id: `surplus-${assetClass}`, kind: 'fresh-surplus', assetClass, monthlyCapacityPaise: rupees(500), loadFree: true,
+    });
+    const positions = [
+      position({ instrumentId: 'NSE:WINNER', valuePaise: rupees(70_000), avgCostPaise: rupees(20_000) }),
+      position({ instrumentId: 'BOND:A', kind: 'BOND', assetClass: 'DEBT', valuePaise: rupees(26_000) }),
+      position({ instrumentId: 'GOLD:ETF', kind: 'GOLD', assetClass: 'GOLD', valuePaise: rupees(4_000) }),
+    ];
+    const pooled = rebalanceRec(stateOf(positions, [surplus('GOLD'), surplus('DEBT'), surplus('CASH')]), '2026-09');
+    expect(pooled.actions.some((a) => a.kind === 'TRIM')).toBe(true);
+  });
+
+  it('sells the weakest holding first when quality scores exist, using tax only to break ties', () => {
+    const positions = [
+      position({ instrumentId: 'NSE:STRONG-LOSS', valuePaise: rupees(30_000), avgCostPaise: rupees(50_000) }),
+      position({ instrumentId: 'NSE:WEAK-GAIN', valuePaise: rupees(30_000), avgCostPaise: rupees(10_000) }),
+      position({ instrumentId: 'NSE:UNSCORED', valuePaise: rupees(30_000), avgCostPaise: rupees(50_000) }),
+    ];
+    const quality = new Map([['NSE:STRONG-LOSS', 85], ['NSE:WEAK-GAIN', 40]]);
+    expect(sellCandidates(positions, 'EQUITY', quality).map((p) => p.instrumentId))
+      .toEqual(['NSE:WEAK-GAIN', 'NSE:STRONG-LOSS', 'NSE:UNSCORED']);
   });
 });

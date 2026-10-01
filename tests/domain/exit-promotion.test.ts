@@ -95,15 +95,15 @@ describe('promoting an exit candidate', () => {
     await db.close();
   });
 
-  it('refuses rather than throwing when the name IS the index route', async () => {
-    // `buildRecommendation` offers NSE:NIFTYBEES as alternate A1 when no same-intent
-    // challenger exists, so exiting NIFTYBEES itself cannot satisfy FR-11. That is a
-    // refusal, not a 500 out of the API route.
+  it('can exit the index ETF itself — a sale\'s alternative is no longer "buy the index"', async () => {
+    // Until 2026-09-27 every sale's alternative A1 was "BUY NSE:NIFTYBEES", so exiting
+    // NIFTYBEES could not satisfy FR-11 and was refused. A sale's default alternative is
+    // now "reach the same end with new money, without selling".
     const result = await promoteExitCandidate(
       db, candidate({ instrumentId: 'NSE:NIFTYBEES', action: 'SELL' }), '2026-09-21',
     );
-    expect(result.suppressed).toBe(true);
-    expect(result.blocked).toBe('fr-11');
+    expect(result.suppressed).toBe(false);
+    expect(result.id).not.toBeNull();
     await db.close();
   });
 });

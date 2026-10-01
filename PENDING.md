@@ -893,9 +893,11 @@ PHASE 2.5 IN PROGRESS (started 2026-09-27; plan docs/superpowers/plans/2026-09-1
       October (Sun 4 Oct). September's advice never ran: the feature did not exist yet.
 - [ ] `pnpm watchlist:propose` (manual, pre-2.5) still writes picks straight into the live
       watchlist without sign-off. Retire it, or route it through the quarterly revision.
-- [ ] NEXT: the deferred rebalance fixes — confirmed STILL NEEDED after 2.5 (the advisor
-      handles stock ideas and exits; rebalance recommendations bypass it). MEMORY.md,
-      "Phase 2.5 owner inputs".
+- [x] REBALANCE FIXES DONE (2026-10-01): no sale under a 2-point overshoot; the monthly
+      surplus is a funding route (pooled, counted once); sell only if new money cannot close
+      the gap in 12 months; every trim names where the proceeds go; quality before tax;
+      a sale's alternative is "new money, no sale", never "buy the index"; funds say
+      "redeem at NAV". On real data October proposes NO sales.
 - [ ] UI rollout of the new style to the remaining pages; RSU vest form on /log.
 
 STILL OPEN for Phase 2:
