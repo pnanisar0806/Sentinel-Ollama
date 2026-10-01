@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
-import { applyWatchlistProposals } from '../../src/sources/llm-watchlist.js';
+import { recordProposal } from '../../src/advisor/proposals.js';
+import { decideWatchlistLine } from '../../src/domain/watchlist-signoff.js';
 import { loadEngineInputs } from '../../src/domain/engine.js';
 
 /**
@@ -31,6 +32,22 @@ describe('a name already watched is not watched twice', () => {
     );
   });
 
+  /**
+   * The only way a name now joins the watchlist: the owner accepts an ADD line of a
+   * quarterly revision (the manual `watchlist:propose` that wrote straight in was retired
+   * 2026-10-01). Returns how many live rows the acceptance added.
+   */
+  const acceptAdd = async (instrumentId: string, on: string): Promise<number> => {
+    const before = await db.query(`select 1 from watchlist where instrument_id = $1`, [instrumentId]);
+    const id = await recordProposal(db, {
+      kind: 'WATCHLIST_REVISION', payload: { quarter: `q-${Math.random()}`, lines: [{ op: 'ADD', instrumentId, name: instrumentId, reason: 'r' }] },
+      inputSnapshot: {}, evidenceIds: [], model: null, promptVersion: 'p', schemaVersion: 's', asOf: `${on}T00:00:00Z`,
+    });
+    await decideWatchlistLine(db, id, 0, true, on);
+    const after = await db.query(`select 1 from watchlist where instrument_id = $1`, [instrumentId]);
+    return after.length - before.length;
+  };
+
   const live = async () => {
     const rows = await db.query<{ n: string }>(
       `select count(*) as n from watchlist
@@ -39,19 +56,15 @@ describe('a name already watched is not watched twice', () => {
     return Number(rows[0]!.n);
   };
 
-  it('refuses a proposal for a name with a live row, on a later date', async () => {
-    const written = await applyWatchlistProposals(
-      db, [{ instrumentId: 'NSE:X', reason: 'llm likes it' } as never], '2026-09-16',
-    );
+  it('refuses an accepted add for a name with a live row, on a later date', async () => {
+    const written = await acceptAdd('NSE:X', '2026-09-16');
     expect(written).toBe(0);
     expect(await live()).toBe(1);
     await db.close();
   });
 
   it('still refuses a same-day re-add', async () => {
-    await applyWatchlistProposals(
-      db, [{ instrumentId: 'NSE:X', reason: 'again' } as never], '2026-01-15',
-    );
+    await acceptAdd('NSE:X', '2026-01-15');
     expect(await live()).toBe(1);
     await db.close();
   });
@@ -65,9 +78,7 @@ describe('a name already watched is not watched twice', () => {
       `insert into watchlist (instrument_id, added_on, removed_on, source, reason)
        values ('NSE:Y', date '2025-01-01', date '2025-06-01', 'advisor', 'dropped')`,
     );
-    const written = await applyWatchlistProposals(
-      db, [{ instrumentId: 'NSE:Y', reason: 'back in favour' } as never], '2026-09-16',
-    );
+    const written = await acceptAdd('NSE:Y', '2026-09-16');
     // A re-add after a removal is a real decision, not a duplicate.
     expect(written).toBe(1);
     await db.close();
@@ -78,9 +89,7 @@ describe('a name already watched is not watched twice', () => {
       `insert into instruments (id, kind, name, currency)
        values ('NSE:Z', 'EQUITY', 'Z Ltd', 'INR') on conflict (id) do nothing`,
     );
-    const written = await applyWatchlistProposals(
-      db, [{ instrumentId: 'NSE:Z', reason: 'new idea' } as never], '2026-09-16',
-    );
+    const written = await acceptAdd('NSE:Z', '2026-09-16');
     expect(written).toBe(1);
     await db.close();
   });

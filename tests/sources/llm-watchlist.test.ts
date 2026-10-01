@@ -6,7 +6,6 @@ import { TEXT_MODEL, VISION_MODEL_CHAIN } from '../../src/config/models.js';
 import { DEFAULT_NARRATION_MODEL } from '../../src/sources/llm-narration.js';
 import { DEFAULT_LLM_MODEL } from '../../src/sources/llm-extract.js';
 import {
-  applyWatchlistProposals,
   proposeWatchlist,
   watchlistCandidates,
   type WatchlistCandidate,
@@ -108,24 +107,5 @@ describe('watchlistCandidates', () => {
     );
     expect(watched.length).toBeGreaterThan(0);
     for (const w of watched) expect(pool).not.toContain(w.instrument_id);
-  });
-});
-
-describe('applyWatchlistProposals', () => {
-  it('records provenance as llm-advisor and is safe to re-run', async () => {
-    await seed(db, { asOf: '2026-08-12' });
-    const [candidate] = await watchlistCandidates(db, AS_OF);
-    if (candidate === undefined) return; // seed leaves no free instrument; nothing to assert
-
-    const proposals = [{ instrumentId: candidate.instrumentId, reason: 'proposed by the model' }];
-    expect(await applyWatchlistProposals(db, proposals, AS_OF)).toBe(1);
-    expect(await applyWatchlistProposals(db, proposals, AS_OF)).toBe(0);
-
-    const [row] = await db.query<{ source: string; reason: string }>(
-      `select source, reason from watchlist where instrument_id = $1 and added_on = $2`,
-      [candidate.instrumentId, AS_OF],
-    );
-    expect(row!.source).toBe('llm-advisor');
-    expect(row!.reason).toBe('proposed by the model');
   });
 });

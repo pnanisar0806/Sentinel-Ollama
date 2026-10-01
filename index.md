@@ -254,7 +254,7 @@ source of truth, and specifying both makes `pnpm/action-setup` fail at setup.
 
 ## Scripts
 
-`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` · `watchlist:propose` ·
+`pnpm test` · `test:watch` · `migrate` · `seed` · `sync` · `digest` · `report` · `ips` ·
 `telegram:bot` · `indmoney:login` · `backfill:isin` · `ui` (phase-1 preview server, 8081) · `web` (`web/` Next.js app, 3001) · `screener:import` · `screener:remind`
 
 `indmoney:login` runs `tsx --env-file=.env`; `web/next.config.ts` parses the root `.env`
