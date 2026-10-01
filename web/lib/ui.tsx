@@ -105,3 +105,74 @@ export function NotYetBuild({
     </div>
   );
 }
+/** One colour per asset class, the same everywhere (globals.css --c-*). */
+export const CLASS_COLOR: Record<string, string> = {
+  EQUITY: 'var(--c-equity)', DEBT: 'var(--c-debt)', GOLD: 'var(--c-gold)', CASH: 'var(--c-cash)',
+};
+export const CLASS_LABEL: Record<string, string> = { EQUITY: 'Equity', DEBT: 'Debt & EPF', GOLD: 'Gold', CASH: 'Cash' };
+
+/** Asset-class chip in its class colour. */
+export function ClassChip({ assetClass }: { assetClass: string }) {
+  return (
+    <span className="badge" style={{ borderColor: CLASS_COLOR[assetClass], color: CLASS_COLOR[assetClass] }}>
+      {CLASS_LABEL[assetClass] ?? assetClass}
+    </span>
+  );
+}
+
+/** Stacked allocation bar with a legend showing each class against its IPS band. */
+export function AllocationBar({ drift }: {
+  drift: { assetClass: string; actual: number; min: number; max: number; breach: 'OVER' | 'UNDER' | null }[];
+}) {
+  return (
+    <>
+      <div className="alloc-bar" role="img"
+        aria-label={drift.map((d) => `${CLASS_LABEL[d.assetClass] ?? d.assetClass} ${(d.actual * 100).toFixed(1)}%`).join(', ')}>
+        {drift.map((d) => <span key={d.assetClass} style={{ width: `${d.actual * 100}%`, background: CLASS_COLOR[d.assetClass] }} />)}
+      </div>
+      <div className="alloc-legend">
+        {drift.map((d) => (
+          <div className="alloc-item" key={d.assetClass}>
+            <span className="swatch" style={{ background: CLASS_COLOR[d.assetClass] }} aria-hidden="true" />
+            <div>
+              <div>{CLASS_LABEL[d.assetClass] ?? d.assetClass}</div>
+              <div className="v">{(d.actual * 100).toFixed(1)}%</div>
+              <div className="muted">band {(d.min * 100).toFixed(0)}–{(d.max * 100).toFixed(0)}%{' '}
+                {d.breach === null ? <span className="tone-green">· in band</span>
+                  : <span className={d.breach === 'OVER' ? 'tone-amber' : 'tone-red'}>· {d.breach === 'OVER' ? 'over' : 'under'}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** Goal buckets with funded progress. An unallocated bucket says so; it is never ₹0. */
+export function GoalList({ buckets }: {
+  buckets: { id: string; name: string; balancePaise: Paise | null; fundedRatio: number | null; targetNote: string }[];
+}) {
+  return (
+    <>
+      {buckets.map((b) => {
+        const ratio = b.fundedRatio === null ? null : Math.min(1, b.fundedRatio);
+        return (
+          <div className="goal" key={b.id}>
+            <div className="goal-top">
+              <span className="goal-name">{b.name} <span className="dim">({b.id})</span></span>
+              <span className="tnum">
+                {b.balancePaise === null ? <span className="dim">not allocated yet</span>
+                  : ratio === null ? <Money p={b.balancePaise} compact /> : <>{<Money p={b.balancePaise} compact />} · <Pct v={b.fundedRatio!} /></>}
+              </span>
+            </div>
+            {ratio !== null
+              ? <div className="progress" aria-hidden="true"><div className={`fill ${ratio >= 1 ? 'f-green' : 'f-violet'}`} style={{ width: `${ratio * 100}%` }} /></div>
+              : null}
+            {b.targetNote ? <span className="muted">{b.targetNote}</span> : null}
+          </div>
+        );
+      })}
+    </>
+  );
+}

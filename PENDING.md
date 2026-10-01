@@ -898,7 +898,10 @@ PHASE 2.5 IN PROGRESS (started 2026-09-27; plan docs/superpowers/plans/2026-09-1
       the gap in 12 months; every trim names where the proceeds go; quality before tax;
       a sale's alternative is "new money, no sale", never "buy the index"; funds say
       "redeem at NAV". On real data October proposes NO sales.
-- [ ] UI rollout of the new style to the remaining pages; RSU vest form on /log.
+- [x] UI rollout (2026-10-01): shared AllocationBar / GoalList / ClassChip; stat strips on
+      Holdings and Allocation; rotating accents on every stat strip; grids stretch; sticky
+      table headers. All 22 pages 200 on real data.
+- [ ] RSU vest form on /log (Telegram only today).
 
 STILL OPEN for Phase 2:
 1. Credit-rating DIRECTION is not classified — the owner reads each filing's PDF. The

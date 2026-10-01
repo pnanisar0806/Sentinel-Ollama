@@ -1,5 +1,6 @@
 import { getHoldings } from '../../lib/data';
-import { Badge, DataTable, Money, Notice, PageHead } from '../../lib/ui';
+import type { Paise } from '../../../src/money/paise.js';
+import { Badge, ClassChip, DataTable, Money, Notice, PageHead, Stat } from '../../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,12 @@ export default async function HoldingsPage() {
         badge={<Badge tone="gray">as of {businessDate}</Badge>}
         sub="Every position with cost basis, value and source. Red rows are blocked by FR-31. An unknown cost basis is rendered as unknown, never as ₹0."
       />
+      <div className="bento">
+        <div className="span-3"><Stat label="Total value" value={<Money p={rows.reduce((t, r) => t + r.valuePaise, 0n) as Paise} />} accent="violet" /></div>
+        <div className="span-3"><Stat label="Positions" value={rows.length} sub={`${new Set(rows.map((r) => r.account)).size} accounts`} accent="sky" /></div>
+        <div className="span-3"><Stat label="Cost basis unknown" value={rows.filter((r) => r.avgCostPaise === null).length} sub="shown as unknown, never ₹0" accent="amber" /></div>
+        <div className="span-3"><Stat label="Blocked by stale data" value={rows.filter((r) => r.blocked).length} accent={rows.some((r) => r.blocked) ? 'red' : 'green'} /></div>
+      </div>
       {rows.length === 0
         ? <Notice>No positions loaded.</Notice>
         : (
@@ -37,11 +44,10 @@ export default async function HoldingsPage() {
               rows={rows}
               rowTone={(r) => (r.blocked ? 'red' : undefined)}
               cols={[
-                { label: 'Instrument', value: (r) => <span className="mono dim">{r.instrumentId}</span> },
-                { label: 'Name', value: (r) => r.name },
+                { label: 'Name', value: (r) => <><div>{r.name}</div><div className="mono muted">{r.instrumentId}</div></> },
                 { label: 'Account', value: (r) => r.account },
                 { label: 'Kind', value: (r) => r.kind },
-                { label: 'Class', value: (r) => <Badge tone="gray">{r.assetClass}</Badge> },
+                { label: 'Class', value: (r) => <ClassChip assetClass={r.assetClass} /> },
                 { label: 'Cur', value: (r) => r.currency },
                 { label: 'Avg cost', value: (r) => (r.avgCostPaise === null ? <span className="dim">unknown</span> : <Money p={r.avgCostPaise} />) },
                 { label: 'Value', align: 'right', value: (r) => <Money p={r.valuePaise} /> },

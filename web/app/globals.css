@@ -712,3 +712,19 @@ a:hover { color: #f0abfc; }
 .option-why { margin: 8px 0 0; color: var(--text-dim); }
 .option-kill { margin: 6px 0 0; color: var(--amber); font-size: 13.5px; }
 .section-title { font-size: 17px; margin: 26px 0 8px; }
+
+/* Stat strips on the remaining pages pick up the accent palette in rotation, so every
+   page reads as one system without restating colours in each file. */
+.stats > .stat:not([class*=' s-']):nth-child(5n+1) { background: linear-gradient(150deg, rgba(168, 85, 247, 0.34), #282828); }
+.stats > .stat:not([class*=' s-']):nth-child(5n+2) { background: linear-gradient(150deg, rgba(56, 189, 248, 0.32), #282828); }
+.stats > .stat:not([class*=' s-']):nth-child(5n+3) { background: linear-gradient(150deg, rgba(20, 184, 166, 0.34), #282828); }
+.stats > .stat:not([class*=' s-']):nth-child(5n+4) { background: linear-gradient(150deg, rgba(245, 158, 11, 0.32), #282828); }
+.stats > .stat:not([class*=' s-']):nth-child(5n+5) { background: linear-gradient(150deg, rgba(16, 185, 129, 0.34), #282828); }
+
+/* Two-column grids stretch their cards to the row, like the bento. */
+.grid { align-items: stretch; }
+.grid > .card, .grid > section { height: 100%; }
+
+/* Tables: a little more air and a sticky header on long lists. */
+.table th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.table td { padding: 11px 10px; }
