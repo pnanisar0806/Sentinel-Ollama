@@ -82,7 +82,13 @@ export async function loadRedemptions(db: Db): Promise<Map<string, RedemptionRec
   const out = new Map<string, RedemptionRecord>();
   for (const r of rows) {
     const p = (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload) as
-      { receivedOn?: string; amountPaise: string | null };
+      { receivedOn?: string; amountPaise: string | null } | null | undefined;
+    // A row without a readable payload cannot say what was received. Skip it loudly
+    // rather than take down every page that asks whether a bond has paid out.
+    if (p === null || p === undefined || typeof p !== 'object') {
+      console.error(`bond_redemption ${r.action} for ${r.entity_id}: unreadable payload, skipped`);
+      continue;
+    }
     const amount = p.amountPaise === null ? null : BigInt(p.amountPaise);
     if (r.action === 'REDEEMED') {
       out.set(r.entity_id, { canonicalId: r.entity_id, receivedOn: p.receivedOn!, amountPaise: amount });

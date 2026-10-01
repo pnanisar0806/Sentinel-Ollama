@@ -116,3 +116,14 @@ describe('a redeemed bond stops being counted', () => {
     await db.close();
   });
 });
+
+describe('reading redemptions defensively', () => {
+  it('skips a row with no readable payload instead of throwing, and keeps the good ones', async () => {
+    await record();
+    await db.query(`insert into audit_log (entity, entity_id, action, actor, payload) values ('bond_redemption', 'ISIN:BROKEN', 'REDEEMED', 'owner', 'null'::jsonb)`);
+    const all = await loadRedemptions(db);
+    expect(all.has('ISIN:BROKEN')).toBe(false);
+    expect(all.size).toBe(1);
+    await db.close();
+  });
+});

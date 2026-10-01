@@ -567,7 +567,11 @@ export async function getRecommendations(limit = 50): Promise<RecommendationRow[
   for (const r of out) {
     const leg = r.primary;
     if (r.kind !== 'maturity_routing' || typeof leg === 'string' || leg.instrumentId === null) continue;
-    const paid = await redemptionFor(d, leg.instrumentId);
+    // Showing a maturity as still pending is better than not showing the page at all.
+    const paid = await redemptionFor(d, leg.instrumentId).catch((e: unknown) => {
+      console.error(`recommendations: could not check redemption for ${leg.instrumentId}: ${String(e)}`);
+      return null;
+    });
     if (paid) r.done = `Paid out ${paid.receivedOn}${paid.amountPaise !== null ? ` — ${formatInr(paid.amountPaise as Paise)} credited` : ''}.`;
   }
   return out;

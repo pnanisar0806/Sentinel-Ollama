@@ -59,7 +59,11 @@ function Rec({ r, names, kinds }: { r: RecommendationRow; names: Names; kinds: M
 }
 
 export default async function RecommendationsPage() {
-  const [recs, names, kinds] = await Promise.all([getRecommendations(), getInstrumentNames(), getInstrumentKinds()]);
+  // One after another: concurrent queries over the pooled connection returned a mismatched
+  // row in production (2026-10-01), so this page no longer issues them in parallel.
+  const recs = await getRecommendations();
+  const names = await getInstrumentNames();
+  const kinds = await getInstrumentKinds();
   const live = recs.filter((r) => !r.suppressed && r.done === null);
   const done = recs.filter((r) => !r.suppressed && r.done !== null);
   const suppressed = recs.filter((r) => r.suppressed);
