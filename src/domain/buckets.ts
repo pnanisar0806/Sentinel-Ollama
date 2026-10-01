@@ -48,7 +48,7 @@ export interface MilestoneStatus {
  * B3: Emergency fund target ₹6L
  * B4: Education corpus target ₹1Cr
  */
-export type BucketId = 'B1' | 'B2' | 'B3' | 'B4';
+type BucketId = 'B1' | 'B2' | 'B3' | 'B4';
 
 /**
  * Bucket record — mirrors the schema but keeps everything paise-powered.
@@ -122,17 +122,6 @@ export function bucketStatus(
   };
 }
 
-import { formatInr } from '../money/paise.js';
-
-/**
- * Render a human-readable bucket summary.
- */
-export function bucketSummary(b: Bucket, currentPaise: Paise): string {
-  const { met, progressPaise, targetPaise } = bucketStatus(b, currentPaise);
-  const targetStr = targetPaise === null ? 'unspecified' : formatInr(targetPaise);
-  const progressStr = formatInr(progressPaise);
-  return `${b.name}: ${progressStr} / ${targetStr} — ${met ? 'target met' : 'still growing'}`;
-}
 
 /** Default bucket states keyed by id, initialized from seed. */
 export const BUCKETS: Record<BucketId, Bucket> = {
@@ -171,7 +160,7 @@ export const BUCKETS: Record<BucketId, Bucket> = {
 };
 
 /** Default milestone states keyed by id, initialized from seed. */
-export const MILESTONES: Record<'M1' | 'M2', Milestone> = {
+const MILESTONES: Record<'M1' | 'M2', Milestone> = {
   M1: {
     id: 'M1',
     name: 'Term life cover',

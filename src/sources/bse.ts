@@ -4,7 +4,7 @@
  * events here, so it is the official record for held and watched companies.
  */
 
-export const BSE_HEADERS = {
+const BSE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
   Accept: 'application/json, text/plain, */*',
   Referer: 'https://www.bseindia.com/',

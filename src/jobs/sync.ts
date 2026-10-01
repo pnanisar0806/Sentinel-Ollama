@@ -43,11 +43,11 @@ const INDMONEY_MCP_URL = 'https://mcp.indmoney.com/mcp';
 const INDMONEY_SCOPES = ['portfolio:read'] as const;
 
 /** What the FX step returns. Injected so the sync is testable without a network. */
-export type FxFetcher = () => Promise<{ rate: number; asOf: string; source: string }>;
+type FxFetcher = () => Promise<{ rate: number; asOf: string; source: string }>;
 
 /** EOD quote fetchers. Injected for the same reason as FX: no network in the suite. */
-export type PriceFetcher = (tradeDate: string) => Promise<{ equity: BhavcopyRow[]; index: IndexBhavcopyRow[] }>;
-export type NavFetcher = () => Promise<{ rows: NavRow[] }>;
+type PriceFetcher = (tradeDate: string) => Promise<{ equity: BhavcopyRow[]; index: IndexBhavcopyRow[] }>;
+type NavFetcher = () => Promise<{ rows: NavRow[] }>;
 
 export async function runSync(
   db: Db,

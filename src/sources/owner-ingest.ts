@@ -14,7 +14,7 @@ import { rupees, type Paise } from '../money/paise.js';
  * is ever invented from a screenshot — every number comes from the owner's reply.
  */
 
-export interface CostCommand {
+interface CostCommand {
   /** Zero-based index into the /holdings list the owner is replying to. */
   index: number;
   costPaise: Paise;
@@ -46,7 +46,7 @@ export function parseCostCommand(text: string, positionCount: number, now = new 
  *  'unchanged' — identical cost already on file, NOTHING written;
  *  'superseded' — different value: old lot closed, new one written (lots refuse
  *  UPDATE of cost and DELETE — supersession is the only correction path). */
-export type OwnerCostOutcome = 'created' | 'unchanged' | 'superseded';
+type OwnerCostOutcome = 'created' | 'unchanged' | 'superseded';
 
 /** Records an owner-supplied total cost idempotently. Quantity defaults to 1 because
  *  aggregated holdings model totals (see seed convention): quantity x price == total. */

@@ -51,7 +51,7 @@ const TRADING_CALENDAR_SOURCES = new Set(['bhavcopy', 'amfi', 'frankfurter']);
 
 /** How many completed trading days a calendar source may lag before it is stale. 0 means
  *  it must carry the most recent completed session. */
-export const TRADING_DAY_TOLERANCE = 0;
+const TRADING_DAY_TOLERANCE = 0;
 
 /**
  * The most recent completed trading session at `nowIso`.
@@ -77,7 +77,7 @@ export async function lastCompletedTradingDay(db: Db, nowIso: string): Promise<s
  * to ignore the loudest safety signal in the product. An unbuilt feature and rotten
  * data are different problems and must read differently.
  */
-export type SourceState = 'fresh' | 'stale' | 'unimplemented';
+type SourceState = 'fresh' | 'stale' | 'unimplemented';
 
 export interface StalenessRow {
   source: string;
@@ -93,7 +93,7 @@ export interface StalenessRow {
  * Returns the latest as_of per source from holdings (portfolio sources).
  * PGlite returns date columns as Date objects; normalize to ISO string.
  */
-export async function getLatestHoldingsAsOf(db: Db): Promise<Map<string, string>> {
+async function getLatestHoldingsAsOf(db: Db): Promise<Map<string, string>> {
   const rows = await db.query<{ source: string; as_of: string | Date }>(
     `select source, max(as_of) as as_of from holdings group by source`,
   );

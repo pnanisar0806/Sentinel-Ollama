@@ -6,11 +6,6 @@ import { formatInr, paise } from '../money/paise.js';
 import type { Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
 
-export const RAIL_CONSTRAINTS = {
-  MAX_ORDER_PAISE: 100_00_000,
-  TACTICAL_MONTHLY_PAISE: 50_00_000,
-} as const;
-
 /** Default owner rails seeded by `seed.ts`. Idempotent — existing values are preserved. */
 export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
   cash_ceiling_pct: 10,
@@ -37,13 +32,13 @@ export type RailViolation =
   | { code: 'DRAWDOWN_LOOSENING_BLOCKED'; detail: string }
   | { code: 'DRAWDOWN_JUSTIFICATION_REQUIRED'; detail: string };
 
-export type FreezeState = {
+type FreezeState = {
   active: boolean;
   frozenAt: string | null;
   reason: string | null;
 };
 
-export type BreakerState = {
+type BreakerState = {
   active: boolean;
   consecutiveFalsifications: number;
   lastFalsificationAt: string | null;

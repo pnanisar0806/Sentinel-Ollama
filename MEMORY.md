@@ -3083,3 +3083,15 @@ vesting 15 Nov" reappearing after every sync. sync now projects only grants with
 - `buildRecommendation`: a non-BUY primary's default A1 is "new money, no sale" (REDIRECT),
   never the NIFTYBEES index route. This also made NIFTYBEES itself exitable (the old
   exit-promotion test pinned the refusal; it was updated).
+
+## Ponytail audit cuts (2026-10-01)
+
+Removed: the local preview (src/ui, `pnpm ui`), the public GitHub Pages dashboard
+(notify/dashboard.ts + Pages steps — they published the whole docs/ folder, plans included),
+the backup jobs and workflow (owner declined backup 2026-09-24; git history keeps them),
+src/domain/surplus.ts (no production caller), dead helpers (getOrderByStableTag,
+withRefreshers, unvestedValue, bucketSummary, RAIL_CONSTRAINTS, SMALLCASE_CONSTITUENTS,
+INDEX_CATEGORIES_EXCLUDED), the dotenv dependency, and `export` from 153 symbols used only
+in their own file. The Vercel app (passkey) is the only dashboard. Kept on purpose:
+loadBalanceDays, interestPaid (tests observe real behaviour through them),
+scanForExecutionPaths, telegram-bot.ts.

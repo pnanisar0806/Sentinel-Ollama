@@ -11,7 +11,7 @@
 
 import { OPENROUTER_CHAT_URL, TEXT_MODEL } from '../config/models.js';
 
-export const NARRATION_PROMPT = [
+const NARRATION_PROMPT = [
   'You are writing the narrative section of a single investor\'s weekly portfolio report.',
   'You will be given the engine\'s finished output as bullets and JSON.',
   'Rules, without exception:',

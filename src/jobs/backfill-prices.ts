@@ -21,7 +21,7 @@ import { isMainModule } from '../util/main-module.js';
  * `ingestPrices` already exist and are what `sync` calls; this only drives them over a
  * range of dates.
  */
-export interface BackfillReport {
+interface BackfillReport {
   /** Days fetched this run. */
   fetched: string[];
   /** Days already complete on both tables, so not re-fetched. */
@@ -32,7 +32,7 @@ export interface BackfillReport {
   indexInserted: number;
 }
 
-export interface BackfillOptions {
+interface BackfillOptions {
   /** Most recent date to consider, inclusive. */
   endIso: string;
   /** How many trading days back to cover. */

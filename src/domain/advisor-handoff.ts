@@ -19,7 +19,7 @@ import { BANDS } from './engine.js';
  * the advisor rather than approving a stale number.
  */
 
-export interface SignResult { recommendationId: number | null; approvalRequested: boolean; note: string }
+interface SignResult { recommendationId: number | null; approvalRequested: boolean; note: string }
 
 export async function signAdvice(
   db: Db, proposalId: number, opts: { candidates: Candidate[]; now?: Date },

@@ -23,14 +23,14 @@ import { rupees, type Paise } from '../money/paise.js';
  * Pidilite: 19 of the 21 held shares are in Dividend Aristocrats and 2 are direct.
  */
 
-export interface SmallcaseConstituent {
+interface SmallcaseConstituent {
   instrumentId: string;
   units: number;
   /** The app's reported average buy price for this constituent. */
   avgBuyPricePaise: Paise;
 }
 
-export interface SmallcaseHolding {
+interface SmallcaseHolding {
   name: string;
   /** Current value per the app, for reconciliation only — never a valuation input. */
   currentValuePaise: Paise;

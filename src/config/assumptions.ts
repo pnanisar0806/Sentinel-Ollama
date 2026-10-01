@@ -30,4 +30,4 @@ export const ASSUMPTIONS = {
   fiIncomeStretchMonthlyInr: 500_000,
 } as const;
 
-export type Assumptions = typeof ASSUMPTIONS;
+type Assumptions = typeof ASSUMPTIONS;

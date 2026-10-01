@@ -15,7 +15,7 @@ import type { Db } from '../db/client.js';
  *
  * Append-only, in `audit_log`: a redemption is a fact that happened on a date.
  */
-export interface RedemptionRecord {
+interface RedemptionRecord {
   canonicalId: string;
   receivedOn: string;
   /** What reached the bank. NULL until the owner states it — never assumed. */

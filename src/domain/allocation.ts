@@ -182,9 +182,9 @@ export function concentration(positions: Position[]): Concentration {
 }
 
 /** IPS §3.4: the satellite bucket is capped at 25% of equity. */
-export const SATELLITE_CAP_PCT = 25;
+const SATELLITE_CAP_PCT = 25;
 
-export interface SatelliteFit {
+interface SatelliteFit {
   /** Room left under the §3.4 cap. 0n when the bucket is full or over. */
   headroomPaise: Paise;
   /** Share of the whole portfolio per sector, percent. Sectorless positions are absent. */

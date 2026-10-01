@@ -16,7 +16,7 @@ import { EVAL_HORIZONS, MIN_EVALS_FOR_CALIBRATION, type EvalHorizon } from '../d
  * N alone does not prove skill; replayed (retrospective) results are never mixed in here.
  */
 
-export interface OriginCalibrationRow {
+interface OriginCalibrationRow {
   origin: 'advisor' | 'engine';
   conviction: string;
   horizon: EvalHorizon;

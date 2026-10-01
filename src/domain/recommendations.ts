@@ -260,7 +260,7 @@ export function announceMaturity(
 
 // --- FR-12 caps + paper mode --------------------------------------------------------
 
-export interface GateResult {
+interface GateResult {
   allowed: boolean;
   reason: string | null;
 }
@@ -422,7 +422,7 @@ export async function persistRecommendation(
  * order-placing call. Exported so the test asserts the real source tree rather than a
  * list restated in the test file.
  */
-export const ORDER_LIKE_PATTERNS = [
+const ORDER_LIKE_PATTERNS = [
   /place[_A-Z]?order/i,
   /submit[_A-Z]?order/i,
   /\bmodify_order\b/i,

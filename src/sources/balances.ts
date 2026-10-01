@@ -20,7 +20,7 @@ import type { McpClient } from './mcp-client.js';
  * budget, which is affordable once a day.
  */
 
-export type BalanceKind = 'savings' | 'credit_card' | 'invested_cost' | 'loan';
+type BalanceKind = 'savings' | 'credit_card' | 'invested_cost' | 'loan';
 
 export interface BalanceRow {
   kind: BalanceKind;
@@ -73,7 +73,7 @@ export const OPERATING_SAVINGS_BANK = 'HDFC Bank';
  * read ₹1L lighter than it really was. Surfaced on the derived row rather than corrected
  * by an invented adjustment.
  */
-export const LIC_PREMIUM_FLAG =
+const LIC_PREMIUM_FLAG =
   'an annual ~₹1L LIC premium leaves savings for an asset INDmoney does not track ' +
   '(INSURANCE is unserved), so the month it falls in understates realised surplus';
 

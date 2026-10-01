@@ -3,10 +3,10 @@ import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import {
-  confirmVest, persistVests, projectVests, unvestedValue, withRefreshers,
+  confirmVest, persistVests, projectVests, 
 } from '../../src/domain/rsu.js';
 import { rateMicros, usdToInr } from '../../src/money/fx.js';
-import { addP, cents, dollars, mulP, rupees, type Paise } from '../../src/money/paise.js';
+import { addP, cents, dollars, mulP, rupees } from '../../src/money/paise.js';
 import { SEED_RSU_GRANTS } from '../../src/seed/seed-data.js';
 import { seed } from '../../src/seed/seed.js';
 
@@ -95,85 +95,6 @@ describe('vest projection', () => {
     // 12753.999999999998 in IEEE-754). Money must be parsed, never floated.
     expect(() => projectVests(SEED_RSU_GRANTS, { ...opts, priceUsd: 127.545 }))
       .toThrow(/not representable/);
-  });
-
-  it('values the unvested pipeline at exactly 469.375 units / Rs 57,05,047.56', () => {
-    const asOf = '2026-09-01';
-    // Deliberately the UNCLIPPED projection: `unvestedValue` sums whatever it is given, so
-    // a window that stops short of the last tranche silently understates the pipeline.
-    const projected = all;
-
-    // Sanity: the full pipeline adds up to the seeded grant total (derived, not a literal),
-    // so the unvested slice below is a real subset and not a windowing artifact.
-    expect(projected.reduce((s, v) => s + v.units, 0))
-      .toBeCloseTo(SEED_RSU_GRANTS.reduce((s, g) => s + g.units, 0), 6);
-
-    const unvestedUnits = projected
-      .filter((v) => v.vestOn > asOf)
-      .reduce((s, v) => s + v.units, 0);
-    expect(unvestedUnits).toBeCloseTo(469.375, 6);
-    expect(unvestedValue(projected, asOf)).toBe(570_504_756n as Paise);
-  });
-
-  it('treats a vest ON the as-of date as already vested, not unvested', () => {
-    // The headline as-of (2026-09-01) is not a vest date, so `>` vs `>=` is unobservable
-    // there. Pin the boundary on a date that IS a tranche date, derived from the projection.
-    const asOf = all[Math.floor(all.length / 2)]!.vestOn;
-    const onDate = all.filter((v) => v.vestOn === asOf);
-    expect(onDate.length).toBeGreaterThan(0); // the boundary is actually exercised
-
-    const strictlyAfter = addP(...all.filter((v) => v.vestOn > asOf).map((v) => v.grossPaise));
-    const onDateSum = addP(...onDate.map((v) => v.grossPaise));
-    expect(onDateSum > 0n).toBe(true);
-
-    expect(unvestedValue(all, asOf)).toBe(strictlyAfter);
-    // ...and that is strictly less than the inclusive reading, so `>=` cannot also pass.
-    expect(unvestedValue(all, asOf)).not.toBe(addP(strictlyAfter, onDateSum));
-  });
-});
-
-describe('refresher scenario', () => {
-  it('adds one $20k grant per year on top of the base grants', () => {
-    const withR = withRefreshers(SEED_RSU_GRANTS, {
-      fromYear: 2027, toYear: 2030, priceUsd: ASSUMPTIONS.seedNowPriceUsd,
-    });
-    expect(withR).toHaveLength(SEED_RSU_GRANTS.length + 4);
-    const refresher = withR.find((g) => g.id === 'REFRESH-2027')!;
-    expect(refresher.units).toBeCloseTo(20_000 / ASSUMPTIONS.seedNowPriceUsd, 2);
-  });
-
-  it('never double-counts a year that already carries a real grant', () => {
-    const realYears = new Set(SEED_RSU_GRANTS.map((g) => Number(g.grantedOn.slice(0, 4))));
-    const fromYear = Math.max(...realYears); // 2026 today — derived, never a literal.
-    const toYear = fromYear + 3;
-    const withR = withRefreshers(SEED_RSU_GRANTS, {
-      fromYear, toYear, priceUsd: ASSUMPTIONS.seedNowPriceUsd,
-    });
-
-    const overlap = [...Array(toYear - fromYear + 1).keys()]
-      .map((i) => fromYear + i)
-      .filter((y) => realYears.has(y));
-    expect(overlap.length).toBeGreaterThan(0); // the hazard is actually exercised
-    expect(withR).toHaveLength(SEED_RSU_GRANTS.length + (toYear - fromYear + 1) - overlap.length);
-    for (const y of overlap) expect(withR.some((g) => g.id === `REFRESH-${y}`)).toBe(false);
-
-    // And the pipeline is not inflated: total units for an overlapped year stay the
-    // real grant's units alone.
-    for (const y of overlap) {
-      const units = withR
-        .filter((g) => g.grantedOn.startsWith(String(y)))
-        .reduce((s, g) => s + g.units, 0);
-      const real = SEED_RSU_GRANTS
-        .filter((g) => g.grantedOn.startsWith(String(y)))
-        .reduce((s, g) => s + g.units, 0);
-      expect(units).toBe(real);
-    }
-  });
-
-  it('leaves the base grants untouched so the no-refresher downside stays available', () => {
-    const before = JSON.stringify(SEED_RSU_GRANTS);
-    withRefreshers(SEED_RSU_GRANTS, { fromYear: 2027, toYear: 2030, priceUsd: 127.54 });
-    expect(JSON.stringify(SEED_RSU_GRANTS)).toBe(before);
   });
 });
 

@@ -16,7 +16,7 @@ class SourceError extends Error {
  * The screen's EDIT COLUMNS controls which of these appear — the parser handles
  * any subset.
  */
-export const COLUMN_MAP: Record<string, string> = {
+const COLUMN_MAP: Record<string, string> = {
   'Current Price':            'CMP',
   'Price to Earning':         'P/E',
   'Market Capitalization':    'Mar Cap',
@@ -63,7 +63,7 @@ export interface ParsedScreenRow {
   fcfPos5y: boolean | null;
 }
 
-export interface ScreenParseResult {
+interface ScreenParseResult {
   rows: ParsedScreenRow[];
   headers: string[];
   warnings: string[];

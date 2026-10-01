@@ -24,7 +24,7 @@ export const MINIMUM_HOLD_MONTHS = 12;
 export const BETTER_ALTERNATIVE_MARGIN = 15;
 
 /** §6.5 trigger 5 is rationed: at most one such exit per quarter. */
-export const BETTER_ALTERNATIVE_PER_QUARTER = 1;
+const BETTER_ALTERNATIVE_PER_QUARTER = 1;
 
 /**
  * Trigger 6 — the legacy cleanup queue (IPS §3.9, FR-14) — is deliberately not evaluated
@@ -37,7 +37,7 @@ export const LEGACY_QUEUE_STUB =
   'needs the LTCG harvest calendar to spread consolidation across fiscal years, which is ' +
   'Phase 2 scope. Nothing evaluates it in Phase 1.';
 
-export type ExitTrigger =
+type ExitTrigger =
   | 'falsification'
   | 'red-flag'
   | 'hard-cap'
@@ -62,7 +62,7 @@ export interface FalsificationCondition {
   value: string | number;
 }
 
-export interface BetterAlternative {
+interface BetterAlternative {
   heldInstrumentId: string;
   challengerId: string;
   heldComposite: number;

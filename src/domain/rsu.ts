@@ -1,7 +1,7 @@
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import type { Db } from '../db/client.js';
 import { rateMicros, usdToInr } from '../money/fx.js';
-import { addP, cents, dollars, mulP, type Paise } from '../money/paise.js';
+import { cents, dollars, mulP, type Paise } from '../money/paise.js';
 import type { RsuGrantSeed } from '../seed/seed-data.js';
 
 const VEST_MONTHS = ['02', '05', '08', '11'] as const;
@@ -9,7 +9,7 @@ const VEST_DAY = '15';
 
 /** `rsu_vests.source` for a model-projected row. Owner confirmations overwrite it. */
 export const PROJECTED_SOURCE = 'model';
-export const CONFIRMED_SOURCE = 'owner-confirmed';
+const CONFIRMED_SOURCE = 'owner-confirmed';
 
 /**
  * Units are `numeric(12,4)` in the schema and genuinely fractional (120/16 = 7.5), so they
@@ -93,48 +93,6 @@ export function projectVests(
     }
   }
   return events.sort((a, b) => a.vestOn.localeCompare(b.vestOn) || a.grantId.localeCompare(b.grantId));
-}
-
-/**
- * PRD §15.2 base case: $20k/year refreshers. Pure — the base grants are not mutated, so the
- * no-refresher downside scenario stays available.
- *
- * A year that already carries a REAL grant is skipped. `SEED_RSU_GRANTS` contains a real
- * 285-unit `G2026`; without this check `fromYear: 2026` emitted `REFRESH-2026` beside it and
- * overstated the RSU pipeline by a whole grant. The occupied years are derived from the
- * `grants` argument, never hard-coded, so the guard survives the seed moving.
- *
- * NOTE: the returned refresher grants are hypothetical and have no `rsu_grants` row.
- * `rsu_vests.grant_id` is a foreign key, so vests projected from them cannot be persisted —
- * they are a scenario input for projection only. `rsu_grants.scenario` ('ACTUAL'|'REFRESHER')
- * exists for the day they are persisted; `RsuGrantSeed` carries no such field yet.
- */
-export function withRefreshers(
-  grants: RsuGrantSeed[],
-  opts: { fromYear: number; toYear: number; priceUsd: number },
-): RsuGrantSeed[] {
-  const occupied = new Set(grants.map((g) => Number(g.grantedOn.slice(0, 4))));
-  const extra: RsuGrantSeed[] = [];
-  for (let y = opts.fromYear; y <= opts.toYear; y++) {
-    if (occupied.has(y)) continue;
-    extra.push({
-      id: `REFRESH-${y}`,
-      grantedOn: `${y}-02-15`,
-      units: ASSUMPTIONS.rsuRefresherUsdPerYear / opts.priceUsd,
-      note: `Assumed $${ASSUMPTIONS.rsuRefresherUsdPerYear} refresher (PRD §15.2)`,
-    });
-  }
-  return [...grants, ...extra];
-}
-
-/**
- * Gross value of every tranche vesting strictly after `asOf`.
- *
- * Sums exactly what it is given: pass a projection whose window stops short of the last
- * tranche and the answer is understated by the clipped tail. Project over the full pipeline.
- */
-export function unvestedValue(vests: VestEvent[], asOf: string): Paise {
-  return addP(...vests.filter((v) => v.vestOn > asOf).map((v) => v.grossPaise));
 }
 
 /**

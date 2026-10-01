@@ -62,9 +62,9 @@ export const QUALITY = { minRocePct: 15, maxDeRatio: 1, maxRedFlags: 0 } as cons
 /** Sectors whose balance sheets make a D/E gate meaningless (§6). */
 export const FINANCE_SECTORS = ['Banking', 'Finance', 'NBFC', 'Financial Services', 'Insurance'] as const;
 
-export type SignalBand = 'HIGH' | 'MEDIUM' | 'WATCH' | 'NONE';
+type SignalBand = 'HIGH' | 'MEDIUM' | 'WATCH' | 'NONE';
 
-export interface CandidateFundamentals {
+interface CandidateFundamentals {
   rocePct: number | null;
   deRatio: number | null;
   fcfPos5y: boolean | null;
@@ -100,7 +100,7 @@ export interface EngineContext {
   };
 }
 
-export interface SatelliteComponents {
+interface SatelliteComponents {
   valuation: number;
   trend: number;
   earnings: number;
@@ -348,7 +348,7 @@ export interface MfCandidate {
   styleDriftPct: number | null;
 }
 
-export interface MfContext {
+interface MfContext {
   scoreDate: string;
   blockedIds: readonly string[];
   /** Samples per rolling window (default 12 — monthly NAV points over a year). */
@@ -493,7 +493,7 @@ export async function persistSignalScores(db: Db, scores: readonly SatelliteScor
   return inserted;
 }
 
-export interface EngineInputs {
+interface EngineInputs {
   candidates: SatelliteCandidate[];
   context: Omit<EngineContext, 'blockedIds' | 'fit'>;
 }

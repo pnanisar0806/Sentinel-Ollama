@@ -48,7 +48,7 @@ export type OrderIntent = {
   status: OrderStatus;
 };
 
-export type OrderRevision = {
+type OrderRevision = {
   id: string;
   orderIntentId: string;
   revisionNumber: number;
@@ -65,7 +65,7 @@ export type OrderRevision = {
   validationDetail: Record<string, unknown>;
 };
 
-export type OrderTransition = {
+type OrderTransition = {
   id: string;
   orderIntentId: string;
   revisionNumber: number;
@@ -78,7 +78,7 @@ export type OrderTransition = {
   idempotencyKey: string | null;
 };
 
-export type OrderSimulation = {
+type OrderSimulation = {
   id: string;
   orderIntentId: string;
   revisionNumber: number;
@@ -89,19 +89,19 @@ export type OrderSimulation = {
   note: string;
 };
 
-export type CreateOrderInput = {
+type CreateOrderInput = {
   recommendationId: number;
   recommendation: Recommendation;
   createdBy: 'advisor' | 'owner';
   advisoryPath?: boolean;
 };
 
-export type ApproveInput = {
+type ApproveInput = {
   idempotencyKey: string;
   actor: 'owner';
 };
 
-export type ModifyInput = {
+type ModifyInput = {
   idempotencyKey: string;
   actor: 'owner';
   quantity?: string;
@@ -111,19 +111,19 @@ export type ModifyInput = {
   alternateInstrumentId?: string | null;
 };
 
-export type DeferInput = {
+type DeferInput = {
   idempotencyKey: string;
   actor: 'owner';
   deferUntil: string;
 };
 
-export type RejectInput = {
+type RejectInput = {
   idempotencyKey: string;
   actor: 'owner';
   reason: string;
 };
 
-export type ExpireInput = {
+type ExpireInput = {
   actor: 'system';
   reason: string;
 };
@@ -403,16 +403,6 @@ function computeSipMfExpiry(): Date {
 
 export async function getOrder(db: Db, id: string): Promise<OrderIntent | null> {
   return getOrderWithStatus(db, id);
-}
-
-export async function getOrderByStableTag(db: Db, stableTag: string): Promise<OrderIntent | null> {
-  const [row] = await db.query<Record<string, unknown>>(
-    `select * from order_intents where stable_tag = $1`,
-    [stableTag],
-  );
-  if (!row) return null;
-  const currentStatus = await getCurrentStatus(db, row.id as string);
-  return toOrderIntent(row, currentStatus);
 }
 
 export async function getPendingApprovals(db: Db): Promise<OrderIntent[]> {

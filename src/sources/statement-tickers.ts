@@ -10,7 +10,7 @@
  * it bit three times on 2026-08-25 alone. A ticker hit overrides the line number;
  * the line is only a fallback for holdings this map does not know.
  */
-export const TICKER_TO_INSTRUMENT: Record<string, string> = {
+const TICKER_TO_INSTRUMENT: Record<string, string> = {
   ASIANPAINT: 'IND:INDS00427',
   BERGEPAINT: 'IND:INDS00365',
   CRISIL: 'IND:INDS00083',

@@ -18,7 +18,7 @@ import type { Db } from '../db/client.js';
  * A `specialSession` row is the opposite case — the exchange is OPEN on a day the weekend
  * rule would skip.
  */
-export interface HolidaySeed {
+interface HolidaySeed {
   date: string;
   note: string;
   specialSession?: boolean;
@@ -62,7 +62,7 @@ export const SEED_HOLIDAYS_2026: HolidaySeed[] = [
  * earlier 2025 holidays are deliberately not listed — a wrong entry silently skips a
  * real trading day, and the 2026 note's rule is to leave a date out when in doubt.
  */
-export const SEED_HOLIDAYS_2025: HolidaySeed[] = [
+const SEED_HOLIDAYS_2025: HolidaySeed[] = [
   { date: '2025-10-02', note: 'Mahatma Gandhi Jayanti / Dussehra' },
   { date: '2025-10-22', note: 'Diwali-Balipratipada' },
   { date: '2025-11-05', note: 'Prakash Gurpurb Sri Guru Nanak Dev' },

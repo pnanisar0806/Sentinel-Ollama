@@ -10,7 +10,7 @@ import { isMainModule } from '../util/main-module.js';
 export const ENV_PURPOSES: Purpose[] = [];
 
 /** Import from a screener.in CSV file (legacy path). */
-export async function screenerImportCsv(
+async function screenerImportCsv(
   db: Db,
   csvPath: string,
   opts: { asOf?: string; filename?: string } = {},
@@ -22,7 +22,7 @@ export async function screenerImportCsv(
 }
 
 /** Import by scraping a screener.in screen URL (HTML). */
-export async function screenerImportScreen(
+async function screenerImportScreen(
   db: Db,
   screenUrl: string,
   opts: { asOf?: string; maxPages?: number } = {},
@@ -39,7 +39,7 @@ export async function screenerImportScreen(
 }
 
 /** Import a pasted screen table or the signed-in CSV export (tab- or comma-separated). */
-export async function screenerImportPaste(
+async function screenerImportPaste(
   db: Db,
   text: string,
   opts: { asOf?: string; filename?: string } = {},

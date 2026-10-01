@@ -24,7 +24,7 @@ import { OPENROUTER_CHAT_URL, TEXT_MODEL } from '../config/models.js';
  * `source = 'llm-advisor'` records that provenance on every row it creates.
  */
 
-export const WATCHLIST_PROMPT = [
+const WATCHLIST_PROMPT = [
   'You are shortlisting Indian listed equities for a single long-term investor to WATCH.',
   'This is a watchlist, not a buy list: a separate deterministic engine scores every name',
   'afterwards on real fundamentals and prices, and it — not you — decides what is recommended.',
@@ -36,7 +36,7 @@ export const WATCHLIST_PROMPT = [
   'Return STRICT JSON only: {"picks":[{"instrumentId":"NSE:XXX","reason":"..."}]}',
 ].join('\n');
 
-export interface WatchlistProposal {
+interface WatchlistProposal {
   instrumentId: string;
   reason: string;
 }
@@ -47,7 +47,7 @@ export interface WatchlistCandidate {
   sector: string | null;
 }
 
-export interface ProposeWatchlistDeps {
+interface ProposeWatchlistDeps {
   apiKey?: string | undefined;
   model?: string | undefined;
   fetchImpl?: typeof fetch;

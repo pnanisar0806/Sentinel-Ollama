@@ -51,7 +51,7 @@ export const SCREENER_COLUMNS = [
   'DII Holding %',           // DII shareholding
 ] as const;
 
-export interface ScreenerRow {
+interface ScreenerRow {
   name: string;
   symbol: string;
   industry: string;
@@ -74,7 +74,7 @@ export interface ScreenerRow {
   raw: Record<string, string>;
 }
 
-export interface ScreenerParseResult {
+interface ScreenerParseResult {
   records: ScreenerRow[];
   warnings: string[];
 }

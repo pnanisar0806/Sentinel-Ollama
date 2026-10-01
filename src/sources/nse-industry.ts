@@ -21,7 +21,7 @@ import type { Db } from '../db/client.js';
 const NSE_TOTAL_MARKET_URL =
   'https://nsearchives.nseindia.com/content/indices/ind_niftytotalmarket_list.csv';
 
-export interface IndustryRow {
+interface IndustryRow {
   symbol: string;
   isin: string;
   industry: string;

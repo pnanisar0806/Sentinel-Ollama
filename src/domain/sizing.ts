@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 
 export const SIZING_POLICY = 'sizing-v1';
 /** A price older than this cannot size an order. */
-export const QUOTE_MAX_AGE_DAYS = 5;
+const QUOTE_MAX_AGE_DAYS = 5;
 
 type Kind = 'EQUITY' | 'ETF' | 'MF' | 'BOND' | 'GOLD' | string;
 const EXCHANGE_TRADED = new Set(['EQUITY', 'ETF', 'GOLD']);

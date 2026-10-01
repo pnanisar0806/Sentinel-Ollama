@@ -88,11 +88,11 @@ export async function unfreeze(db: Db, typed: string): Promise<void> {
 /** Three consecutive falsified approvals demote the advisor to report-only. */
 export const BREAKER_STREAK = 3;
 /** An approval that survives this long without its condition firing did not fail. */
-export const FALSIFICATION_HORIZON_MONTHS = 12;
+const FALSIFICATION_HORIZON_MONTHS = 12;
 
 export type Outcome = 'HIT' | 'NOT_HIT';
 
-export interface BreakerEvaluation {
+interface BreakerEvaluation {
   /** Approved recommendations with a falsification condition, oldest approval first. */
   outcomes: { recommendationId: number; approvedAt: string; outcome: Outcome | 'UNKNOWN' }[];
   streak: number;
@@ -206,7 +206,7 @@ export const RESET_PHRASE = 'RESET BREAKER';
  * the owner then reads and confirms. Deterministic: it states which approvals failed and
  * how, and originates no number of its own.
  */
-export async function breakerPostMortem(db: Db): Promise<string> {
+async function breakerPostMortem(db: Db): Promise<string> {
   const rows = await db.query<{ entity_id: string; payload: unknown; at: string | Date }>(
     `select entity_id, payload, at from audit_log
       where entity = 'falsification' and action = 'HIT' order by at desc limit $1`,
@@ -235,8 +235,8 @@ export async function resetBreakerWithPostMortem(db: Db, typed: string): Promise
 
 // ── FR-34: rail changes cool for 48 hours ────────────────────────────────────────────
 
-export const RAIL_COOLING_HOURS = 48;
-export const LOOSENING_BLOCK_DRAWDOWN_PCT = 15;
+const RAIL_COOLING_HOURS = 48;
+const LOOSENING_BLOCK_DRAWDOWN_PCT = 15;
 
 /**
  * Every current rail is a ceiling or a cap, so a HIGHER value is a looser rail. Listed

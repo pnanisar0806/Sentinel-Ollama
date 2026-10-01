@@ -67,7 +67,7 @@ async function previousNet(
   return netWorth(positions, liabilitiesPaise).netPaise;
 }
 
-export interface LiveInputs {
+interface LiveInputs {
   nowPriceCents: bigint;
   usdInr: number;
   asOf: string;

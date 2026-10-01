@@ -32,7 +32,7 @@ const NO_REALISATION_NOTE =
 /** PRD §3.3 is the only clause an allocation move can cite. */
 const ALLOCATION_CLAUSE = '3.3';
 
-export type RebalanceDirection = 'in-band' | 'add' | 'reduce' | 'mixed';
+type RebalanceDirection = 'in-band' | 'add' | 'reduce' | 'mixed';
 
 export interface FundingRoute {
   id: string;
@@ -67,7 +67,7 @@ export interface AllocationState {
   routes?: FundingRoute[];
 }
 
-export interface RebalanceRec {
+interface RebalanceRec {
   monthYear: string;
   /** True in April: India's fiscal year start, the FR-13 annual proposal. */
   annual: boolean;
@@ -117,7 +117,7 @@ export function sellCandidates(
  */
 export const SELL_TOLERANCE = 0.02;
 /** Beyond the tolerance, still prefer new money if it closes the gap within this many months. */
-export const FLOW_HORIZON_MONTHS = 12n;
+const FLOW_HORIZON_MONTHS = 12n;
 
 /**
  * What to BUY when an asset class is under its floor.

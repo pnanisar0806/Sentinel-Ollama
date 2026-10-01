@@ -38,7 +38,7 @@ export async function persistBalanceSnapshot(
   return inserted;
 }
 
-export interface BalanceDay {
+interface BalanceDay {
   asOf: string;
   /** Every savings account summed. A transfer between two of them nets to zero here,
    *  which is the whole reason the operating account is not read on its own. */

@@ -35,7 +35,7 @@ export function parseAumCrore(v: unknown): number | null {
   return m ? Number(m[1]) : null;
 }
 
-export async function fetchCategoryPeers(
+async function fetchCategoryPeers(
   client: McpClient,
   categories: readonly string[],
   size = 12,
@@ -71,7 +71,7 @@ export async function fetchCategoryPeers(
   }));
 }
 
-export interface ResolvedPeer extends PeerFund {
+interface ResolvedPeer extends PeerFund {
   schemeCode: string;
   isin: string;
 }

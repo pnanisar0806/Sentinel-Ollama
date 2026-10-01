@@ -28,7 +28,7 @@ export const ISSUER_BSE_SCRIP: Record<string, { scrip: string; company: string }
   INE532F: { scrip: '532922', company: 'Edelweiss Financial Services' },
 };
 
-export interface RatingFiling {
+interface RatingFiling {
   newsId: string;
   bseScrip: string;
   company: string;

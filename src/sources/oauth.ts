@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import type { Db } from '../db/client.js';
 
-export interface AsMetadata {
+interface AsMetadata {
   issuer: string;
   authorization_endpoint: string;
   token_endpoint: string;
@@ -9,7 +9,7 @@ export interface AsMetadata {
   scopes_supported?: string[];
 }
 
-export interface TokenSet {
+interface TokenSet {
   accessToken: string;
   refreshToken: string | null;
   expiresAt: string;
@@ -185,7 +185,7 @@ export const exchangeCode = (
     ...(opts.clientSecret ? { client_secret: opts.clientSecret } : {}),
   }, opts.fetchImpl ?? fetch);
 
-export const refreshTokens = (
+const refreshTokens = (
   md: AsMetadata,
   opts: { refreshToken: string; clientId: string; clientSecret?: string; fetchImpl?: typeof fetch },
 ): Promise<TokenSet> =>

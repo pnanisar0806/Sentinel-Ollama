@@ -15,7 +15,7 @@ import { recordLlmCall, recordProposal } from './proposals.js';
  * bullets are the whole report.
  */
 
-export const COMMENTARY_PROMPT_VERSION = 'commentary-v1';
+const COMMENTARY_PROMPT_VERSION = 'commentary-v1';
 const MAX_WORDS = 300;
 
 export interface Fact { id: string; subject: string; field: string; value: string; period: string }

@@ -45,7 +45,7 @@ export const REDEMPTION_HORIZON_DAYS = 45;
 
 const WEEK_DAYS = 7;
 
-export interface SignalReview {
+interface SignalReview {
   scored: SatelliteScore[];
   /** Names that reached MEDIUM or better this week and had not before. */
   newlyRecommended: string[];
@@ -58,7 +58,7 @@ export interface SignalReview {
   skippedReason: string | null;
 }
 
-export interface WatchlistChange {
+interface WatchlistChange {
   instrumentId: string;
   change: 'added' | 'removed';
   on: string;
@@ -66,7 +66,7 @@ export interface WatchlistChange {
   reason: string;
 }
 
-export interface StoredRecommendation {
+interface StoredRecommendation {
   id: number;
   createdOn: string;
   kind: string;
@@ -76,14 +76,14 @@ export interface StoredRecommendation {
   ipsClauseRefs: string[];
 }
 
-export interface SuppressedAction {
+interface SuppressedAction {
   loggedOn: string;
   action: string;
   reason: string;
   suppressedBy: string;
 }
 
-export interface BlockedName {
+interface BlockedName {
   instrumentId: string;
   reason: string;
 }
@@ -117,7 +117,7 @@ export interface ReportInput {
   narrative: string | null;
 }
 
-export interface BuildReportOptions {
+interface BuildReportOptions {
   now?: string;
   /** 10Y G-sec yield. Absent ⇒ no satellite scoring, stated as a skip reason. */
   gsecYieldPct?: number | undefined;

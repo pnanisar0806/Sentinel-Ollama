@@ -32,7 +32,7 @@ export interface IndexBhavcopyRow {
   tradeDate: string;
 }
 
-export interface BhavcopyReport {
+interface BhavcopyReport {
   date: string;
   totalRows: number;
   inserted: number;
@@ -358,7 +358,7 @@ function parseNseDate(s: string): string | undefined {
 }
 
 /** A SYMBOL → ISIN entry from the whole-market master (EQUITY_L.csv, EQ series only). */
-export interface EquityMasterRow {
+interface EquityMasterRow {
   symbol: string;
   isin: string;
 }

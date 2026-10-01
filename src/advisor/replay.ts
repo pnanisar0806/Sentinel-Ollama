@@ -18,9 +18,9 @@ import { SIZING_POLICY } from '../domain/sizing.js';
  * `coverage.unreconstructable` rather than silently taken from today.
  */
 
-export interface ReplayNews { eventId: number; instrumentId: string | null; eventType: string; headline: string; publishedAt: string; polarity: string | null; materiality: string | null }
-export interface ReplayScore { instrumentId: string; scoreDate: string; composite: number }
-export interface ReplayPoint { cutoff: string; news: ReplayNews[]; scores: ReplayScore[]; holdingsSnapshot: string | null }
+interface ReplayNews { eventId: number; instrumentId: string | null; eventType: string; headline: string; publishedAt: string; polarity: string | null; materiality: string | null }
+interface ReplayScore { instrumentId: string; scoreDate: string; composite: number }
+interface ReplayPoint { cutoff: string; news: ReplayNews[]; scores: ReplayScore[]; holdingsSnapshot: string | null }
 
 const endOfDay = (d: string): string => `${d}T23:59:59.999+05:30`;
 
@@ -65,7 +65,7 @@ const monthEnds = (from: string, to: string): string[] => {
 
 const sha = (v: unknown): string => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 24);
 
-export interface ReplayRun {
+interface ReplayRun {
   datasetHash: string; codeHash: string; configHash: string;
   coverage: { points: number; newsSeen: number; scoresSeen: number; unreconstructable: string[] };
   result: ReplayPoint[];

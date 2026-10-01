@@ -9,7 +9,7 @@ export interface LoanInput {
   cascadeOrder: number;
 }
 
-export interface ScheduleRow {
+interface ScheduleRow {
   loanId: string;
   /** First of the month, 'YYYY-MM-01'. */
   month: string;
@@ -22,7 +22,7 @@ export interface ScheduleRow {
 
 const MAX_MONTHS = 600; // 50-year guard, not a business rule.
 
-export function nextMonth(month: string): string {
+function nextMonth(month: string): string {
   const [y, m] = month.split('-').map(Number) as [number, number];
   return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
 }

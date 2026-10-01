@@ -35,7 +35,7 @@ export const SOURCE = 'indmoney';
 /** Balances, not prices: their day-over-day change is a flow. */
 const BALANCE_KINDS = new Set(['CASH', 'EPF']);
 
-export interface DrawdownPoint {
+interface DrawdownPoint {
   asOf: string;
   /** Base 100 on the first day of history. */
   index: number;
@@ -172,7 +172,7 @@ export async function recordDrawdown(db: Db): Promise<{ written: number; latest:
 }
 
 /** How old drawdown evidence may be before it no longer counts as evidence. */
-export const DRAWDOWN_EVIDENCE_MAX_AGE_DAYS = 7;
+const DRAWDOWN_EVIDENCE_MAX_AGE_DAYS = 7;
 
 /**
  * The latest drawdown, or null when there is no recent evidence.

@@ -9,11 +9,11 @@ import { attachmentUrl, bseResolver, fetchBseAnnouncements, fetchBseScrips, type
  * never sells on a headline (enforced where the advisor consumes it, Task 6).
  */
 
-export type EventType =
+type EventType =
   'results' | 'rating' | 'governance' | 'management' | 'mna' | 'corporate_action' | 'business' | 'unknown';
 
 /** Coverage older than this blocks advice on the company (owner, 2026-09-27: 7 days). */
-export const NEWS_SLA_DAYS = 7;
+const NEWS_SLA_DAYS = 7;
 
 // Built from the categories BSE actually returned for the held and watched companies,
 // Jun–Sep 2026 (100 companies, 322 material filings). Order matters: first match wins.
@@ -57,7 +57,7 @@ async function coveredInstruments(db: Db): Promise<{ id: string; isin: string | 
   );
 }
 
-export interface NewsRunResult { companies: number; stored: number; failed: number; unresolved: number }
+interface NewsRunResult { companies: number; stored: number; failed: number; unresolved: number }
 
 export async function recordNews(
   db: Db,
@@ -112,7 +112,7 @@ export async function recordNews(
   return result;
 }
 
-export type CoverageState = 'fresh' | 'stale' | 'missing' | 'unresolved';
+type CoverageState = 'fresh' | 'stale' | 'missing' | 'unresolved';
 
 /**
  * Whether the advisor may rely on this company's news being checked. Freshness is the

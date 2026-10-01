@@ -6,14 +6,7 @@ import { loadSmallcasePositions } from '../seed/seed-smallcases.js';
 
 export const MICRO_ORPHAN_THRESHOLD = rupees('5000');
 export const LTCG_EXEMPTION_PER_FY = rupees('125000');
-export const SMALLCASE_CONSTITUENTS = [
-  'NSE:NIFTYBEES',
-  'NSE:JUNIORBEES',
-  'NSE:GOLDBEES',
-  'NSE:LIQUIDBEES',
-] as const;
-
-export interface OpenLot {
+interface OpenLot {
   id: string;
   instrumentId: string;
   account: string;
@@ -23,7 +16,7 @@ export interface OpenLot {
   isSeeded: boolean;
 }
 
-export interface FyHarvestPlan {
+interface FyHarvestPlan {
   fiscalYear: string;
   budgetPaise: Paise;
   usedPaise: Paise;
@@ -317,7 +310,7 @@ function buildLtcgHarvestRec(instrumentId: string, name: string, fyPlan: FyHarve
   };
 }
 
-export interface CleanupInput {
+interface CleanupInput {
   asOf: string;
   positions: Array<{
     instrumentId: string;
@@ -329,7 +322,7 @@ export interface CleanupInput {
   }>;
 }
 
-export interface CleanupOutput {
+interface CleanupOutput {
   cleanupRecs: CleanupRec[];
   microOrphans: CleanupRec[];
   thesisLess: CleanupRec[];

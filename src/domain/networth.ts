@@ -8,7 +8,7 @@ import type { Account } from '../seed/seed-data.js';
  * 'LOAN' included. The plan's union omitted LOAN, which meant a LOAN row would fall
  * through `classify` to EQUITY and be summed into ASSETS. See `classify`.
  */
-export type InstrumentKind =
+type InstrumentKind =
   | 'EQUITY' | 'ETF' | 'MF' | 'BOND' | 'CASH' | 'EPF' | 'RSU' | 'GOLD' | 'LOAN';
 export type AssetClass = 'EQUITY' | 'DEBT' | 'GOLD' | 'CASH';
 

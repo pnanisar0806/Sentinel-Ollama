@@ -17,9 +17,9 @@ import type { Recommendation, RecKind, RecLeg } from './recommendations.js';
  */
 
 /** A recommendation older than this is not drafted: its facts have moved on. */
-export const DRAFT_WINDOW_DAYS = 7;
+const DRAFT_WINDOW_DAYS = 7;
 
-export interface DraftReport {
+interface DraftReport {
   drafted: OrderIntent[];
   /** Rails, freeze, breaker or freshness refused it. Retried on the next run. */
   refused: { recommendationId: number; reason: string }[];

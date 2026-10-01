@@ -14,12 +14,12 @@ import type { Db } from '../db/client.js';
  * check reads `prices_eod` too, and was changed to count only `nse-bhavcopy` rows —
  * otherwise a fresh NOW close would make a dead NSE feed read as current.
  */
-export const NOW_INSTRUMENT = 'US:NOW';
-export const NOW_SOURCE = 'yahoo';
+const NOW_INSTRUMENT = 'US:NOW';
+const NOW_SOURCE = 'yahoo';
 
-export interface DailyClose { date: string; closeCents: bigint }
+interface DailyClose { date: string; closeCents: bigint }
 
-export async function fetchNowCloses(range = '1y', fetchImpl: typeof fetch = fetch): Promise<DailyClose[]> {
+async function fetchNowCloses(range = '1y', fetchImpl: typeof fetch = fetch): Promise<DailyClose[]> {
   const res = await fetchImpl(`https://query1.finance.yahoo.com/v8/finance/chart/NOW?interval=1d&range=${range}`, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Sentinel/1.0)', Accept: 'application/json' },
   });
@@ -44,7 +44,7 @@ export async function fetchNowCloses(range = '1y', fetchImpl: typeof fetch = fet
 }
 
 /** USD/INR by date, from Frankfurter. Rates as micros, the unit `fx_rates` stores. */
-export async function fetchUsdInrSeries(
+async function fetchUsdInrSeries(
   from: string, to: string, fetchImpl: typeof fetch = fetch,
 ): Promise<Map<string, bigint>> {
   const res = await fetchImpl(`https://api.frankfurter.app/${from}..${to}?from=USD&to=INR`);

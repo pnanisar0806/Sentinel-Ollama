@@ -56,7 +56,7 @@ export async function monthEndNavs(db: Db, instrumentIds: string[]): Promise<Map
   ]));
 }
 
-export interface HeldFund {
+interface HeldFund {
   /** The instrument the POSITION is on — `IND:*` for a live INDmoney row. */
   instrumentId: string;
   name: string;

@@ -12,15 +12,15 @@ import { recordLlmCall } from '../advisor/proposals.js';
  */
 
 export const PROMPT_VERSION = 'sentiment-v1';
-export const SCHEMA_VERSION = 'sentiment-schema-v1';
-export const BATCH = 20;
+const SCHEMA_VERSION = 'sentiment-schema-v1';
+const BATCH = 20;
 
 const POLARITY = ['POSITIVE', 'NEGATIVE', 'NEUTRAL', 'UNKNOWN'] as const;
 const MATERIALITY = ['HIGH', 'MEDIUM', 'LOW', 'UNKNOWN'] as const;
-export type Polarity = typeof POLARITY[number];
-export type Materiality = typeof MATERIALITY[number];
+type Polarity = typeof POLARITY[number];
+type Materiality = typeof MATERIALITY[number];
 
-export interface Classification { eventId: number; polarity: Polarity; materiality: Materiality; summary: string }
+interface Classification { eventId: number; polarity: Polarity; materiality: Materiality; summary: string }
 
 const PROMPT = [
   'You read Indian stock-exchange filings for a long-term investor (5-year horizon) who',
@@ -137,7 +137,7 @@ export async function classifyPending(
   return out;
 }
 
-export interface StoredSentiment extends Omit<Classification, 'eventId'> { model: string; promptVersion: string; classifiedAt: string }
+interface StoredSentiment extends Omit<Classification, 'eventId'> { model: string; promptVersion: string; classifiedAt: string }
 
 /** The latest reading available at `cutoff` — not the latest now, so a replay cannot see the future. */
 export async function latestSentiment(db: Db, eventId: number, cutoff = new Date()): Promise<StoredSentiment | null> {

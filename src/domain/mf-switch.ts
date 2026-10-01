@@ -27,7 +27,7 @@ import { loadUniverse } from './mf-universe.js';
  * would have quietly become a looser bar — the sort of drift that shows up as "the
  * advisor started recommending more switches" with no decision behind it.
  */
-export const SWITCH_MARGIN_SHARE = 10 / 75;
+const SWITCH_MARGIN_SHARE = 10 / 75;
 
 /** The margin in points, on the current scale. */
 export const SWITCH_MARGIN = Math.round(MAX_ACHIEVABLE_COMPOSITE * SWITCH_MARGIN_SHARE * 100) / 100;
@@ -66,7 +66,7 @@ interface Scored {
  * by a separate job — a one-month difference between the two backfills is an artefact,
  * and requiring equality emptied every cohort.
  */
-export const MIN_HISTORY_SHARE = 0.9;
+const MIN_HISTORY_SHARE = 0.9;
 
 /** The trailing `n` points of a series. */
 const tail = (xs: readonly bigint[], n: number): bigint[] => xs.slice(Math.max(0, xs.length - n));

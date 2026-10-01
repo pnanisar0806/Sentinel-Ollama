@@ -1,14 +1,14 @@
 import { cents, dollars, type Cents } from '../money/paise.js';
 import { fetchUsdInr } from './fx.js';
 
-export interface LivePrice {
+interface LivePrice {
   symbol: string;
   priceCents: Cents;
   asOf: string;
   source: string;
 }
 
-export interface LiveRsuInputs {
+interface LiveRsuInputs {
   nowPriceCents: Cents;
   usdInr: number;
   asOf: string;
@@ -18,7 +18,7 @@ export interface LiveRsuInputs {
  * Fetch live ServiceNow (NOW) price from Yahoo Finance.
  * Returns price in integer cents (e.g., $185.47 → 18547 cents).
  */
-export async function fetchNowPrice(): Promise<LivePrice> {
+async function fetchNowPrice(): Promise<LivePrice> {
   const url = 'https://query1.finance.yahoo.com/v8/finance/chart/NOW?interval=1d&range=1d';
   const res = await fetch(url, {
     headers: {

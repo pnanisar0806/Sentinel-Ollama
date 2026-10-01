@@ -12,7 +12,7 @@ import { cents, mulP, type Cents, type Paise } from '../money/paise.js';
  * - Price per unit at vest
  * - Withholding (typically 30% for US)
  */
-export interface FidelityRsuVest {
+interface FidelityRsuVest {
   grantId: string;
   vestOn: string;
   units: number;
@@ -39,7 +39,7 @@ export interface FidelityProposal {
  * Prompt for extracting Fidelity RSU vest events from a statement image.
  * The output feeds directly into `confirmVest` in rsu.ts.
  */
-export const FIDELITY_EXTRACTION_PROMPT = `
+const FIDELITY_EXTRACTION_PROMPT = `
 You are extracting RSU vesting events from a Fidelity NetBenefits statement screenshot.
 Output ONLY valid JSON matching this TypeScript interface:
 

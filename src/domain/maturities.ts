@@ -12,7 +12,7 @@ import { listRedemptionsUntil, type Redemption } from './redemptions.js';
  */
 export { listRedemptionsUntil, type Redemption };
 
-export interface MaturityRouting {
+interface MaturityRouting {
   intent: string;
   action: 'REDEEM→CASH';
   bucket: string;

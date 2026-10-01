@@ -3,15 +3,11 @@ import { writeCommentary, type Fact } from '../advisor/commentary.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
-import { writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
 import { installIps } from '../domain/ips.js';
 import { buildDigestInput } from '../notify/digest.js';
-import { generateDashboardHtml } from '../notify/dashboard.js';
 import { buildReportInput, composeReport, REDEMPTION_HORIZON_DAYS } from '../notify/report.js';
 import { listRedemptionsUntil } from '../domain/redemptions.js';
 import { maturityRoutingRec } from '../domain/maturities.js';
@@ -74,18 +70,10 @@ if (isMainModule(import.meta.url)) {
   await runMigrations(db);
   await installIps(db);
 
-  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  const dashboardPath = join(repoRoot, 'docs', 'dashboard.html');
-
   // A retry that lands after a successful run must skip everything irreversible —
-  // `persistRecommendation` is a plain INSERT into an append-only table — but it must
-  // still write the dashboard. docs/dashboard.html is untracked, so the workflow's
-  // Pages upload would otherwise publish a docs/ with no dashboard in it and take the
-  // published dashboard down.
+  // `persistRecommendation` is a plain INSERT into an append-only table.
   if (await alreadyReportedFor(db, asOf)) {
-    const refreshed = generateDashboardHtml(await buildDigestInput(db, new Date().toISOString()));
-    await writeFile(dashboardPath, refreshed, 'utf-8');
-    console.log(`weekly report already sent for ${asOf} — dashboard refreshed, nothing else to do`);
+    console.log(`weekly report already sent for ${asOf} — nothing to do`);
     await db.close();
     process.exit(0);
   }
@@ -120,9 +108,7 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   }
   const text = composeReport(input) + adviceLine;
 
-  // The dashboard rides along with the weekly run, as it did under `pnpm weekly`.
   const digest = await buildDigestInput(db, input.generatedAt);
-  const html = generateDashboardHtml(digest);
 
   // Phase 2.5 Task 8: validated commentary on this week's facts, stored for /advisor.
   // Allocation and the advisor's decision only — funded status is never a fact here.
@@ -136,7 +122,6 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   } catch (error) {
     console.error(`commentary failed: ${error instanceof Error ? error.message : String(error)}`);
   }
-  await writeFile(dashboardPath, html, 'utf-8');
 
   const telegram = new Telegram({
     botToken: env.telegramBotToken!,

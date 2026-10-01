@@ -26,7 +26,7 @@ export type EvalHorizon = (typeof EVAL_HORIZONS)[number];
  */
 export const MIN_EVALS_FOR_CALIBRATION = 20;
 
-export interface BenchmarkSnapshot {
+interface BenchmarkSnapshot {
   instrumentId: string | null;
   closePaise: string | null;
   indexSeries: string;
@@ -37,7 +37,7 @@ export interface BenchmarkSnapshot {
   note?: string;
 }
 
-export interface DueEval {
+interface DueEval {
   benchmarkId: number;
   recommendationId: number;
   horizon: EvalHorizon;
@@ -231,7 +231,7 @@ export async function runDueEvals(db: Db, asOf: string): Promise<EvalResult[]> {
   return out;
 }
 
-export interface CalibrationRow {
+interface CalibrationRow {
   conviction: string;
   horizon: EvalHorizon;
   evaluated: number;

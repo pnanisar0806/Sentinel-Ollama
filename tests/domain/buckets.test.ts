@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { rupees, type Paise } from '../../src/money/paise.js';
-import { BUCKETS, type Bucket, bucketStatus, bucketSummary } from '../../src/domain/buckets.js';
+import { BUCKETS, type Bucket, bucketStatus } from '../../src/domain/buckets.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 
 describe('Buckets', () => {
@@ -61,32 +61,6 @@ describe('Buckets', () => {
       expect(result.met).toBe(false);
       expect(result.progressPaise).toBe(rupees(5_000_000));
       expect(result.targetPaise).toBe(rupees(10_000_000));
-    });
-  });
-
-  describe('bucketSummary', () => {
-    it('reports B1 with computed floor band target', () => {
-      const summary = bucketSummary(BUCKETS.B1, rupees(10_000_000));
-      // formatInr produces Indian digit grouping for the floor band target
-      expect(summary).toContain('10,28,57,142');
-      expect(summary).toContain('still growing');
-    });
-
-    it('reports B2 progress vs target', () => {
-      const summary = bucketSummary(BUCKETS.B2, rupees(3_000_000));
-      // formatInr produces Indian digit grouping: 30,00,000 and 65,00,000
-      expect(summary).toContain('30,00,000');
-      expect(summary).toContain('65,00,000');
-    });
-
-    it('reports B3 met status', () => {
-      const summary = bucketSummary(BUCKETS.B3, rupees(600_000));
-      expect(summary).toContain('target met');
-    });
-
-    it('reports B4 growing status', () => {
-      const summary = bucketSummary(BUCKETS.B4, rupees(5_000_000));
-      expect(summary).toContain('still growing');
     });
   });
 });

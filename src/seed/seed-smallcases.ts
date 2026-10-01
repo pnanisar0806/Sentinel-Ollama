@@ -45,7 +45,7 @@ export async function seedSmallcases(db: Db): Promise<{ inserted: number; skippe
   return { inserted, skipped };
 }
 
-export interface SmallcasePosition {
+interface SmallcasePosition {
   smallcase: string;
   instrumentId: string;
   units: number;

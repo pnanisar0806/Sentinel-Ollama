@@ -32,7 +32,7 @@ import {
  * candidates over 31 months would be ~90,000 inserts against the pooler for numbers
  * nothing looks at. Held funds keep their daily series, which `backfill-navs` writes.
  */
-export interface UniverseReport {
+interface UniverseReport {
   categories: string[];
   candidates: number;
   created: number;
@@ -57,7 +57,7 @@ export function monthEndRows(rows: readonly NavRow[], wanted: ReadonlySet<string
   return [...best.values()];
 }
 
-export async function buildMfUniverse(
+async function buildMfUniverse(
   db: Db,
   opts: { months: number; endMonth: string; pauseMs?: number },
 ): Promise<UniverseReport> {
@@ -113,7 +113,7 @@ export async function buildMfUniverse(
  * peer's OWN nav_date. Anything that does not match is left without metadata rather
  * than guessed at.
  */
-export async function enrichUniverse(
+async function enrichUniverse(
   db: Db,
   client: McpClient,
   categories: readonly string[],

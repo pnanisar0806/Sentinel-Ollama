@@ -81,15 +81,12 @@ const reachers = () => reachersOf(graph);
 const ALLOWED = new Set([
   'src/domain/buckets.ts',   // bucket reporting; re-exports the FI band, never sizes
   'src/notify/digest.ts',    // renders funded status to the owner
-  'src/notify/dashboard.ts', // renders HTML dashboard with funded status
   'src/jobs/digest.ts',      // the digest CLI entrypoint
   // The FR-51 weekly report CLI (replaced jobs/weekly.ts, 2026-09-13). It reaches funded
   // status only through maturity ROUTING, which reports bucket allocation. The report's
   // own composition — `notify/report.ts`, which drives the sizing engines — is NOT on this
   // list and must never be: that is where the firewall actually has to hold.
   'src/jobs/report.ts',
-  'src/ui/render.ts',        // local preview: renders the report + digest to the owner, never sizes
-  'src/ui/server.ts',        // local preview: serving entrypoint over render.ts
   'src/domain/maturities.ts', // maturity routing for digest; reports bucket allocation, never sizes
 ]);
 

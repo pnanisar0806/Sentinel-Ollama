@@ -16,8 +16,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 jobs:
   weekly:
@@ -42,20 +40,3 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           WEEKLY_LLM_MODEL: ${{ vars.WEEKLY_LLM_MODEL }}
           GSEC_YIELD_PCT: ${{ vars.GSEC_YIELD_PCT }}
-      # The weekly job writes dashboard.html to docs/
-      # Upload it as a Pages artifact
-      - name: Upload dashboard artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: docs/
-
-  deploy-dashboard:
-    needs: weekly
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4

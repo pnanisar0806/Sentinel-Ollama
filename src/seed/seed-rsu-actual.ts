@@ -19,7 +19,7 @@ import { mulP } from '../money/paise.js';
  *
  * Units and dates are Fidelity's, transcribed. They do not move.
  */
-export interface ActualGrant {
+interface ActualGrant {
   id: string;
   grantedOn: string;
   units: number;
@@ -36,7 +36,7 @@ export const FIDELITY_GRANTS: ActualGrant[] = [
   { id: '26RSU', grantedOn: '2026-02-17', units: 285, cadence: 'QUARTERLY', note: 'Vests 15 Feb/May/Aug/Nov' },
 ];
 
-export interface ActualVest {
+interface ActualVest {
   grantId: string;
   vestOn: string;
   units: number;
@@ -91,7 +91,7 @@ export const FIDELITY_UNVESTED: ActualVest[] = [
   { grantId: '26RSU', vestOn: '2030-02-15', units: 18, grossPaise: V18 },
 ];
 
-export const FIDELITY_AS_OF = '2026-09-21';
+const FIDELITY_AS_OF = '2026-09-21';
 export const FIDELITY_SOURCE = 'fidelity-awards-details';
 
 /**

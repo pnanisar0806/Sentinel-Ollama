@@ -14,7 +14,7 @@ import type { ExitCandidate } from './sell-triggers.js';
  * `persistRecommendation` already enforces the monthly cap and records a refusal in
  * `suppressed_actions`, so this surfaces that reason rather than duplicating the rule.
  */
-export interface PromotionResult extends PersistResult {
+interface PromotionResult extends PersistResult {
   /** Set when the candidate was refused before the FR-12 gate was even consulted. */
   blocked?: string;
 }

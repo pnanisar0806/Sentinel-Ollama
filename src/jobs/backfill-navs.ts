@@ -18,7 +18,7 @@ import { isMainModule } from '../util/main-module.js';
  * only the schemes matching an instrument. Requests are therefore chunked by month, not
  * by fund.
  */
-export interface NavBackfillReport {
+interface NavBackfillReport {
   /** Month ranges fetched, as 'YYYY-MM'. */
   fetched: string[];
   /** Months already holding NAVs for every MF instrument, so not re-fetched. */
@@ -28,7 +28,7 @@ export interface NavBackfillReport {
   inserted: number;
 }
 
-export interface NavBackfillOptions {
+interface NavBackfillOptions {
   /** Most recent month to cover, 'YYYY-MM'. */
   endMonth: string;
   /** How many months back to cover, including `endMonth`. */

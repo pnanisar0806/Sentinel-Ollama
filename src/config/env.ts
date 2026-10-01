@@ -1,4 +1,4 @@
-export interface Env {
+interface Env {
   databaseUrl: string | undefined;
   telegramBotToken: string | undefined;
   telegramOwnerChatId: string | undefined;
@@ -23,7 +23,7 @@ export interface Env {
 export type Purpose = 'crypto' | 'telegram' | 'all';
 
 /** `loadEnv(..., ['crypto'])` has already thrown if the key is absent, so it is a `string`. */
-export interface CryptoEnv extends Env {
+interface CryptoEnv extends Env {
   tokenEncryptionKey: string;
 }
 

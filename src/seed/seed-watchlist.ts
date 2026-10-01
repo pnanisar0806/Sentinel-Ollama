@@ -7,7 +7,7 @@ import { openDb, type Db } from '../db/client.js';
  * Excludes held instruments (per §6.1); no penny stocks.
  * Large-caps + Indian MF funds for switch opportunities.
  */
-export const SEED_WATCHLIST = [
+const SEED_WATCHLIST = [
   // Indian Large-cap equities
   { instrumentId: 'NSE:RELIANCE', addedOn: '2026-01-15', removedOn: null, source: 'advisor', reason: 'Large-cap energy/conglomerate; dividend yield + refining margin recovery thesis' },
   { instrumentId: 'NSE:TCS', addedOn: '2026-01-15', removedOn: null, source: 'advisor', reason: 'IT services bellwether; consistent FCF, dividend growth, US revenue hedge' },

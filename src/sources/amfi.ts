@@ -19,7 +19,7 @@ export interface NavRow {
   date: string;
 }
 
-export interface AmfiReport {
+interface AmfiReport {
   date: string;
   totalRows: number;
   inserted: number;

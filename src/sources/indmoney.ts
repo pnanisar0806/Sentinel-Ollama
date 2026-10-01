@@ -344,7 +344,7 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
  * A fund the tool has nothing for is skipped, not defaulted: a missing expense ratio is
  * NULL, and scoring it as 0 would read as a free fund and rank it top.
  */
-export interface RemoteMfDetail {
+interface RemoteMfDetail {
   fundId: string;
   expenseRatioPct: number | null;
   aumCrore: number | null;

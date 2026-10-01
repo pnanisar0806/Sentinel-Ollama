@@ -8,10 +8,10 @@ import type { Db } from '../db/client.js';
  * platform code.
  */
 
-export type ProposalKind = 'ADVISE' | 'WATCHLIST_REVISION' | 'COMMENTARY' | 'RATING_REVIEW';
-export type ProposalStatus = 'OPEN' | 'SIGNED' | 'DISMISSED';
+type ProposalKind = 'ADVISE' | 'WATCHLIST_REVISION' | 'COMMENTARY' | 'RATING_REVIEW';
+type ProposalStatus = 'OPEN' | 'SIGNED' | 'DISMISSED';
 
-export interface NewProposal {
+interface NewProposal {
   kind: ProposalKind;
   payload: object;
   inputSnapshot: object;
@@ -72,7 +72,7 @@ export async function loadProposals(db: Db, kind?: ProposalKind, limit = 50): Pr
   }));
 }
 
-export interface LlmCall {
+interface LlmCall {
   seam: string; model: string; latencyMs: number | null;
   outcome: 'ok' | 'unavailable' | 'invalid' | 'error';
   /** NULL when the provider did not report it. Never invented as 0. */

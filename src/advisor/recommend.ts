@@ -19,8 +19,8 @@ import { recordLlmCall, recordProposal } from './proposals.js';
  * invalid reply. Neither of the last two is ever reported as HOLD.
  */
 
-export const ADVISE_PROMPT_VERSION = 'advise-v1';
-export const ADVISE_SCHEMA_VERSION = 'advise-schema-v1';
+const ADVISE_PROMPT_VERSION = 'advise-v1';
+const ADVISE_SCHEMA_VERSION = 'advise-schema-v1';
 export type Decision = 'BUY' | 'SELL' | 'HOLD' | 'WAIT' | 'NO_ACTION' | 'UNAVAILABLE';
 
 const NEWS_LOOKBACK_DAYS = 90;
@@ -101,7 +101,7 @@ interface ModelDecision {
   rationale: string; keyRisk: string; falsification: string; counterargument: string; evidenceIds: string[]; alternates: string[];
 }
 
-export function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecision {
+function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecision {
   const d = raw as Record<string, unknown>;
   for (const k of FORBIDDEN_NUMBERS) if (k in d) throw new Error(`the model supplied "${k}"; sizes are the system's`);
   const decision = String(d['decision']);

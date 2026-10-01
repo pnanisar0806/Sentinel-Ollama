@@ -13,28 +13,21 @@ import { heldFunds } from './mf-ranking.js';
  */
 
 /** Categories where a switch is a like-for-like comparison. */
-export const SWITCHABLE_CATEGORIES = [
+const SWITCHABLE_CATEGORIES = [
   'Equity Scheme - Flexi Cap Fund',
   'Equity Scheme - Large Cap Fund',
   'Equity Scheme - Mid Cap Fund',
   'Equity Scheme - Small Cap Fund',
 ] as const;
+// Index funds are deliberately excluded from the list above, for now. AMFI files 290
+// Direct growth funds under `Other Scheme - Index Funds` and 64 more under `Index Funds -
+// Equity Funds`, but the category does not say WHICH index. A Nifty 50 tracker and a
+// Nifty Smallcap tracker are not alternatives to one another, and ranking them together
+// would recommend swapping one exposure for a different one on the strength of a cost
+// difference. The peer set for an index fund is the funds tracking the same index, which
+// needs index-level matching on the scheme name.
 
-/**
- * Index funds are deliberately excluded, for now.
- *
- * AMFI files 290 Direct growth funds under `Other Scheme - Index Funds` and 64 more
- * under `Index Funds - Equity Funds`, but the category does not say WHICH index. A
- * Nifty 50 tracker and a Nifty Smallcap tracker are not alternatives to one another,
- * and ranking them together would recommend swapping one exposure for a different one
- * on the strength of a cost difference. The peer set for an index fund is the funds
- * tracking the same index, which needs index-level matching on the scheme name.
- */
-export const INDEX_CATEGORIES_EXCLUDED =
-  'Index funds need same-index matching before they can be compared; AMFI’s category '
-  + 'says only that a fund is an index fund, not which index it tracks.';
-
-export interface UniverseCandidate {
+interface UniverseCandidate {
   instrumentId: string;
   schemeCode: string;
   isin: string;

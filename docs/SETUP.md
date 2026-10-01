@@ -6,7 +6,7 @@ Phase 0 is **not a website you host**. It is a headless agent made of four piece
 |---|---|---|
 | Database | Supabase (hosted Postgres) | Free tier |
 | Messenger | A private Telegram bot that talks only to you | Free |
-| Jobs | `sync` / `digest` / `keepalive` / `schedule` / `backup`, run on GitHub's computers on a schedule | Free |
+| Jobs | `sync` / `digest` / `keepalive` / `schedule` / `weekly`, run on GitHub's computers on a schedule | Free |
 | Web app | Next.js 15 on Vercel (single-owner, read-only portfolio + owner-gated imports) | Free tier |
 | Secrets | Stored in GitHub Actions secrets — never in the repo | — |
 
@@ -123,13 +123,10 @@ Repo → Settings → Secrets and variables → Actions → **New repository sec
 
 | Secret | Needed by | Value |
 |---|---|---|
-| `DATABASE_URL` | sync, digest, keepalive, schedule, backup | Supabase pooler string (Step 4) |
+| `DATABASE_URL` | sync, digest, keepalive, schedule, weekly | Supabase pooler string (Step 4) |
 | `TELEGRAM_BOT_TOKEN` | digest | Step 3 |
 | `TELEGRAM_OWNER_CHAT_ID` | digest | Step 3 |
-| `TOKEN_ENCRYPTION_KEY` | sync, backup, backup-restore | the key from Step 5 |
-| `BACKUP_REPO` | backup | Private GitHub repo for encrypted backups (e.g., `owner/sentinel-backups`) |
-| `BACKUP_BRANCH` | backup | Branch in backup repo (default: `main`) |
-| `GH_TOKEN` | backup | GitHub PAT with `repo` scope for pushing to backup repo |
+| `TOKEN_ENCRYPTION_KEY` | sync | the key from Step 5 |
 | `LLM_API_KEY` | sync, schedule, weekly (+ Vercel) | OpenRouter key. Absent is supported: filings stay unclassified (never neutral), advice is recorded as UNAVAILABLE, no commentary, and the watchlist revision lists removals only |
 | `KITE_API_KEY`, `KITE_ACCESS_TOKEN` | sync (optional) | developers.kite.trade personal app; order APIs free, market data ₹500/mo — Phase 2 doesn't need market data |
 
@@ -149,14 +146,13 @@ Repo → Settings → Secrets and variables → Actions → **New repository sec
 ## Step 8 — Turn it on and verify
 
 1. Repo → **Actions** tab → enable workflows if prompted.
-2. Test each manually before trusting the cron: open `sync` / `digest` / `keepalive` / `schedule` / `backup` →
+2. Test each manually before trusting the cron: open `sync` / `digest` / `keepalive` / `schedule` / `weekly` →
    **Run workflow**. A real Telegram digest should arrive within ~a minute.
 3. Schedules then take over (times in IST):
    - `sync` — **daily 19:00** (13:30 UTC) — after NSE publishes the whole-market file (~18:00 IST)
    - `digest` — **after a successful sync** (`workflow_run` in `digest.yml`, no fixed cron)
    - `keepalive` — **Sundays 09:30** (04:00 UTC), belt-and-braces Supabase ping
    - `schedule` — **daily 10:00** (04:30 UTC) — expire orders, resurface deferred, T+2/T+7 reminders
-   - `backup` — **Sundays 11:00** (05:30 UTC) — encrypted pg_dump to private GitHub repo
    - Phase 2.5 steps ride on those jobs rather than having their own:
      - `sync` fetches material BSE filings for held and watched companies (`pnpm news --days=N`
        to backfill), then has the model read new ones.
@@ -184,6 +180,4 @@ Telegram delivers reports to your phone, Vercel serves the web app.
 | Sync falls back to the file snapshot | `TOKEN_ENCRYPTION_KEY` missing/wrong in CI (sync.yml logs loudly on stderr when this happens), or the OAuth login was never run against Supabase. |
 | Everything looks ₹0 after a run | `DATABASE_URL` pointed somewhere unexpected — check it is the Supabase service-role pooler string, port 6543. |
 | `schedule` workflow fails | `expireOrders` / `resurfaceDeferredOrder` require `order_intents` table — ensure migrations ran (0016_approval_orders.sql). |
-| `backup` workflow fails | Check `BACKUP_REPO`, `GH_TOKEN`, `BACKUP_BRANCH` secrets are set. `TOKEN_ENCRYPTION_KEY` must be 32 bytes base64. |
-| `backup:restore` fails | Ensure the backup file exists in `backups/` and the same `TOKEN_ENCRYPTION_KEY` is used. Target DB must be empty/isolated. |
 | Web app shows 404 on pages | Verify `web/` deployed to Vercel with Root Directory = `web`. Check build logs for type errors. |
