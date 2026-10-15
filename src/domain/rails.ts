@@ -5,18 +5,10 @@ import { blockedInstruments, assessStaleness } from '../sources/staleness.js';
 import { formatInr, paise } from '../money/paise.js';
 import type { Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
+import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
+import { loadFreeEnvelope } from './sips.js';
 
-/** Default owner rails seeded by `seed.ts`. Idempotent — existing values are preserved. */
-export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
-  cash_ceiling_pct: 10,
-  tactical_monthly_paise: 50_00_000,
-  max_order_paise: 100_00_000,
-  single_stock_cap_pct: 10,
-  employer_cap_pct: 25,
-  mf_scheme_cap_pct: 10,
-  sector_cap_pct: 20,
-  issuer_cap_pct: 15,
-};
+export { DEFAULT_OWNER_RAILS, railPaise };
 
 export type RailViolation =
   | { code: 'MAX_ORDER_EXCEEDED'; detail: string }
@@ -54,6 +46,8 @@ export async function checkRails(
     isRevision?: boolean;
     /** The recommendation this call is gating, so FR-12 does not treat it as its own prior. */
     forRecommendationId?: number | undefined;
+    /** Re-gating this existing order (modify, resurface): its own amount is not prior spend. */
+    excludeOrderIntentId?: string | undefined;
   } = {}
 ): Promise<{ code: string; detail: string }[]> {
   const violations: { code: string; detail: string }[] = [];
@@ -94,18 +88,27 @@ export async function checkRails(
 
   // FR-12 caps DEPLOYMENT, so only a buy is measured against it. A SELL or REDEEM
   // returns money; counting it would make selling into a breach impossible in exactly
-  // the month the portfolio needs it. The month is the server's, matching the `as_of`
-  // the order row is stamped with — `recommendation.createdOn` can be an older date and
-  // would then be compared against a different month's spend.
-  const tacticalCap = await railPaise(db, 'tactical_monthly_paise');
-  const deploying = recommendation.primary.action === 'BUY' ? amountPaise : 0n;
-  const tacticalUsed = await getTacticalUsedThisMonth(db, new Date().toISOString());
-  if (tacticalUsed + deploying > tacticalCap) {
-    violations.push({
-      code: 'TACTICAL_BUDGET_EXCEEDED',
-      detail: `Tactical deployment would exceed ${formatInr(paise(tacticalCap))}/month `
-        + `(used: ${formatInr(paise(tacticalUsed))})`,
-    });
+  // the month the portfolio needs it. The month is the server's IST month, matching the
+  // `as_of` the order row is stamped with — `recommendation.createdOn` can be an older date
+  // and would then be compared against a different month's spend.
+  // The cap is the free envelope (budget − live SIPs, inside the tactical rail) less this
+  // month's spend (Sentinel BUY orders + purchases the owner logged outside Sentinel). An
+  // unknown SIP commitment refuses every BUY: guessing zero SIPs would let the owner deploy
+  // the whole budget on top of them.
+  if (recommendation.primary.action === 'BUY') {
+    const env = await loadFreeEnvelope(db, new Date().toISOString(), opts.excludeOrderIntentId);
+    if (env.envelopePaise === null) {
+      violations.push({ code: 'TACTICAL_BUDGET_EXCEEDED', detail: env.reason ?? 'SIP commitment unknown' });
+    } else if (env.spentPaise + amountPaise > env.envelopePaise) {
+      violations.push({
+        code: 'TACTICAL_BUDGET_EXCEEDED',
+        detail: `This order of ${formatInr(paise(amountPaise))} would exceed this month's ${formatInr(paise(env.envelopePaise))} envelope `
+          + `(budget ${formatInr(paise(env.budgetPaise))} − SIPs ${formatInr(paise(env.sipTotalPaise ?? 0n))}, `
+          + `tactical rail ${formatInr(paise(env.tacticalPaise))}; spent ${formatInr(paise(env.spentPaise))}, `
+          + `remaining ${formatInr(paise(env.remainingPaise ?? 0n))})`
+          + (env.reason ? `: ${env.reason}` : ''),
+      });
+    }
   }
 
   if (recommendation.primary.action === 'BUY' && primaryInst) {
@@ -158,23 +161,6 @@ export async function checkRails(
   if (drawdownJustification) violations.push(drawdownJustification);
 
   return violations;
-}
-
-/**
- * A rail the owner can change lives in `settings_rails` (PRD 11), with
- * DEFAULT_OWNER_RAILS as the fallback when the row is absent. `checkRails` used to
- * compare against `100_00_000n` and `50_00_000n` written into the function, so editing
- * either rail in `settings_rails` changed nothing — the same split `checkCashCeiling`
- * already avoids.
- */
-export async function railPaise(db: Db, key: string): Promise<bigint> {
-  const [row] = await db.query<{ value: number | string }>(
-    `select value from settings_rails where key = $1`,
-    [key],
-  );
-  const raw = Number(row ? row.value : DEFAULT_OWNER_RAILS[key]);
-  if (!Number.isFinite(raw)) throw new Error(`rail ${key} is not a number`);
-  return BigInt(Math.trunc(raw));
 }
 
 /** `Single-stock cap: NSE:X at 12.0% (cap 10.0%)` -> `NSE:X`. The separator is a colon
@@ -260,48 +246,6 @@ async function syntheticPosition(db: Db, id: string, amountPaise: bigint): Promi
     asOf: new Date().toISOString(),
     source: 'rails-projection',
   };
-}
-
-/**
- * Orders that no longer represent deployed or committed money. Everything else — a
- * draft, a pending approval, a filled order — has the budget spoken for.
- */
-const RELEASED_STATUSES = ['REJECTED', 'EXPIRED', 'CANCELLED', 'BROKER_REJECTED', 'ABANDONED'];
-
-/**
- * FR-12's ₹50k monthly tactical deployment, spent so far this month.
- *
- * This was `return 0n` with a note that `order_intents` lacks an amount column. It has
- * one: `createOrder` writes `primary.amountPaise` into `quantity`. So the rail was only
- * ever comparing a single order against the cap, and four ₹40,000 buys in one month all
- * passed — which is the whole point of a MONTHLY budget.
- *
- * Only BUY-shaped intents count: FR-12 caps *deployment*, and a SELL or REDEEM returns
- * money rather than spending it. SIPs are excluded because they are not orders here at
- * all — they never pass through `createOrder`.
- *
- * NOT implemented: FR-12's "confirmed-vest-month redeployment allowance", which raises
- * the cap in a month when an RSU vest is confirmed. The PRD states the allowance exists
- * but not its size, and inventing one would silently widen a rail. Under-counting the
- * allowance makes the gate stricter than the PRD, which is the safe direction to be
- * wrong in; it is on the owner true-up list.
- */
-async function getTacticalUsedThisMonth(db: Db, asOfIso: string): Promise<bigint> {
-  const month = asOfIso.slice(0, 7);
-  const rows = await db.query<{ total: string | number | null }>(
-    `select coalesce(sum(o.quantity::numeric), 0)::text as total
-       from order_intents o
-      where o.intent in ('BUY')
-        and to_char(o.as_of, 'YYYY-MM') = $1
-        and coalesce((
-              select t.to_status from order_transitions t
-               where t.order_intent_id = o.id order by t.at desc limit 1
-            ), 'DRAFT') <> all($2::text[])`,
-    [month, RELEASED_STATUSES],
-  );
-  const total = rows[0]?.total ?? '0';
-  // `sum` of a numeric column comes back as a decimal string; money is paise and whole.
-  return BigInt(String(total).split('.')[0] || '0');
 }
 
 function monthsBetween(fromIso: string, toIso: string): number {
@@ -423,16 +367,19 @@ export async function checkPortfolioRails(
     }
   }
 
-  // Tactical monthly budget check (aggregate, not per order)
-  const tacticalUsed = await getTacticalUsedThisMonth(db, new Date().toISOString());
-  let totalTactical: import('../money/paise.js').Paise = paise(0n);
-  for (const p of positions) {
-    if (['EQUITY', 'ETF', 'MF'].includes(p.kind)) {
-      totalTactical = paise(totalTactical + p.valuePaise);
-    }
-  }
-  if (tacticalUsed + totalTactical > 50_00_000n) {
-    violations.push({ code: 'TACTICAL_BUDGET_EXCEEDED', detail: `Tactical deployment would exceed ₹50k/month (used: ${formatInr(paise(tacticalUsed))})` });
+  // Tactical: this month's spend (Sentinel BUYs + owner-logged purchases) against the free
+  // envelope. The previous version added the value of every equity/MF holding to the spend
+  // and compared it with a hard-coded ₹50k, so any real portfolio read as a permanent breach
+  // (found 2026-10-14). An unknown envelope is not reported here; the SIP staleness surfaces
+  // it and the order gate refuses.
+  const env = await loadFreeEnvelope(db, new Date().toISOString());
+  if (env.envelopePaise !== null && env.spentPaise > env.envelopePaise) {
+    violations.push({
+      code: 'TACTICAL_BUDGET_EXCEEDED',
+      detail: `This month's deployment: spent ${formatInr(paise(env.spentPaise))} exceeds the `
+        + `${formatInr(paise(env.envelopePaise))} envelope (budget ${formatInr(paise(env.budgetPaise))} `
+        + `− SIPs ${formatInr(paise(env.sipTotalPaise ?? 0n))}, tactical rail ${formatInr(paise(env.tacticalPaise))})`,
+    });
   }
 
   // Cash ceiling (PRD 3.3)

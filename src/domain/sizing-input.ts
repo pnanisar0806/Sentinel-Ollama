@@ -1,6 +1,7 @@
 import type { Db } from '../db/client.js';
 import { loadPositions } from './networth.js';
 import { railPaise } from './rails.js';
+import { loadFreeEnvelope } from './sips.js';
 import { BANDS } from './engine.js';
 import type { SizingInput } from './sizing.js';
 
@@ -56,9 +57,14 @@ export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput
     [asOf.slice(0, 7)],
   );
 
+  // SIP staleness is about the wall clock now, not the report's asOf. What remains this
+  // month (envelope less BUY orders and owner-logged purchases), never the whole envelope.
+  const envelope = await loadFreeEnvelope(db, new Date().toISOString());
+
   return {
     asOf,
-    tacticalBudgetPaise: await railPaise(db, 'tactical_monthly_paise'),
+    tacticalBudgetPaise: envelope.remainingPaise ?? 0n,
+    envelopeReason: envelope.reason,
     maxOrderPaise: await railPaise(db, 'max_order_paise'),
     cashAvailablePaise: cash,
     reservedPaise: BigInt(reserved?.n ?? '0'),

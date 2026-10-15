@@ -4,8 +4,8 @@ import { createHash } from 'node:crypto';
  * Deterministic sizing of actionable candidates (Phase 2.5 Task 4).
  *
  * The LLM advisor may choose among these, and choose HOLD/WAIT; it can never change a size.
- * Every amount comes from money and rails — the monthly tactical budget (owner, 2026-09-27:
- * one tranche = min(tactical, max order)), cash that is not the emergency fund, open
+ * Every amount comes from money and rails — the free envelope: budget − live SIPs, capped by
+ * the tactical rail (owner, 2026-09-27: one tranche = min(envelope, max order)), cash that is not the emergency fund, open
  * requests already reserved, the single-stock cap, and units actually owned — never from a
  * score. Pure: the loader that reads the database lives in sizing-input.ts.
  */
@@ -20,6 +20,8 @@ const EXCHANGE_TRADED = new Set(['EQUITY', 'ETF', 'GOLD']);
 export interface SizingInput {
   asOf: string;
   tacticalBudgetPaise: bigint;
+  /** Why the monthly budget is 0/unknown (live SIPs). Withheld BUYs quote it verbatim. */
+  envelopeReason: string | null;
   maxOrderPaise: bigint;
   /** Bank cash minus the emergency fund. NULL when it cannot be established. */
   cashAvailablePaise: bigint | null;
@@ -77,6 +79,7 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
     const base = { action: 'BUY' as const, instrumentId: b.instrumentId, name: b.name, amountPaise: null, units: null, pricePaise: null, quoteAsOf: null, constraints: [] as string[] };
     const withhold = (reason: string, basis = '') => out.push(withId({ ...base, status: 'WITHHELD', withheldReason: reason, basis }, input.asOf));
     if (cashLeft === null) { withhold('cash available cannot be established'); continue; }
+    if (input.envelopeReason !== null && budget <= 0n) { withhold(input.envelopeReason); continue; }
     if (budget <= 0n) { withhold('this month\'s tactical budget is already used by a higher-ranked candidate'); continue; }
     const held = holding.get(b.instrumentId)?.valuePaise ?? 0n;
     const headroom = cap - held;

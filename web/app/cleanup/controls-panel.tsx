@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
  * server-side in the domain, so this form cannot be talked past.
  */
 const RAIL_KEYS = [
-  'max_order_paise', 'tactical_monthly_paise', 'cash_ceiling_pct', 'single_stock_cap_pct',
+  'monthly_budget_paise', 'max_order_paise', 'tactical_monthly_paise', 'cash_ceiling_pct', 'single_stock_cap_pct',
   'employer_cap_pct', 'mf_scheme_cap_pct', 'sector_cap_pct', 'issuer_cap_pct',
 ];
 
@@ -81,7 +81,7 @@ export default function ControlsPanel(
         <select style={field} value={railKey} onChange={(e) => setRailKey(e.target.value)}>
           {RAIL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
         </select>
-        <input style={field} value={railValue} inputMode="numeric" placeholder="new value"
+        <input style={field} value={railValue} inputMode="numeric" placeholder={railKey.endsWith('_paise') ? 'in paise (₹50,000 = 5000000)' : 'new value'}
           onChange={(e) => setRailValue(e.target.value)} />
         <button className="btn" style={{ marginTop: 6 }} disabled={busy || railValue === ''}
           onClick={() => send({ action: 'propose_rail', key: railKey, value: Number(railValue) })}>

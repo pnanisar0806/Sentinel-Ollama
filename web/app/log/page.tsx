@@ -7,24 +7,24 @@ import LogForm from './log-form';
 export const dynamic = 'force-dynamic';
 
 const KIND_TONE: Record<string, Tone> = {
-  Goal: 'green', Bond: 'amber', Milestone: 'indigo', Note: 'gray', RSU: 'indigo',
+  Goal: 'green', Purchase: 'indigo', Bond: 'amber', Milestone: 'indigo', Note: 'gray', RSU: 'indigo',
 };
 
 export default async function LogPage() {
-  const { timeline, buckets, openMilestones, bonds } = await getLog();
+  const { timeline, buckets, openMilestones, bonds, holdings } = await getLog();
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
 
   return (
     <>
       <PageHead
         title="Log what I did"
-        sub="Tell Sentinel what you did outside it — money moved into a goal, a bond that paid out, a milestone reached. Each entry is permanent and feeds the rest of the app."
+        sub="Tell Sentinel what you did outside it — money moved into a goal, a purchase, a bond that paid out, a milestone reached. Each entry is permanent and feeds the rest of the app."
       />
 
       <div className="bento">
         <div className="span-7">
           <Card title="Record something">
-            <LogForm buckets={buckets} bonds={bonds} milestones={openMilestones} today={today} />
+            <LogForm buckets={buckets} bonds={bonds} holdings={holdings} milestones={openMilestones} today={today} />
           </Card>
         </div>
 
@@ -34,7 +34,8 @@ export default async function LogPage() {
               <li>An order Sentinel proposed and you executed: mark it on <Link href="/approvals">Approvals</Link>.</li>
               <li>A new statement or cost basis: <Link href="/import">Import statements</Link>.</li>
               <li>An RSU vest: confirm it with the Telegram bot for now.</li>
-              <li>A trade or fund switch you made yourself: log it under <em>Anything else</em>; your holdings update from the daily sync.</li>
+              <li>A buy you made yourself: log it under <em>Purchase outside Sentinel</em> so it counts against the month; your holdings update from the daily sync.</li>
+              <li>A sale or fund switch you made yourself: log it under <em>Anything else</em>.</li>
             </ul>
           </Card>
         </div>

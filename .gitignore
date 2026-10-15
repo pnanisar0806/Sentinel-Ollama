@@ -35,3 +35,6 @@ web/tsconfig.tsbuildinfo
 .next-dev-out.log
 .next-dev-err.log
 .pglite-test-orders/
+
+# Visual-companion mockups from brainstorming; local only.
+.superpowers/brainstorm/

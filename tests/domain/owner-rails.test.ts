@@ -6,6 +6,8 @@ import { IPS_BANDS, allocationDrift } from '../../src/domain/allocation.js';
 import { checkPortfolioRails, DEFAULT_OWNER_RAILS, getFreezeState, setFreeze, getBreakerState, recordFalsification, resetBreaker, checkFreeze } from '../../src/domain/rails.js';
 import { loadPositions, netWorth, type Position } from '../../src/domain/networth.js';
 import { rupees, type Paise } from '../../src/money/paise.js';
+import { persistSipSnapshot } from '../../src/domain/sips.js';
+import { buildRecommendation, persistRecommendation } from '../../src/domain/recommendations.js';
 
 let db: Db;
 beforeEach(async () => {
@@ -207,5 +209,50 @@ describe('breaker state management', () => {
     expect(state.active).toBe(false);
     expect(state.consecutiveFalsifications).toBe(0);
     expect(state.postMortemNote).toBe('post-mortem note');
+  });
+});
+/**
+ * The portfolio-level tactical check is this month's BUY spend against the free envelope.
+ * It used to add the value of every EQUITY/ETF/MF holding to the spend and compare that
+ * with a hard-coded ₹50k, so every real book read as a standing breach.
+ */
+describe('checkPortfolioRails measures spend, not holdings, against the envelope', () => {
+  const tactical = async () => {
+    const positions = await loadPositions(db);
+    const nw = netWorth(positions, 0n as Paise);
+    return (await checkPortfolioRails(db, positions, nw.assetsPaise)).filter((v) => v.code === 'TACTICAL_BUDGET_EXCEEDED');
+  };
+
+  it('a large equity book is not a tactical breach', async () => {
+    const positions = await loadPositions(db);
+    const equity = positions.filter((p) => ['EQUITY', 'ETF', 'MF'].includes(p.kind)).reduce((s, p) => s + p.valuePaise, 0n);
+    expect(equity > 50_00_000n).toBe(true); // the premise: the seeded book is far over ₹50k
+    await persistSipSnapshot(db, [], new Date().toISOString());
+    expect(await tactical()).toHaveLength(0);
+  });
+
+  it("flags this month's BUY spend over the envelope", async () => {
+    await persistSipSnapshot(db, [], new Date().toISOString());
+    const r = buildRecommendation({
+      kind: 'satellite', createdOn: '2026-09-20',
+      primary: {
+        intent: 'add', instrumentId: 'NSE:GOLDBEES', action: 'BUY', amountPaise: '6000000',
+        thesis: 'a thesis of adequate length for the validator', ipsClauseRefs: ['3.3'], falsification: null,
+      },
+      sameIntentAlternates: [], engineEvidence: {}, paperMode: true,
+    });
+    const persisted = await persistRecommendation(db, r);
+    // ₹60,000 deployed this month against a ₹50,000 envelope (zero SIPs).
+    await db.query(
+      `insert into order_intents
+         (recommendation_id, intent, instrument_id, quantity, order_type, payload_snapshot,
+          expires_at, advisory_path, as_of, source, created_by, status, current_revision)
+       values ($1, 'BUY', 'NSE:GOLDBEES', 6000000, 'MARKET', '{}'::jsonb,
+               now() + interval '7 days', true, now(), 'advisor', 'advisor', 'DRAFT', 1)`,
+      [persisted.id],
+    );
+    const v = await tactical();
+    expect(v).toHaveLength(1);
+    expect(v[0]!.detail).toMatch(/₹60,000.*₹50,000/);
   });
 });

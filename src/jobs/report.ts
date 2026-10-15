@@ -1,4 +1,4 @@
-import { runAdvisor } from '../advisor/recommend.js';
+import { runAdvisor, type AdvisorBudget } from '../advisor/recommend.js';
 import { writeCommentary, type Fact } from '../advisor/commentary.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
@@ -15,6 +15,8 @@ import { announceMaturity, type Recommendation } from '../domain/recommendations
 import { Telegram } from '../notify/telegram.js';
 import { isMainModule } from '../util/main-module.js';
 import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
+import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
+import { formatInr, type Paise } from '../money/paise.js';
 
 /**
  * FR-51 weekly deep report — `pnpm report [--as-of YYYY-MM-DD]`.
@@ -47,6 +49,67 @@ export function parseGsecYield(raw: string | undefined): number | undefined {
   if (raw === undefined || raw.trim() === '') return undefined;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+/**
+ * The month's budget as the advisor sees it (SIP tracking Task 8): formatted rupee strings,
+ * null when unknown. SIPs are classed by `sipAssetClass`, as the rebalance classes them, and
+ * — as there — a stale snapshot's rows are not current, so none are listed.
+ */
+export async function advisorBudget(db: Db, nowIso: string): Promise<AdvisorBudget> {
+  const env = await loadFreeEnvelope(db, nowIso);
+  const c = await loadSipCommitment(db, nowIso);
+  const inr = (p: bigint | null) => (p === null ? null : formatInr(p as Paise));
+  return {
+    monthlyBudget: formatInr(env.budgetPaise as Paise),
+    sipTotal: inr(env.sipTotalPaise),
+    sipAsOf: env.sipAsOf?.slice(0, 10) ?? null,
+    freeEnvelope: inr(env.envelopePaise),
+    spentThisMonth: formatInr(env.spentPaise as Paise),
+    remaining: inr(env.remainingPaise),
+    // Departed SIPs are inside sipTotal (debited this month), so they are listed too, tagged.
+    sips: c.totalPaise === null ? [] : [
+      ...c.sips.map((s) => ({ fund: s.fundName, amount: formatInr(s.amountPaise as Paise), assetClass: sipAssetClass(s) })),
+      ...c.departedThisMonth.map((s) => ({ fund: s.fundName, amount: formatInr(s.amountPaise as Paise),
+        assetClass: sipAssetClass(s), status: 'stopped — counted this month' })),
+    ],
+  };
+}
+
+/**
+ * Phase 2.5: the advisor decides once a month, in the same first successful weekly run
+ * as the other proposals. It sizes candidates deterministically, reads their news, and
+ * stores advice for the owner to sign on /advisor. Nothing here creates an order.
+ * Returns the line appended to the report ('' when the month is already done or the advisor failed).
+ */
+export async function monthlyAdvice(
+  db: Db, asOf: string, generatedAt: string,
+  opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
+): Promise<string> {
+  const month = asOf.slice(0, 7);
+  if (await monthlyReviewDone(db, 'advice', month)) return '';
+  try {
+    // Unknown SIPs ⇒ unknown envelope: held exactly as the rebalance is held (same signal,
+    // same clock), and the month stays open for the next weekly run (owner, 2026-10-15).
+    // A known ₹0 envelope is an answer and the advisor runs.
+    const envelope = await loadFreeEnvelope(db, generatedAt);
+    if (envelope.envelopePaise === null) {
+      return `
+
+Advisor (${month}): held — ${envelope.reason ?? 'SIP data unknown'}. It runs at the next weekly report with fresh SIP data.`;
+    }
+    const candidates = sizeCandidates(await loadSizingInput(db, asOf));
+    // The report's own clock: the advisor sees the same envelope the rebalance sized against.
+    const budget = await advisorBudget(db, generatedAt);
+    const advice = await runAdvisor(db, { asOf, candidates, ...opts, budget });
+    await recordMonthlyReview(db, 'advice', month, { asOf, proposed: advice.decision === 'BUY' || advice.decision === 'SELL' ? 1 : 0 });
+    return `
+
+Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advisor page.`;
+  } catch (error) {
+    console.error(`advisor failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
 }
 
 /**
@@ -89,23 +152,8 @@ if (isMainModule(import.meta.url)) {
     maturityRecommendations,
     narration: { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL },
   });
-  // Phase 2.5: the advisor decides once a month, in the same first successful weekly run
-  // as the other proposals. It sizes candidates deterministically, reads their news, and
-  // stores advice for the owner to sign on /advisor. Nothing here creates an order.
-  let adviceLine = '';
-  const month = asOf.slice(0, 7);
-  if (!(await monthlyReviewDone(db, 'advice', month))) {
-    try {
-      const candidates = sizeCandidates(await loadSizingInput(db, asOf));
-      const advice = await runAdvisor(db, { asOf, candidates, apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
-      await recordMonthlyReview(db, 'advice', month, { asOf, proposed: advice.decision === 'BUY' || advice.decision === 'SELL' ? 1 : 0 });
-      adviceLine = `
-
-Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advisor page.`;
-    } catch (error) {
-      console.error(`advisor failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
+  const adviceLine = await monthlyAdvice(db, asOf, input.generatedAt,
+    { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
   const text = composeReport(input) + adviceLine;
 
   const digest = await buildDigestInput(db, input.generatedAt);

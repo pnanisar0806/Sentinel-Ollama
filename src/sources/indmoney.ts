@@ -212,8 +212,29 @@ export class RemoteIndmoneySource implements Source {
        * into the rate limiter; tests pass 0.
        */
       spacingMs?: number;
+      /** Injectable for tests; defaults to a real timer. */
+      sleep?: (ms: number) => Promise<void>;
     },
   ) {}
+
+  /**
+   * Deferred minor #9, fixed on touch 2026-10-15: a throttled reply carrying a numeric
+   * `retry_after_seconds` (capped at 120) is waited out (plus 1 s) and retried ONCE. A second
+   * consecutive throttle is returned as-is, so the caller's parser stays fatal on it.
+   */
+  private async callWithRetry(tool: string, args: Record<string, unknown>): Promise<{ result?: string }> {
+    const envelope = await this.opts.client.callTool<{ result?: string }>(tool, args);
+    let retryAfter: unknown;
+    try {
+      const body = JSON.parse(envelope?.result ?? 'null') as { error?: unknown; retry_after_seconds?: unknown } | null;
+      if (body?.error === 'rate_limit_exceeded') retryAfter = body.retry_after_seconds;
+    } catch { /* not JSON: the caller's parser reports it */ }
+    if (typeof retryAfter !== 'number' || !Number.isFinite(retryAfter) || retryAfter < 0) return envelope;
+    const sleep = this.opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    // Capped: a huge retry_after would stall the sync silently; still one retry after the cap.
+    await sleep((Math.min(retryAfter, 120) + 1) * 1000);
+    return this.opts.client.callTool<{ result?: string }>(tool, args);
+  }
 
   async fetch(): Promise<{ rows: SourceRow[]; asOf: string }> {
     const types = this.opts.assetTypes ?? ASSET_TYPES;
@@ -228,10 +249,13 @@ export class RemoteIndmoneySource implements Source {
     return { rows: aggregate(holdings), asOf: new Date().toISOString() };
   }
 
+  async fetchSips(): Promise<{ rows: SipRow[]; asOf: string }> {
+    const envelope = await this.callWithRetry('mf_sips', {});
+    return { rows: parseMfSips(envelope), asOf: new Date().toISOString() };
+  }
+
   private async fetchOne(assetType: string): Promise<RemoteHolding[]> {
-    const envelope = await this.opts.client.callTool<{ result?: string }>(
-      'networth_holdings', { asset_type: assetType },
-    );
+    const envelope = await this.callWithRetry('networth_holdings', { asset_type: assetType });
 
     // callTool hands back the tool's own envelope: one `result` key holding a JSON string.
     if (typeof envelope?.result !== 'string') {
@@ -331,6 +355,68 @@ function aggregate(holdings: RemoteHolding[]): SourceRow[] {
   }
 
   return [...byKey.values()];
+}
+
+export interface SipRow {
+  sipId: string; instrumentId: string; isin: string | null; fundName: string;
+  fundType: string | null; category: string | null; frequency: string;
+  amountPaise: bigint; stepUpRaw: number | null; stepUpFreq: string | null;
+  /** YYYY-MM-DD. INDmoney sends DD-MM-YYYY. */
+  startDate: string;
+}
+
+/**
+ * The owner's ACTIVE mutual fund SIPs (spec 2026-10-14 §1.2). Stopped and paused SIPs
+ * are absent by design. An error body or a missing list throws: reading either as "no
+ * SIPs" would hand the sizer the whole budget. `mf_sips: []` is a real answer.
+ */
+export function parseMfSips(envelope: unknown): SipRow[] {
+  const raw = (envelope as { result?: unknown } | null)?.result;
+  const contractChanged = 'could not parse INDmoney mf_sips payload — the tool contract changed; recapture the fixture before trusting this sync';
+  if (typeof raw !== 'string') throw new Error(contractChanged);
+  let payload: { mf_sips?: unknown; error?: string; message?: string; holding_error?: boolean } | null;
+  try { payload = JSON.parse(raw) as typeof payload; } catch { throw new Error(contractChanged); }
+  if (payload === null || typeof payload !== 'object') throw new Error(contractChanged);
+  if (payload.error) throw new Error(`INDmoney refused mf_sips: ${payload.error} — ${payload.message ?? '(no message)'}`);
+  // As with holdings: a partial answer read as "no SIPs" would free the whole budget.
+  if (payload.holding_error) throw new Error('INDmoney reported holding_error for mf_sips; the SIP list may be partial — refusing to sync it');
+  if (!Array.isArray(payload.mf_sips)) throw new Error('INDmoney mf_sips payload has no mf_sips list — the tool contract changed');
+
+  const str = (v: unknown) => (v === null || v === undefined || v === '' ? null : String(v));
+  const rows: SipRow[] = [];
+  for (const fund of payload.mf_sips as Record<string, unknown>[]) {
+    // A fund entry without the list would otherwise read as "this fund has no SIPs".
+    if (!Array.isArray(fund['active_sips'])) throw new Error(`mf_sips: fund ${String(fund['name'])} has no active_sips list`);
+    for (const s of fund['active_sips'] as Record<string, unknown>[]) {
+      const id = String(s['sip_id']);
+      // Identity and frequency are required, never defaulted: a guessed fund or cadence
+      // would silently misstate the monthly commitment.
+      for (const key of ['sip_id', 'fund_id', 'sip_frequency'] as const) {
+        if (str(s[key]) === null) throw new Error(`mf_sips: SIP ${id} has no ${key}`);
+      }
+      const amount = s['amount'];
+      if (typeof amount !== 'number' || !Number.isInteger(amount) || amount <= 0) {
+        throw new Error(`mf_sips: SIP ${id} has amount ${String(amount)}, not a positive whole rupee figure`);
+      }
+      const date = /^(\d{2})-(\d{2})-(\d{4})$/.exec(String(s['sip_start_date'] ?? ''));
+      if (!date) throw new Error(`mf_sips: SIP ${id} has start date ${String(s['sip_start_date'])}, not DD-MM-YYYY`);
+      const stepUp = s['is_step_up_sip'] === true;
+      rows.push({
+        sipId: id,
+        instrumentId: `IND:${String(s['fund_id'])}`,
+        isin: str(fund['isin']),
+        fundName: String(fund['name']),
+        fundType: str(fund['fundType']),
+        category: str(fund['category']),
+        frequency: String(s['sip_frequency']),
+        amountPaise: rupees(amount),
+        stepUpRaw: stepUp && typeof s['step_up_by'] === 'number' ? s['step_up_by'] : null,
+        stepUpFreq: stepUp ? str(s['step_up_freq']) : null,
+        startDate: `${date[3]}-${date[2]}-${date[1]}`,
+      });
+    }
+  }
+  return rows;
 }
 
 /**

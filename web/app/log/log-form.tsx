@@ -3,10 +3,11 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Tab = 'goal' | 'bond' | 'milestone' | 'note';
+type Tab = 'goal' | 'purchase' | 'bond' | 'milestone' | 'note';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
+  { id: 'purchase', label: 'Purchase outside Sentinel' },
   { id: 'bond', label: 'Bond matured' },
   { id: 'milestone', label: 'Milestone done' },
   { id: 'note', label: 'Anything else' },
@@ -16,8 +17,9 @@ const TABS: { id: Tab; label: string }[] = [
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said.
  */
-export default function LogForm({ buckets, bonds, milestones, today }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today }: {
   buckets: { id: string; name: string }[];
+  holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
   milestones: { id: string; name: string }[];
   today: string;
@@ -94,6 +96,44 @@ export default function LogForm({ buckets, bonds, milestones, today }: {
             <div className="field">
               <label htmlFor="note">Note</label>
               <input id="note" name="note" placeholder="Sammaan 2026 proceeds into IDFC First savings" />
+            </div>
+          </>
+        )}
+
+        {tab === 'purchase' && (
+          <>
+            <p className="dim">
+              A buy you made yourself, outside Sentinel. It counts against that month&apos;s remaining-to-invest.
+              An order Sentinel proposed is marked on Approvals instead — logging it here too would count it twice.
+              SIP instalments are already counted in the SIP commitment: never log them here.
+              Only log buys paid from this month&apos;s budget. A buy funded by a maturity, an RSU vest or a
+              redemption is not logged here.
+            </p>
+            <div className="form-row">
+              <div className="field">
+                <label htmlFor="description">What you bought</label>
+                <input id="description" name="description" maxLength={200} required placeholder="Zerodha Gold ETF" />
+              </div>
+              <div className="field">
+                <label htmlFor="instrumentId">Holding (optional)</label>
+                <select id="instrumentId" name="instrumentId" defaultValue="">
+                  <option value="">— not linked —</option>
+                  {holdings.map((h) => <option key={h.id} value={h.id}>{h.name}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="rupees">Amount paid (₹)</label>
+                <input id="rupees" name="rupees" inputMode="decimal" required />
+              </div>
+              <div className="field">
+                <label htmlFor="units">Units (optional)</label>
+                <input id="units" name="units" inputMode="decimal" />
+              </div>
+              {date}
+            </div>
+            <div className="field">
+              <label htmlFor="note">Note</label>
+              <input id="note" name="note" />
             </div>
           </>
         )}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
+import { persistSipSnapshot } from '../../src/domain/sips.js';
 import {
   buildRecommendation, persistRecommendation, type RecLeg,
 } from '../../src/domain/recommendations.js';
@@ -21,6 +22,8 @@ beforeEach(async () => {
   db = await openDb();
   await runMigrations(db);
   await seed(db, { asOf: '2026-08-12' });
+  // Zero SIPs synced, so the order gate's envelope is the ₹50,000 budget these tests assume.
+  await persistSipSnapshot(db, [], new Date().toISOString());
 });
 
 const leg = (over: Partial<RecLeg> = {}): RecLeg => ({

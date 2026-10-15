@@ -1,4 +1,4 @@
-import { addP, formatInr, type Paise } from '../../src/money/paise.js';
+import { addP, formatInr, paise, type Paise } from '../../src/money/paise.js';
 import { redemptionFor } from '../../src/domain/bond-redemptions.js';
 import { openDb, type Db } from '../../src/db/client.js';
 import { buildDigestInput, type DigestInput } from '../../src/notify/digest.js';
@@ -33,6 +33,7 @@ import { humanize, sentence } from './plain';
 import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
+import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -691,6 +692,8 @@ export interface LogData {
   buckets: { id: string; name: string }[];
   openMilestones: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
+  /** Holdings a purchase made outside Sentinel can be linked to (optional on the form). */
+  holdings: { id: string; name: string }[];
 }
 
 /** What /log needs: the owner's own timeline and the choices each form offers. */
@@ -700,12 +703,17 @@ export async function getLog(): Promise<LogData> {
   const positions = await loadPositions(d, input.businessDate);
   const bonds = new Map<string, string>();
   // loadPositions already drops a redeemed bond, so what is left is still outstanding.
-  for (const p of positions) if (p.kind === 'BOND') bonds.set(p.instrumentId, p.name);
+  const holdings = new Map<string, string>();
+  for (const p of positions) {
+    if (p.kind === 'BOND') bonds.set(p.instrumentId, p.name);
+    if (['EQUITY', 'ETF', 'MF', 'GOLD'].includes(p.kind)) holdings.set(p.instrumentId, p.name);
+  }
   return {
     timeline: await loadOwnerTimeline(d),
     buckets: input.buckets.map((b) => ({ id: b.id, name: b.name })),
     openMilestones: input.milestones.filter((m) => m.completedOn === null).map((m) => ({ id: m.id, name: m.name })),
     bonds: [...bonds].map(([id, name]) => ({ id, name })),
+    holdings: [...holdings].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
 
@@ -761,4 +769,53 @@ export async function getAdvisor(): Promise<AdvisorData> {
 export async function getInstrumentKinds(): Promise<Map<string, string>> {
   const rows = await (await db()).query<{ id: string; kind: string }>(`select id, kind from instruments`);
   return new Map(rows.map((r) => [r.id, r.kind]));
+}
+
+export interface SipsData {
+  asOf: string | null; stale: boolean;
+  budgetPaise: bigint; tacticalPaise: bigint; sipTotalPaise: bigint | null; envelopePaise: bigint | null; reason: string | null;
+  /** This IST month's Sentinel BUY orders + owner-logged purchases. Always known. */
+  spentPaise: bigint;
+  /** max(0, envelope − spent). Null iff envelopePaise is null. */
+  remainingPaise: bigint | null;
+  /** Active SIPs, then SIPs stopped this month after their instalment (`departed`, still counted). */
+  rows: { key: string; fund: string; instrumentId: string; assetClass: string; amountPaise: bigint; departed: boolean;
+          stepUp: string | null; stepUpInferred: boolean; nextOn: string | null; nextAmountPaise: bigint | null }[];
+  nextStepUp: { on: string; totalPaise: bigint | null } | null;
+}
+
+/** Live SIPs, the monthly budget and what is free to deploy. Unknown stays null, never 0. */
+export async function getSips(): Promise<SipsData> {
+  const d = await db();
+  const now = new Date().toISOString();
+  const c = await loadSipCommitment(d, now);
+  const e = await loadFreeEnvelope(d, now);
+  const rows = c.sips.map((s) => {
+    const n = nextStepUp(s, now.slice(0, 10));
+    return {
+      key: s.sipId, fund: s.fundName, instrumentId: s.instrumentId, assetClass: sipAssetClass(s),
+      amountPaise: s.amountPaise,
+      // Rupee step-ups to paise exactly, as nextStepUp does; rounding to the rupee would invent paise.
+      stepUp: s.stepUpKind === null ? null : s.stepUpKind === 'percent' ? `${s.stepUpRaw}%`
+        : s.stepUpKind === 'rupees' ? formatInr(paise(Math.round(s.stepUpRaw! * 100))) : 'unknown',
+      stepUpInferred: s.stepUpInferred, nextOn: n.on, nextAmountPaise: n.amountPaise, departed: false,
+    };
+  });
+  const first = rows.map((r) => r.nextOn).filter((x): x is string => x !== null).sort()[0];
+  // The total after the next step-up: every SIP stepping that day moves; the rest stay.
+  // Unknown if any SIP stepping that day has an unknown new amount, or if today's total is
+  // itself unknown (stale snapshot, non-MONTHLY SIP): a precise figure beside "unknown" lies.
+  const nextStepUpTotal = first === undefined ? null : {
+    on: first,
+    totalPaise: c.totalPaise === null || rows.some((r) => r.nextOn === first && r.nextAmountPaise === null) ? null
+      : rows.reduce((s, r) => s + (r.nextOn === first ? r.nextAmountPaise! : r.amountPaise), 0n),
+  };
+  // Departed SIPs step up never again; listed after the step-up maths so they cannot move it.
+  const departed = c.departedThisMonth.map((s) => ({
+    key: s.sipId, fund: s.fundName, instrumentId: s.instrumentId, assetClass: sipAssetClass(s), amountPaise: s.amountPaise,
+    stepUp: null, stepUpInferred: false, nextOn: null, nextAmountPaise: null, departed: true,
+  }));
+  return { asOf: c.asOf, stale: c.stale, budgetPaise: e.budgetPaise, tacticalPaise: e.tacticalPaise, sipTotalPaise: c.totalPaise,
+    envelopePaise: e.envelopePaise, reason: e.reason, spentPaise: e.spentPaise, remainingPaise: e.remainingPaise,
+    rows: [...rows, ...departed], nextStepUp: nextStepUpTotal };
 }

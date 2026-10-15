@@ -6,7 +6,8 @@ import { persistSchedules } from '../domain/loans.js';
 import { installIps } from '../domain/ips.js';
 import { persistVests, projectVests } from '../domain/rsu.js';
 import { FIDELITY_SOURCE } from '../seed/seed-rsu-actual.js';
-import { FileIndmoneySource, RemoteIndmoneySource } from '../sources/indmoney.js';
+import { FileIndmoneySource, RemoteIndmoneySource, type SipRow } from '../sources/indmoney.js';
+import { persistSipSnapshot } from '../domain/sips.js';
 import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
@@ -57,6 +58,7 @@ export async function runSync(
     fetchFx?: FxFetcher;
     fetchPrices?: PriceFetcher;
     fetchNavs?: NavFetcher;
+    fetchSips?: () => Promise<{ rows: SipRow[]; asOf: string }>;
   },
 ): Promise<{ synced: string[]; failed: { source: string; error: string }[] }> {
   const businessDate = opts.now.slice(0, 10);
@@ -95,6 +97,17 @@ export async function runSync(
       const { rows, asOf } = await source.fetch();
       await writeSnapshot(db, source.name, businessDate, rows, asOf);
     });
+  }
+
+  // Live SIPs (spec 2026-10-14 §1.5). After the portfolio, before anything sizes. A failed
+  // fetch writes nothing and goes through step()'s WARN-then-BLOCK incident path.
+  if (opts.fetchSips) {
+    await step('indmoney-sips', async () => {
+      const { rows, asOf } = await opts.fetchSips!();
+      await persistSipSnapshot(db, rows, asOf);
+    });
+  } else {
+    console.error('indmoney-sips skipped: no live INDmoney client (file source has no SIPs)');
   }
 
   // Nothing wrote fx_rates, so `frankfurter` was permanently stale and held an open
@@ -222,9 +235,12 @@ export async function indmoneySource(
       // this client rather than a second OAuth path. Every addition to this list is a
       // deliberate widening of what the process can invoke: read-only tools only, and
       // never anything that could place, modify or cancel an order.
+      //
+      // `mf_sips` (2026-10-14) lists the owner's active MF SIPs. It reads standing
+      // instructions only; it creates, modifies and cancels nothing.
       allowedTools: [
         'networth_holdings', 'networth_snapshot', 'get_mf_funds_details',
-        'get_mf_by_category',
+        'get_mf_by_category', 'mf_sips',
       ],
       getToken: () => ensureAccessToken(db, 'indmoney', {
         md, clientId: registration.client_id, key, allowedScopes: INDMONEY_SCOPES,
@@ -247,6 +263,7 @@ if (isMainModule(import.meta.url)) {
   await installIps(db);
 
   const sources: Source[] = [await indmoneySource(db, env)];
+  const remote = sources.find((s): s is RemoteIndmoneySource => s instanceof RemoteIndmoneySource);
 
   const result = await runSync(db, {
     now: new Date().toISOString(),
@@ -260,6 +277,7 @@ if (isMainModule(import.meta.url)) {
       return { equity, index };
     },
     fetchNavs: () => downloadDailyNav(),
+    ...(remote ? { fetchSips: () => remote.fetchSips() } : {}),
   });
   console.log(`synced: ${result.synced.join(', ') || 'none'}`);
   if (result.failed.length) {

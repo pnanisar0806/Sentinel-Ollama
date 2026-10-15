@@ -29,12 +29,12 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
 - **Every page and route handler carries `export const dynamic = 'force-dynamic'`**, so
   `next build` never opens a DB connection. Verify a web change with `DATABASE_URL= pnpm
   --dir web build` (must pass with the var *empty*) and then `next start` against Supabase.
-- **One owner rail is read from the DB; the other seven are constants.** PRD §11 says
-  “all rails live in `settings_rails`”. As of 2026-09-19 only `cash_ceiling_pct` does —
-  `checkCashCeiling` reads it, falling back to `DEFAULT_OWNER_RAILS`. `checkRails` and the
-  rest of `checkPortfolioRails` still enforce hard-coded `100_00_000n` / `50_00_000n` and
-  `CAPS` from `src/domain/allocation.ts`, and `DEFAULT_OWNER_RAILS` is otherwise imported
-  by `seed.ts` alone. **Four seeded values contradict the PRD** — `employer_cap_pct` 25 vs
+- **Some owner rails are read from the DB; the rest are constants.** PRD §11 says
+  “all rails live in `settings_rails`”. As of 2026-10-14 four do, via `railPaise` /
+  `checkCashCeiling` with `DEFAULT_OWNER_RAILS` (`src/domain/rail-values.ts`) as fallback:
+  `cash_ceiling_pct`, `max_order_paise`, `tactical_monthly_paise`, `monthly_budget_paise`.
+  Still constants: the 12-month hold, drawdown gates, 3-strike breaker and the
+  `CAPS` in `src/domain/allocation.ts`. **Four seeded values contradict the PRD** — `employer_cap_pct` 25 vs
   10, `mf_scheme_cap_pct` 10 vs 35, `sector_cap_pct` 20 vs 25, `issuer_cap_pct` 15 vs 10 —
   so wiring the rest to the table means fixing those first, not copying constants across.
 - **The cash ceiling is 10%, and it is an owner amendment, not a PRD original.** The PRD
@@ -65,9 +65,8 @@ at session start (see `CLAUDE.md`). Update it when a durable fact changes.
   loosening-block are both unreachable. The one live path is `checkPortfolioRails`, which
   feeds the digest breach list and /rails. Verified 2026-09-19 — do not read the Phase 2
   ledger's “rails enforced” as meaning enforced on the order path.
-- **`checkPortfolioRails` raises a permanent false `TACTICAL_BUDGET_EXCEEDED`** (line 281):
-  it sums the whole EQUITY/ETF/MF book's market value against the ₹50k/month flow budget.
-  A stock compared to a flow. `checkRails`'s per-order version is correct. Not yet fixed.
+- ~~`checkPortfolioRails` raises a permanent false `TACTICAL_BUDGET_EXCEEDED`~~ — **fixed in
+  SIP Task 6 (2026-10-14):** it now compares this month's BUY spend to `loadFreeEnvelope`.
 
 ## Fidelity RSU flow — SHIPPED 2026-09-05 (evening)
 
@@ -690,9 +689,39 @@ today; do not re-merge them), RSU refresher $20k/yr over 4 years net 70%, seed U
 seed NOW price $127.54, child arrives 2028 (−₹10k/mo), FI at age 55, owner born 1995,
 FI income floor ₹3L/mo, stretch ₹5L/mo.
 
+### Free envelope — `loadFreeEnvelope(db, nowIso)` in `src/domain/sips.ts` (2026-10-14)
+
+Every sizing / order-gate / portfolio-rail / rebalance / advisor / web path reads
+`loadFreeEnvelope` — **never `tactical_monthly_paise` directly**. Envelope =
+`max(0, min(tactical, budget − live SIPs))`. Unknown (no snapshot, snapshot older than
+`SIP_MAX_AGE_DAYS` = 7, any non-MONTHLY SIP, unparseable clock) ⇒ `envelopePaise: null`
+with a named `reason` ⇒ every BUY withheld. Never the full budget as a fallback.
+
+**SIP gaps (2026-10-15):** `FreeEnvelope` also carries `spentPaise` (always known) and
+`remainingPaise` (null iff envelope null); remaining = `max(0, envelope − spent)`. Spent
+(`loadMonthSpend`) = Sentinel BUY orders (latest revision quantity; the order's own intent
+excluded via `excludeOrderIntentId` when re-gated on modify/resurface) + `owner_purchases`.
+SIP instalments are never in spent. **All month logic is the IST calendar month**
+(`istMonth`/`istDate` in `sips.ts`; order spend moved from UTC). Departed SIPs (seen this
+IST month on/after their instalment day, then gone) still count in the commitment.
+INDmoney keeps `sip_id` across a step-up/start-date edit (live evidence 2026-10-13/14), so
+no double count. Rebalance route capacity stays on the envelope; only the BUY tranche uses
+remaining (spend must not push the engine toward a SALE). At a ₹0 tranche the redirect A1
+names the target fund (FR-11). Owner-log "today" is the IST date.
+
+**Rebalance capacity with SIP drag (Task 7 ruling, replaces the spec's
+`dilution − inflow`):** `capacity = max(0, dilution − inflow·(1−max)/max)`. The spec's form
+called a shrinking overshoot unclosable and proposed a SALE. **Owner note:** the
+pre-existing `flowCloses` compares drift to dilution capacity without the ×max factor, so
+it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not fixed.
+
 ---
 
 ## Gotchas learned the hard way (each cost a fix round)
+
+- **`mf_sips` `step_up_by` carries no unit** (`1000` meant ₹1,000, `10` means 10%).
+  `inferStepUp` reads ≤100 as percent, else rupees, and stores `step_up_inferred`.
+- **`incidents.id` is a uuid** — "latest incident" must order by `opened_at`, never `id`.
 
 - **Scheduled scripts must not require `.env` (2026-09-18).** GitHub runners receive env
   directly and have no gitignored file. `sync`, `digest`, `report`, `screener:remind` use
@@ -850,7 +879,7 @@ passed because they fed that invention back to themselves. The real contract, ca
   the portfolio, so it is fatal. The fixture keeps a captured copy as `_rateLimitedResponse`.
   `RemoteIndmoneySource` spaces calls by `spacingMs` (default 9s; tests pass 0).
 - **`holding_error` / `position_error` / `is_cached_response` flags** ride on the IND_STOCK
-  reply. `holding_error: true` means a partial book — refused, not synced. `is_cached_response`
+  reply. `holding_error: true` means a partial book — refused, not synced. `mf_sips` refuses it too. `is_cached_response`
   is a staleness signal for Task 12.
 - **Unmapped `asset_type` throws.** The old `?? 'EQUITY'` default would silently classify an
   unknown holding as equity and feed a wrong asset class into allocation drift and the IPS
@@ -1312,7 +1341,23 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 | 6 | T5 | `tests/seed/seed-data.test.ts` MF subtotal test *title* says "1.83L", asserts 11.83L — cosmetic, value correct | final fix wave |
 | 7 | T6 | `persistSchedules` does `delete` + N sequential inserts, unwrapped (`src/domain/loans.ts:144–171`) — matches existing `seed.ts` convention, so genuinely cross-cutting | final fix wave |
 | 8 | T11A | `indmoney-login.ts` calls `db.close()` only on the success path, so a failed login never closes PGlite. Survived a real crash intact, so robustness not correctness | Task 15 |
-| 9 | T11B | `RemoteIndmoneySource` paces calls with a fixed 9s `spacingMs` rather than reading `retry_after_seconds` from a throttled reply | Task 15, when sync.ts wires it |
+| ~~9~~ | T11B | ~~`RemoteIndmoneySource` paces calls with a fixed 9s `spacingMs` rather than reading `retry_after_seconds` from a throttled reply~~ | **fixed in SIP Task 2** (fix-on-touch): one retry after `min(retry_after_seconds, 120) + 1` s (cap: SIP final fix wave), second throttle fatal |
+
+**SIP tracking (2026-10-14/15) — still-deferred minors** (ledger workspace is deleted):
+- T1: `trigger-integrity.test.ts` hard-coded list lacks the 4 sip triggers; no CHECK ties `step_up_kind` to `step_up_raw` nullness; no test that `sip_count>=0` / `amount_paise>0` CHECKs reject.
+- T2: SIP start date validated by shape only (31-02 passes); `fundName` not required; second-throttle test lacks a call-count assert, old fatal-throttle test duplicates it.
+- T3: `nextStepUp` trusts kind/raw agreement (hand-built percent+NaN throws); no rows for 7.5%, fractional-rupee step-up, NaN in `inferStepUp`.
+- T5: no PGlite test wiring stale snapshot → sizing-input → BUYs withheld with dated reason.
+- T6: `rails-gate.test.ts` comment appended on a seed line; no `checkRails` test for the envelope=0 reason.
+- T7: `DEBT_CATEGORY` regex `debt` could match a hybrid "Equity & Debt"; a month-long hold escalates only via the `indmoney-sips` STALE_DATA incident, no dedicated notice.
+- T8: `FORBIDDEN_NUMBERS` checks keys only — advisor free text can quote a stale "₹19,746 is free" (sizes unaffected).
+- T9: `getSips` throwing 500s the whole of `/` and `/funds`.
+- Final: `monthly-advice.test.ts` fetch-count 0 is not discriminating; Overview "Monthly" column header mislabels a non-MONTHLY SIP's instalment.
+
+**SIP gaps (2026-10-15) — deferred minors:**
+- T1: a SIP debited and stopped between two snapshots is invisible (bounded by daily sync); February instalment-day clamp untested.
+- T2: IST month-boundary test has a negligible flake window.
+- T3: `/api/log` purchase route assumes string fields from JSON callers; no route-level test (vitest lacks the `@/` alias); "Next step-up" kept as a 5th Overview tile.
 
 ---
 
@@ -1853,24 +1898,12 @@ by `tests/web/recommendations-shape.test.ts`, mutation-checked.
 
 ### Owner deployment budget and the MF SIP true-up (owner input 2026-09-20)
 
-Owner states a **₹50,000/month total deployment budget**, and believed ₹28,000 of it was
-committed to MF SIPs. INDmoney's live active-SIP view says **₹30,254/month** across four
-funds:
+Owner states a **₹50,000/month total deployment budget** (incl. SIPs) — now rail
+`monthly_budget_paise`, editable on /cleanup. The SIP list is **no longer hand-copied**: it
+lives in `sip_snapshots` / `sips` (synced daily), read via `loadSipCommitment` /
+`loadFreeEnvelope` (`src/domain/sips.ts`). The 2026-09-20 hand table is superseded
+(step-ups were since restarted at 10%; HDFC Mid Cap stopped — see 2026-10-13/14 below).
 
-| fund | monthly | step-up | started |
-|---|---|---|---|
-| ICICI Prudential Nifty 50 Index Direct Growth | ₹14,001 | ₹1,000/yr | 12-08-2023 |
-| Parag Parikh Flexi Cap Direct Growth | ₹11,001 | ₹1,000/yr | 12-08-2025 |
-| HDFC Mid Cap Direct Growth | ₹3,001 | none | 12-02-2026 |
-| Bandhan Small Cap Direct Growth | ₹2,251 | ₹250/yr | 12-08-2025 |
-
-**The ₹2,254 gap is exactly one step-up cycle.** Subtract each fund's `step_up_by`
-(1000 + 1000 + 250) and the total is ₹28,004 — the owner's figure is one year stale, not
-wrong. Three of the four step up every August, so the SIP commitment rises ~₹2,250 each
-August and the free budget shrinks by the same amount unless the ₹50,000 moves with it.
-Any sizing policy must read the live SIP total, never a pinned constant.
-
-- Free for non-SIP deployment today: **₹50,000 − ₹30,254 = ₹19,746/month.**
 - No Indian stock SIPs and no US stock SIPs exist (both INDmoney endpoints return empty).
   Owner has stopped all smallcase SIPs. MF SIPs are the only recurring commitment.
 - **Owner true-up still open:** this ₹50,000 is a *deployment* budget, not the modelled
@@ -3095,3 +3128,37 @@ INDEX_CATEGORIES_EXCLUDED), the dotenv dependency, and `export` from 153 symbols
 in their own file. The Vercel app (passkey) is the only dashboard. Kept on purpose:
 loadBalanceDays, interestPaid (tests observe real behaviour through them),
 scanForExecutionPaths, telegram-bot.ts.
+
+## Owner decisions 2026-10-13/14 — SIPs, goals, funds-first
+
+Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` §0.
+
+- **SIPs (live INDmoney, 2026-10-14):** ICICI Nifty 50 Index ₹14,001, Parag Parikh ₹11,001,
+  Bandhan Small Cap ₹2,251, all **10%/yr step-up** (restarted 12-11-2026, so next step-up
+  Nov 2027), plus **Invesco India Midcap ₹3,001** from Nov 2026 (not in the feed until
+  mandated). HDFC Mid Cap SIP stopped after the Oct instalment. ICICI Large Cap and Motilal
+  Midcap SIPs stopped earlier; their units are still held, which is why `/funds` offers a
+  switch for them. **October real:** SIPs ₹30,254 (HDFC ₹3,001 debited 12 Oct) → free
+  ₹19,746; owner bought Zerodha Gold ETF ₹19,722 outside Sentinel → October fully deployed
+  (₹24 left). **November on:** ₹27,253 + Invesco ₹3,001 = ₹30,254 → free ₹19,746. Live sync
+  2026-10-14 (snapshot id 1) holds the three active SIPs; the departed HDFC now counts, so
+  the system reads ₹19,746 free (it read ₹22,747 before the gaps fix).
+- **Envelope gaps — fixed 2026-10-15** (departed SIPs + `owner_purchases`; contract under
+  § Free envelope). Owner must log the ₹19,722 gold ETF (2026-10-14) on /log.
+- **Purchase form scope (owner, 2026-10-15):** /log purchases are buys from *this month's
+  budget only*. Buys funded by maturity/vest/redemption proceeds are NOT logged there; they
+  wait for the "lump sum received" log use (keeps FR-12 redeployment separate).
+- **Meaningful /log, batched (owner, 2026-10-15):** nine new log uses — A (2,5,6,13) → B
+  (3,4,8) → C (9,10); each batch designed for owner approval, then SDD. Next after SIP-gaps
+  push. Numbering/scope in PENDING.md.
+- **Unknown SIPs hold, never consume the month (owner, 2026-10-15):** an unknown envelope
+  holds the whole rebalance and the advisor; retry is the **next weekly report** (weekly.yml,
+  Sundays) — not "next daily run" as first told. Known ₹0 still consumes the month.
+- **Budget:** ₹50,000/month, raised yearly by the owner; aim ₹1L/month by ~2031.
+- **PRD AMENDMENT (decided, NOT yet in code):** the advisor may read goal gaps, but only in a
+  separate goal-plan module; the goal-blind normal plan is always shown beside it, owner
+  picks. The goal plan may raise amount AND risk (above IPS bands), with mandatory per-month
+  risk disclosure. **Until piece 2 ships, the old firewall and CLAUDE.md wording stand** —
+  do not loosen the architecture test ahead of the goal-plan module.
+- **Funds first:** no individual stocks unless exceptional (spec §3).
+- **₹2.5L of the Sammaan ₹3,24,300 is a family trip** (exact after 2026-12-31); not modelled.

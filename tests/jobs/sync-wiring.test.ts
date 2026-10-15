@@ -105,8 +105,11 @@ describe('the OAuth INDmoney path is reachable from the entrypoint', () => {
     // Widened again, deliberately, on 2026-09-21: `get_mf_by_category` lists the peer
     // funds `mf_switch` needs as a candidate universe (owner decision). It reads a
     // published category listing, names no order surface and takes no amount.
+    // Widened again, deliberately, on 2026-10-14: `mf_sips` lists the owner's active MF
+    // SIPs for the monthly commitment. It reads standing instructions only and creates,
+    // modifies and cancels nothing.
     const ALLOWED = [
-      'networth_holdings', 'networth_snapshot', 'get_mf_funds_details', 'get_mf_by_category',
+      'networth_holdings', 'networth_snapshot', 'get_mf_funds_details', 'get_mf_by_category', 'mf_sips',
     ];
 
     const match = source.match(/allowedTools:\s*\[([^\]]*)\]/);

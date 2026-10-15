@@ -17,6 +17,8 @@ const LIMIT_BY_SOURCE: Record<string, number> = {
   amfi: FRESHNESS_HOURS.navs!,
   bhavcopy: FRESHNESS_HOURS.prices!,
   screener: FRESHNESS_HOURS.fundamentals!,
+  // Live SIPs (spec 2026-10-14). Stale SIPs pause sizing, not instruments.
+  'indmoney-sips': 168,
 };
 
 /** Sentinel value for a source that has never produced a row. */
@@ -161,6 +163,13 @@ async function getLatestFundamentalsAsOf(db: Db): Promise<string | undefined> {
   return asOf instanceof Date ? asOf.toISOString() : asOf;
 }
 
+/** Latest SIP snapshot. Its source name is not a position source, so it blocks no holding. */
+async function getLatestSipsAsOf(db: Db): Promise<string | undefined> {
+  const [r] = await db.query<{ as_of: string | Date | null }>(`select max(as_of) as as_of from sip_snapshots`);
+  if (!r || r.as_of === null) return undefined;
+  return r.as_of instanceof Date ? r.as_of.toISOString() : r.as_of;
+}
+
 /**
  * Assesses staleness for all known sources.
  * - Portfolio sources (indmoney, manual-seed) from holdings, on a wall-clock limit
@@ -225,6 +234,8 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
   // screener from fundamentals (Phase 1 Task 6 built the ingestion path, so it is
   // assessed like any other source — `unimplemented` would now hide a real drought)
   results.push(assess('screener', fundamentalsAsOf, FRESHNESS_HOURS.fundamentals!));
+
+  results.push(assess('indmoney-sips', await getLatestSipsAsOf(db), 168));
 
   return results;
 }

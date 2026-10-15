@@ -5,6 +5,50 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [ ] **SIPs → goals → funds-first (owner, 2026-10-13/14).** Spec:
+      `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` — approved.
+  - [x] **Piece 1 (SIP tracking) — SHIPPED 2026-10-15**, branch `feat/sip-tracking`,
+        squashed. Live 2026-10-14: snapshot id 1 = ICICI Nifty 50 ₹14,001, PPFAS Flexi
+        ₹11,001, Bandhan Small Cap ₹2,251 (MONTHLY, step-up 10%, start 2026-11-12).
+        Invesco Midcap ₹3,001 not in the feed yet (mandate pending, starts Nov 2026).
+        **October's real free amount was ₹19,746** (SIPs ₹30,254 incl. HDFC Mid Cap
+        ₹3,001 debited 12 Oct before it stopped); owner bought Zerodha Gold ETF ₹19,722
+        outside Sentinel → October fully deployed (₹24 left). From November: ₹27,253 +
+        Invesco ₹3,001 = ₹30,254 → free ₹19,746. Gaps fixed 2026-10-15: the system now
+        reads ₹19,746 free (departed HDFC counted) and ₹24 remaining once the gold ETF is logged. Proposals run in the WEEKLY report (Sundays); unknown SIPs hold
+        rebalance + advisor without consuming the month, retry next weekly run.
+  - [ ] **Piece 2 (goal plan) next** — needs the PRD amendment; ask the owner the five
+        spec §2.5 inputs at its start.
+- [x] **Envelope gap: a SIP stopped after this month's instalment still cost this month** —
+      FIXED 2026-10-15 (departed SIPs count; plan `2026-10-15-sip-gaps.md`).
+- [x] **Envelope gap: purchases made outside Sentinel are not counted** — FIXED 2026-10-15
+      (`owner_purchases`, migration 0033 applied to prod 2026-10-15; "remaining to invest").
+- [ ] **Owner: log the Zerodha Gold ETF purchase on /log** — ₹19,722, dated 2026-10-14 — so
+      October reads ₹24 remaining instead of ₹19,746.
+- [ ] **PRE-EXISTING DEFECT — deferred orders never resurface.** `resurfaceDeferredOrder`
+      reads `order_intents.defer_until`, which `deferOrder` never writes; the scheduler reads
+      PENDING_APPROVAL only. Its withdrawal path writes DEFERRED→DEFERRED, violating
+      `from_status <> to_status`. `getOrderWithStatus` payload-merge read lacks a tie-break.
+      Not SIP work; needs a scheduler fix.
+- [ ] **NEXT FEATURE (owner-approved 2026-10-15): meaningful /log** — nine new log uses in
+      batches, each designed for owner approval first, then opus SDD:
+      A (2 sale/redemption I made, 5 withdrawal for spending, 6 earmark money, 13 correct a
+      mistaken entry via reversal) → B (3 SIP change, 4 lump sum received, 8 scheduled budget
+      raise) → C (9 decisions about a holding as advisor rules, 10 life events updating
+      assumptions / IPS stop rules).
+- [ ] **Maturity/vest-funded buys are not logged as purchases** (form: this month's budget
+      only) — they wait for "lump sum received" (batch B).
+- [ ] **Owner: free amount is also capped by `tactical_monthly_paise` (₹50k).** Envelope =
+      min(tactical, budget − SIPs). Raising `monthly_budget_paise` alone does nothing past
+      ₹50k — raise both together.
+- [ ] **Two zombie STALE_DATA incidents (`composite`, FX `seed`) can never clear** — no job
+      refreshes those sources (found 2026-10-14). Close or re-source them.
+- [ ] **`indmoney-sips` STALE_DATA stays open while INDmoney falls back to the file
+      source.** Honest, not a bug — clears on the next live sync.
+- [ ] **Stale FR-31 copy on `/freshness`:** "NAV and price ingestion … unimplemented in
+      Phase 0" is false. Rewrite.
+- [ ] **US:NOW blocked by FR-31** — only the 17-Sep manual seed covers Fidelity. Owner:
+      import a fresh Fidelity statement, or choose a longer Fidelity staleness limit.
 - [x] **WEB APP BUILDS AND RENDERS AGAINST THE REAL DB (2026-09-19).** `web/` never
       typechecked before: `web/lib/data.ts` imported `evaluateRails` / `loadOwnerRails` /
       `OwnerRail` from `src/domain/rails.ts`, none of which existed. `getRails` now uses the
@@ -660,8 +704,9 @@ items below either point at them or name a gap that plan does not cover.
       SIPs take **₹30,254** (live INDmoney figure, not the ₹28,000 the owner quoted — the
       gap is exactly one step-up cycle; see MEMORY). Leaves **₹19,746/month** free, and
       that free amount shrinks by ~₹2,250 every August as three of the four SIPs step up.
-      The sizer must read the live SIP total, never pin a constant.
-- [ ] **Still needed: the per-action policy, not just the pot.** ₹19,746/month is a
+      The sizer must read the live SIP total, never pin a constant. *(2026-10-14: it does —
+      `loadFreeEnvelope`. October real free ₹19,746, fully deployed; November ₹19,746.)*
+- [ ] **Still needed: the per-action policy, not just the pot.** The free envelope is a
       monthly flow. Task 4 needs a rule for how much of it any single action may consume —
       one name per month, a cap per action, a minimum ticket. Phase 2.5 is explicit: *"Do
       not invent the satellite allocation budget/rule if no existing IPS/owner input

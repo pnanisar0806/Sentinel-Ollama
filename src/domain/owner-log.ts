@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
 import { formatInr, type Paise } from '../money/paise.js';
+import { istDate } from './sips.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -11,7 +12,9 @@ import { formatInr, type Paise } from '../money/paise.js';
 
 export type GoalMoveKind = 'sip' | 'maturity' | 'vest' | 'withdrawal';
 
-const today = (now: string): string => now.slice(0, 10);
+// The owner's today is the India date: at 01:30 IST the UTC date is still yesterday, and
+// a purchase made that morning is not "in the future".
+const today = (now: string): string => istDate(now);
 
 function assertDate(on: string, now: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw new Error(`not a date: ${on}`);
@@ -44,6 +47,34 @@ export async function logGoalMove(
     );
     await audit(tx, 'bucket_flow', m.bucketId, 'LOGGED', {
       on: m.occurredOn, amountPaise: signed.toString(), kind: m.kind, note: m.note.trim(), bucket: bucket.name,
+    });
+  });
+}
+
+/**
+ * A purchase the owner made outside Sentinel (SIP gaps Task 2). It counts against the IST
+ * month of `boughtOn` in what remains to invest. `units` is kept as exact decimal text.
+ */
+export async function logPurchase(
+  db: Db,
+  p: { boughtOn: string; description: string; amountPaise: bigint; instrumentId?: string | null; units?: string | null; note?: string },
+  now = new Date().toISOString(),
+): Promise<void> {
+  if (p.amountPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(p.boughtOn, now);
+  const description = p.description.trim();
+  if (description === '') throw new Error('a purchase needs a description');
+  if (description.length > 200) throw new Error('a description is limited to 200 characters');
+  const note = (p.note ?? '').trim();
+  await db.withTransaction(async (tx) => {
+    const [row] = await tx.query<{ id: string }>(
+      `insert into owner_purchases (bought_on, instrument_id, description, amount_paise, units, note, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, $7, 'owner-web') returning id::text`,
+      [p.boughtOn, p.instrumentId ?? null, description, p.amountPaise.toString(), p.units ?? null, note, now],
+    );
+    await audit(tx, 'owner_purchase', row!.id, 'LOGGED', {
+      on: p.boughtOn, amountPaise: p.amountPaise.toString(), description,
+      instrumentId: p.instrumentId ?? null, units: p.units ?? null, note,
     });
   });
 }
@@ -81,6 +112,7 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       const abs = (amount < 0n ? -amount : amount).toString();
       return { kind: 'Goal', summary: `${verb} ${money(abs)} ${amount < 0n ? 'from' : 'into'} ${entityId}${p['note'] ? ` — ${String(p['note'])}` : ''}` };
     }
+    case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
     case 'owner_note/NOTE': return { kind: 'Note', summary: String(p['text'] ?? '') };
     case 'bond_redemption/REDEEMED': return { kind: 'Bond', summary: `Bond redeemed: ${entityId}` };
@@ -94,7 +126,7 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
 export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEntry[]> {
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
-      where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest')
+      where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase')
       order by at desc, id desc limit $1`,
     [limit],
   );

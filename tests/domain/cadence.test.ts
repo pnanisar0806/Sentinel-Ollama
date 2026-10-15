@@ -5,6 +5,7 @@ import { seed } from '../../src/seed/seed.js';
 import { monthlyReviewDone, nextMonthStart, recordMonthlyReview } from '../../src/domain/cadence.js';
 import { addTarget, DEFAULT_ADD_INSTRUMENT } from '../../src/domain/alloc-engine.js';
 import { buildReportInput } from '../../src/notify/report.js';
+import { persistSipSnapshot } from '../../src/domain/sips.js';
 import type { Position } from '../../src/domain/networth.js';
 
 /**
@@ -43,6 +44,9 @@ describe('buy/sell proposals come once a month', () => {
   });
 
   it('proposes on the first weekly run of a month and nothing on the later ones', async () => {
+    // A known, empty SIP book: an unknown envelope leaves the month open for a retry
+    // (owner, 2026-10-15), which is not what these tests are about.
+    await persistSipSnapshot(db, [], new Date().toISOString());
     await buildReportInput(db, '2026-09-06', { gsecYieldPct: 7 });
     const afterFirst = await recCount();
     expect(afterFirst, 'the seed must produce a proposal, or this proves nothing').toBeGreaterThan(0);
@@ -54,6 +58,9 @@ describe('buy/sell proposals come once a month', () => {
   });
 
   it('reviews again when the next month starts, even if its first Sunday run was dropped', async () => {
+    // A known, empty SIP book: an unknown envelope leaves the month open for a retry
+    // (owner, 2026-10-15), which is not what these tests are about.
+    await persistSipSnapshot(db, [], new Date().toISOString());
     await buildReportInput(db, '2026-09-06', { gsecYieldPct: 7 });
     // No run on 2026-10-04 (GitHub dropped it); the 2026-10-11 run is the review.
     await buildReportInput(db, '2026-10-11', { gsecYieldPct: 7 });
@@ -104,7 +111,12 @@ describe('a rebalance top-up names what to buy', () => {
 
 describe('a top-up is one month’s tranche', () => {
   it('sizes a gap larger than the rails as a staged monthly amount', async () => {
-    await buildReportInput(db, '2026-09-06', { gsecYieldPct: 7 });
+    // A known, empty SIP book keeps the free envelope at the ₹50k budget; with no snapshot
+    // the BUY is suppressed as unknown (spec 2026-10-14). Stamped at the same clock the
+    // build reads, so it is fresh by construction.
+    const now = new Date().toISOString();
+    await persistSipSnapshot(db, [], now);
+    await buildReportInput(db, '2026-09-06', { gsecYieldPct: 7, now });
     const rows = await db.query<{ primary_rec: string }>(
       `select primary_rec from recommendations where kind = 'rebalance'`);
     const buys = rows.map((r) => JSON.parse(r.primary_rec) as

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
@@ -13,6 +14,13 @@ import { narrate } from '../../src/sources/llm-narration.js';
 import { parseAsOf, parseGsecYield } from '../../src/jobs/report.js';
 import { MAX_THESIS_WORDS, buildRecommendation, persistRecommendation, thesisWordCount } from '../../src/domain/recommendations.js';
 import { IPS_V1_TEXT, getIpsClauseIndex } from '../../src/domain/ips.js';
+import { parseMfSips } from '../../src/sources/indmoney.js';
+import { loadFreeEnvelope, persistSipSnapshot } from '../../src/domain/sips.js';
+import { logPurchase } from '../../src/domain/owner-log.js';
+import { IPS_BANDS } from '../../src/domain/allocation.js';
+import { monthlyReviewDone } from '../../src/domain/cadence.js';
+import { classify } from '../../src/domain/networth.js';
+import { railPaise } from '../../src/domain/rail-values.js';
 
 const SEED_DATE = '2026-08-12';
 /** Inside every freshness limit for SEED_DATE's data. */
@@ -83,6 +91,9 @@ const build = (opts = {}): Promise<ReportInput> =>
 describe('FR-51 weekly report — the Phase 1 DoD', () => {
   it('produces at least one fully-formed paper recommendation with every timestamp shown', async () => {
     await makeEverythingFresh();
+    // A known, empty SIP book keeps the free envelope at the ₹50k budget, so the GOLD BUY is
+    // sized rather than suppressed as unknown (spec 2026-10-14).
+    await persistSipSnapshot(db, [], NOW);
     const input = await build();
     const text = composeReport(input);
 
@@ -146,6 +157,250 @@ describe('FR-51 weekly report — the Phase 1 DoD', () => {
     // The diff between the two reports is the proof.
     expect(freshText).not.toBe(staleText);
     expect(freshText.includes('Blocked from recommendations')).toBe(false);
+  });
+});
+
+const live = parseMfSips({
+  result: JSON.stringify(JSON.parse(await readFile('tests/fixtures/indmoney-mf-sips-2026-10-14.json', 'utf8')).payload),
+});
+
+describe('rebalance sizing reads live SIPs (spec 2026-10-14)', () => {
+  // The seeded book is GOLD under its floor by ~₹2.17L, so the rebalance wants a GOLD BUY.
+  const goldBuys = (input: ReportInput) => input.pipeline.recommendations
+    .filter((r) => r.primary.action === 'BUY' && /GOLD/.test(r.intent));
+
+  it('sizes the rebalance tranche at budget minus live SIPs', async () => {
+    await persistSipSnapshot(db, live, NOW);
+    const input = await build();
+    const env = await loadFreeEnvelope(db, NOW);
+    expect(env.envelopePaise).not.toBeNull();
+    const [gold] = goldBuys(input);
+    expect(gold).toBeDefined();
+    expect(BigInt(gold!.primary.amountPaise!)).toBeLessThanOrEqual(env.envelopePaise!);
+  });
+
+  it("sizes the tranche at what remains after this month's logged purchases (SIP gaps Task 2)", async () => {
+    await persistSipSnapshot(db, live, NOW);
+    await logPurchase(db, { boughtOn: '2026-08-10', description: 'Zerodha Gold ETF', amountPaise: 500_000n }, NOW);
+    const env = await loadFreeEnvelope(db, NOW);
+    expect(env.remainingPaise! < env.envelopePaise!).toBe(true);
+    const [gold] = goldBuys(await build());
+    expect(BigInt(gold!.primary.amountPaise!)).toBe(env.remainingPaise!);
+  });
+
+  it('a fully deployed month is a known ₹0: the BUY is suppressed with that reason, and the month is consumed', async () => {
+    await persistSipSnapshot(db, live, NOW);
+    const envelope = (await loadFreeEnvelope(db, NOW)).envelopePaise!;
+    await logPurchase(db, { boughtOn: '2026-08-10', description: 'Zerodha Gold ETF', amountPaise: envelope }, NOW);
+    const input = await build();
+    expect(goldBuys(input)).toEqual([]);
+    expect(input.pipeline.suppressed.find((x) => x.action === 'rebalance:BUY:GOLD')?.reason).toMatch(/already deployed/);
+    expect(await monthlyReviewDone(db, 'recommendations', SEED_DATE.slice(0, 7))).toBe(true);
+  });
+
+  it('with no SIP data it suppresses the BUY and says why', async () => {
+    const input = await build();
+    expect(goldBuys(input)).toEqual([]);
+    expect(input.pipeline.suppressed.some((s) => s.suppressedBy === 'SIP_ENVELOPE')).toBe(true);
+  });
+
+  // Withheld counts as proposed: this book has no price history, so FR-31 withholds a TRIM
+  // on a stale name — the engine still proposed it, which is what these tests are about.
+  const proposed = (input: ReportInput) => [...input.pipeline.recommendations, ...input.pipeline.withheld]
+    .map((r) => r.primary.action);
+
+  /** A book of NIFTYBEES (equity), a liquid fund (debt) and GOLDBEES, in rupees. */
+  async function bookOf(equity: number, debt: number, gold: number): Promise<Db> {
+    const book = await openDb();
+    await runMigrations(book);
+    await book.query(`insert into instruments (id, kind, name, currency) values
+      ('NSE:NIFTYBEES', 'EQUITY', 'Nifty BeES', 'INR'), ('MF:LIQ', 'MF', 'Liquid Fund', 'INR'),
+      ('NSE:GOLDBEES', 'GOLD', 'Gold BeES', 'INR')`);
+    const [snap] = await book.query<{ id: string }>(
+      `insert into snapshots (business_date, source) values ($1, 'indmoney') returning id`, [SEED_DATE]);
+    await book.query(
+      `insert into holdings (snapshot_id, instrument_id, account, quantity, value_paise, source, as_of)
+       values ($1, 'NSE:NIFTYBEES', 'zerodha', 1, $3, 'indmoney', $2::timestamptz),
+              ($1, 'MF:LIQ', 'zerodha', 1, $4, 'indmoney', $2::timestamptz),
+              ($1, 'NSE:GOLDBEES', 'zerodha', 1, $5, 'indmoney', $2::timestamptz)`,
+      [snap!.id, `${SEED_DATE}T12:00:00Z`, equity * 100, debt * 100, gold * 100]);
+    return book;
+  }
+  /** EQUITY 70% against a 60% ceiling: 10 points over, beyond SELL_TOLERANCE, so flow-vs-trim is live. */
+  const overweightEquityBook = (scale = 1): Promise<Db> => bookOf(70_000 * scale, 22_000 * scale, 8_000 * scale);
+
+  it('an unknown envelope never proposes a SALE: it proposes nothing, says why, and keeps the month open', async () => {
+    // Fix round 2: this used to assert a REDIRECT and no TRIM from an unknown run. An unknown
+    // run now proposes no rebalance action at all, so the stronger claim is that nothing — a
+    // sale least of all — is proposed on missing data, and the run explains itself.
+    const book = await overweightEquityBook(10);
+    const input = await buildReportInput(book, SEED_DATE, { now: NOW });
+    expect(proposed(input)).toEqual([]);
+    const held = input.pipeline.suppressed.find((x) => x.action === 'rebalance:ALL');
+    expect(held?.suppressedBy).toBe('SIP_ENVELOPE');
+    expect(held?.reason).toBe((await loadFreeEnvelope(book, NOW)).reason);
+    expect(await monthlyReviewDone(book, 'recommendations', SEED_DATE.slice(0, 7))).toBe(false);
+    // Not vacuous: the same book, once its SIPs are known, does get a rebalance proposal.
+    await persistSipSnapshot(book, live, NOW);
+    expect(proposed(await buildReportInput(book, SEED_DATE, { now: NOW }))).toContain('TRIM');
+    await book.close();
+  });
+
+  it('live equity SIPs reach the engine and count against diluting an equity overweight', async () => {
+    // Each month moves the overshoot by inflow·(1−max) − max·dilution, so equity SIPs cancel
+    // inflow·(1−max)/max of the free envelope's dilution. With the owner's live SIPs (all
+    // equity) the net capacity is small but positive; the book is sized so that 12 months
+    // of it cannot close the drift, while 12 months of the envelope alone could — so the
+    // answer is TRIM only if the SIP routes reached the engine.
+    const book = await overweightEquityBook(10);
+    await persistSipSnapshot(book, live, NOW);
+    const env = await loadFreeEnvelope(book, NOW);
+    const maxBp = BigInt(Math.round(IPS_BANDS.EQUITY.max * 10_000));
+    const drag = (env.sipTotalPaise! * (10_000n - maxBp) + maxBp - 1n) / maxBp;
+    const net = env.envelopePaise! - drag;
+    const drift = 700_000_00n - (1_000_000_00n * maxBp) / 10_000n; // equity − max·NW
+    expect(net > 0n).toBe(true); // the corrected model: equity takes < 60% of new money
+    expect(drift > 12n * net).toBe(true);
+    expect(drift <= 12n * env.envelopePaise!).toBe(true);
+    const input = await buildReportInput(book, SEED_DATE, { now: NOW });
+    const actions = proposed(input);
+    expect(actions).toContain('TRIM');
+    expect(actions).not.toContain('REDIRECT');
+    await book.close();
+  });
+
+  it('a SIP is classed by its INDmoney category before its name: a money-market SIP dilutes equity', async () => {
+    // The same live SIPs, but categorised Money Market. Their names read as EQUITY to
+    // classify(), which would make them equity inflow and (as the test above shows) a TRIM.
+    // As DEBT they are dilution on top of the envelope, so new money closes the gap.
+    const book = await overweightEquityBook(10);
+    const mm = live.map((r) => ({ ...r, fundType: null, category: 'Money Market' }));
+    expect(mm.every((r) => classify('MF', r.instrumentId, r.fundName) === 'EQUITY')).toBe(true);
+    await persistSipSnapshot(book, mm, NOW);
+    const actions = proposed(await buildReportInput(book, SEED_DATE, { now: NOW }));
+    expect(actions).toContain('REDIRECT');
+    expect(actions).not.toContain('TRIM');
+    await book.close();
+  });
+
+  it('a suppressed BUY does not also silence the redirect into that class', async () => {
+    // GOLD 3% (under its 5% floor) and EQUITY 61% (1 point over 60%, inside SELL_TOLERANCE, so
+    // a redirect even with no money): the engine wants a GOLD BUY and a redirect into GOLD.
+    // With a known ₹0 envelope the BUY is suppressed, so the redirect is the only thing said
+    // about GOLD and must be proposed. (Round 1 used an unknown envelope; that now holds the
+    // whole rebalance, so the case lives on the known-₹0 path.)
+    const book = await bookOf(61_000, 36_000, 3_000);
+    await book.query(`insert into settings_rails (key, value) values ('monthly_budget_paise', '0'::jsonb)
+                      on conflict (key) do update set value = excluded.value`);
+    await persistSipSnapshot(book, [], NOW);
+    expect((await loadFreeEnvelope(book, NOW)).envelopePaise).toBe(0n);
+    const input = await buildReportInput(book, SEED_DATE, { now: NOW });
+    expect(input.pipeline.suppressed.map((x) => x.action)).toContain('rebalance:BUY:GOLD');
+    const redirects = [...input.pipeline.recommendations, ...input.pipeline.withheld]
+      .filter((r) => r.primary.action === 'REDIRECT' && /GOLD/.test(r.intent));
+    expect(redirects).toHaveLength(1);
+    // No money this month: "put this month's tranche straight into X" has nothing to put.
+    expect(redirects[0]!.alternates.filter((a) => a.action === 'BUY')).toEqual([]);
+    await book.close();
+  });
+
+  it("a redirect's direct-buy alternate is this month's tranche, never the full drift", async () => {
+    // The money-market case: the engine redirects new money (drift-sized) rather than selling.
+    const book = await overweightEquityBook(10);
+    await persistSipSnapshot(book, live.map((r) => ({ ...r, fundType: null, category: 'Money Market' })), NOW);
+    const env = await loadFreeEnvelope(book, NOW);
+    const maxOrder = await railPaise(book, 'max_order_paise');
+    const tranche = env.remainingPaise! < maxOrder ? env.remainingPaise! : maxOrder;
+    expect(tranche > 0n).toBe(true);
+    const input = await buildReportInput(book, SEED_DATE, { now: NOW });
+    const redirect = [...input.pipeline.recommendations, ...input.pipeline.withheld]
+      .find((r) => r.primary.action === 'REDIRECT')!;
+    expect(BigInt(redirect.primary.amountPaise!) > tranche).toBe(true); // premise: the drift exceeds one tranche
+    const buys = redirect.alternates.filter((a) => a.action === 'BUY');
+    expect(buys).toHaveLength(1);
+    expect(BigInt(buys[0]!.amountPaise!)).toBe(tranche);
+    await book.close();
+  });
+
+  describe('an unknown envelope leaves the month open for a retry (owner, 2026-10-15)', () => {
+    // EQUITY 90% of ₹1Cr: ₹30L over, more than 12 months of any surplus can dilute, so a TRIM;
+    // GOLD 3%, under its floor, so a BUY that the envelope decides.
+    const book = () => bookOf(9_000_000, 700_000, 300_000);
+    const rebalanceRows = async (b: Db) => (await b.query<{ primary_rec: string }>(
+      `select primary_rec from recommendations where kind = 'rebalance' order by id`))
+      .map((r) => JSON.parse(r.primary_rec) as { action: string; amountPaise: string; instrumentId: string | null });
+
+    // A dated maturity goes out on every run, known envelope or not.
+    const maturity = buildRecommendation({
+      kind: 'maturity_routing', createdOn: SEED_DATE,
+      primary: { intent: 'route the TESTBOND redemption', instrumentId: 'BOND:TESTBOND', action: 'REDEEM',
+        amountPaise: '10000000', thesis: 'Matures this month.', ipsClauseRefs: ['3.8'], falsification: null },
+    });
+    const maturityCount = async (b: Db) => Number((await b.query<{ n: string }>(
+      `select count(*) as n from recommendations where kind = 'maturity_routing'`))[0]!.n);
+
+    it('run 1 without SIPs persists no rebalance action and leaves the month open; run 2 proposes the whole set once', async () => {
+      const b = await book();
+      await buildReportInput(b, SEED_DATE, { now: NOW, maturityRecommendations: [maturity] });
+      expect(await monthlyReviewDone(b, 'recommendations', SEED_DATE.slice(0, 7))).toBe(false);
+      expect(await rebalanceRows(b)).toEqual([]); // no TRIM, no REDIRECT, no BUY on unknown SIPs
+      expect(await maturityCount(b)).toBe(1); // the maturity still went out
+
+      await persistSipSnapshot(b, live, NOW);
+      const env = await loadFreeEnvelope(b, NOW);
+      await buildReportInput(b, SEED_DATE, { now: NOW, maturityRecommendations: [maturity] });
+      expect(await monthlyReviewDone(b, 'recommendations', SEED_DATE.slice(0, 7))).toBe(true);
+      // The retry re-sends the maturity; persistRecommendation's duplicate guard keeps one.
+      expect(await maturityCount(b)).toBe(1);
+      const run2 = await rebalanceRows(b);
+      expect(run2.filter((r) => r.action === 'TRIM')).toHaveLength(1);
+      const buys = run2.filter((r) => r.action === 'BUY');
+      expect(buys).toHaveLength(1);
+      expect(BigInt(buys[0]!.amountPaise)).toBe(env.envelopePaise!);
+      await b.close();
+    });
+
+    it('a retry never leaves a redirect into GOLD beside a BUY of GOLD in the same month', async () => {
+      // The book where the engine wants both a GOLD BUY and a redirect into GOLD. Run 1 used to
+      // persist the redirect, and run 2 then added the BUY: the same money twice.
+      const b = await bookOf(70_000, 27_000, 3_000);
+      await buildReportInput(b, SEED_DATE, { now: NOW });
+      expect(await rebalanceRows(b)).toEqual([]);
+      await persistSipSnapshot(b, live, NOW);
+      await buildReportInput(b, SEED_DATE, { now: NOW });
+      const rows = (await b.query<{ intent: string; primary_rec: string }>(
+        `select intent, primary_rec from recommendations where kind = 'rebalance'`))
+        .map((r) => ({ intent: r.intent, action: (JSON.parse(r.primary_rec) as { action: string }).action }));
+      expect(rows.some((r) => r.action === 'BUY' && /GOLD/.test(r.intent))).toBe(true);
+      expect(rows.some((r) => r.action === 'REDIRECT' && /GOLD/.test(r.intent))).toBe(false);
+      await b.close();
+    });
+
+    it('a known ₹0 envelope is an answer: the BUY is suppressed and the month is closed', async () => {
+      const b = await book();
+      await b.query(`insert into settings_rails (key, value) values ('monthly_budget_paise', '0'::jsonb)
+                     on conflict (key) do update set value = excluded.value`);
+      await persistSipSnapshot(b, [], NOW);
+      expect((await loadFreeEnvelope(b, NOW)).envelopePaise).toBe(0n);
+      const input = await buildReportInput(b, SEED_DATE, { now: NOW });
+      expect(input.pipeline.suppressed.map((x) => x.action)).toContain('rebalance:BUY:GOLD');
+      expect(await monthlyReviewDone(b, 'recommendations', SEED_DATE.slice(0, 7))).toBe(true);
+      await b.close();
+    });
+  });
+
+  it('a same-day re-run does not log the suppression twice, or fail on it', async () => {
+    // A same-day row already exists, as after an earlier run today. With unknown SIPs the
+    // month stays open (fix round 2), so both builds reach the insert of the one
+    // `rebalance:ALL` row and must hit the (logged_on, action) key, not fail on it.
+    await db.query(
+      `insert into suppressed_actions (logged_on, action, reason, suppressed_by)
+       values ($1, 'rebalance:ALL', 'earlier run', 'SIP_ENVELOPE')`, [SEED_DATE]);
+    await build();
+    await build();
+    const [n] = await db.query<{ n: string }>(
+      `select count(*) as n from suppressed_actions where suppressed_by = 'SIP_ENVELOPE'`);
+    expect(Number(n!.n)).toBe(1);
   });
 });
 

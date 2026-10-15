@@ -1,7 +1,8 @@
 import type { Db } from '../db/client.js';
 import { escapeMarkdown } from './telegram.js';
 import { formatInr } from '../money/paise.js';
-import { loadPositions, netWorth, type Position } from '../domain/networth.js';
+import { loadPositions, netWorth, type AssetClass, type Position } from '../domain/networth.js';
+import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
 import { assessStaleness, blockedInstruments, type StalenessRow } from '../sources/staleness.js';
 import {
   loadEngineInputs,
@@ -242,7 +243,7 @@ async function runSignalReview(
  * trim gets none here: `buildRecommendation` gives every sale the "new money, no sale"
  * alternative. Never the equity index as the alternative to a gold or debt move.
  */
-function rebalanceAlternates(action: CandidateAction, primary: RecLeg, positions: readonly Position[]): RecLeg[] {
+function rebalanceAlternates(action: CandidateAction, primary: RecLeg, positions: readonly Position[], tranche: bigint): RecLeg[] {
   if (action.kind === 'ADD') {
     const other = [DEFAULT_ADD_INSTRUMENT[action.assetClass], ...positions
       .filter((p) => p.assetClass === action.assetClass && p.instrumentId !== primary.instrumentId)
@@ -251,9 +252,19 @@ function rebalanceAlternates(action: CandidateAction, primary: RecLeg, positions
     return other ? [{ ...primary, instrumentId: other, thesis: `The same top-up through ${other} instead: same asset class, a different fund.` }] : [];
   }
   if (action.kind === 'DIRECT_FLOW') {
+    // A BUY is this month's tranche at most, never the redirect's drift-sized amount: the gate
+    // would refuse anything larger. No tranche: no BUY at all. FR-11 still needs an A1 naming an
+    // instrument (the generic no-sale leg has none, like this primary), so it steers new money
+    // into the named fund instead — nothing to buy, nothing for the gate to refuse.
     const target = addTarget(positions, action.assetClass);
-    return target ? [{ ...primary, instrumentId: target, action: 'BUY',
-      thesis: `Put this month's tranche straight into ${target} rather than only steering future money.` }] : [];
+    if (!target) return [];
+    if (tranche === 0n) {
+      return [{ ...primary, instrumentId: target,
+        thesis: `No free money this month: steer the coming months' new money into ${target} specifically.` }];
+    }
+    const amount = BigInt(primary.amountPaise ?? '0');
+    return [{ ...primary, instrumentId: target, action: 'BUY', amountPaise: (amount < tranche ? amount : tranche).toString(),
+      thesis: `Put this month's tranche straight into ${target} rather than only steering future money.` }];
   }
   return [];
 }
@@ -281,21 +292,42 @@ export async function buildReportInput(
   const reviewDue = !(await monthlyReviewDone(db, 'recommendations', month));
 
   // A top-up is one month's tranche, never the whole gap at once. The gold gap was
-  // ₹2.17L against a ₹1L single-order rail and a ₹50k monthly tactical budget, so a
-  // full-gap BUY could only ever be refused. Closing a band over several months is also
-  // what a long-term investor does with a monthly surplus.
-  const tranche = (await railPaise(db, 'tactical_monthly_paise')) < (await railPaise(db, 'max_order_paise'))
-    ? await railPaise(db, 'tactical_monthly_paise')
-    : await railPaise(db, 'max_order_paise');
+  // ₹2.17L against a ₹1L single-order rail, so a full-gap BUY could only ever be refused.
+  // Closing a band over several months is also what a long-term investor does with a
+  // monthly surplus. One month's deployable money is the free envelope (budget − live
+  // SIPs), never the flat tactical rail: September sized ₹50,000 against a real ₹19,746
+  // (spec 2026-10-14). Unknown SIPs ⇒ unknown envelope ⇒ tranche 0, and the
+  // whole rebalance is held below with the reason — never sized on a guess. The tranche is
+  // what REMAINS this month, after BUY orders and owner-logged purchases (SIP gaps Task 2).
+  const envelope = await loadFreeEnvelope(db, generatedAt);
+  const maxOrder = await railPaise(db, 'max_order_paise');
+  const capped = (p: bigint | null) => (p === null ? 0n : p < maxOrder ? p : maxOrder);
+  const tranche = capped(envelope.remainingPaise);
 
   // The monthly surplus is a real funding route (owner, 2026-09-27). Until then the report
   // passed none, so the engine concluded "no route can absorb the drift" and proposed
   // sales for a 0.7-point overshoot. One pool, offered to every non-equity class; the
   // engine counts it once. Quality scores make it sell the weakest holding, not the
-  // cheapest in tax.
+  // cheapest in tax. (An unknown envelope proposes nothing at all — see below — so its
+  // tranche of 0 never decides redirect-vs-trim.) The capacity is the RECURRING envelope, not
+  // this month's remainder: money already deployed this month must not tip the engine from
+  // redirecting new money into proposing a sale.
   const surplusRoutes: FundingRoute[] = (['DEBT', 'GOLD'] as const).map((assetClass) => ({
     id: `monthly-surplus-${assetClass.toLowerCase()}`, kind: 'fresh-surplus', assetClass,
-    monthlyCapacityPaise: tranche as never, loadFree: true, note: 'the monthly tactical budget',
+    monthlyCapacityPaise: capped(envelope.envelopePaise) as never, loadFree: true, note: 'the monthly free envelope',
+  }));
+  // Live SIPs are money already flowing, per asset class. Into another class they dilute an
+  // overweight one; into the overweight class itself they work against it (alloc-engine).
+  // A stale or absent snapshot contributes no routes: its amounts are not current.
+  const commitment = await loadSipCommitment(db, generatedAt);
+  const sipByClass = new Map<AssetClass, bigint>();
+  for (const s of commitment.totalPaise === null ? [] : commitment.sips) {
+    const cls = sipAssetClass(s);
+    sipByClass.set(cls, (sipByClass.get(cls) ?? 0n) + s.amountPaise);
+  }
+  const sipRoutes: FundingRoute[] = [...sipByClass].map(([assetClass, amount]) => ({
+    id: `sip-${assetClass.toLowerCase()}`, kind: 'sip', assetClass, monthlyCapacityPaise: amount as never,
+    loadFree: true, note: 'live SIPs (INDmoney)',
   }));
   const scores = await db.query<{ instrument_id: string; composite: string }>(
     `select distinct on (instrument_id) instrument_id, composite::text from signal_scores order by instrument_id, score_date desc`);
@@ -303,15 +335,43 @@ export async function buildReportInput(
 
   // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
   const rebalance = rebalanceRec(
-    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? surplusRoutes, quality },
+    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? [...surplusRoutes, ...sipRoutes], quality },
     month,
   );
   const built: Recommendation[] = [...(opts.maturityRecommendations ?? [])];
-  const addedClasses = new Set(rebalance.actions.filter((a) => a.kind === 'ADD').map((a) => a.assetClass));
+  // Only the BUYs actually emitted: when a KNOWN ₹0 envelope makes the tranche 0, every ADD is
+  // suppressed below, and a redirect into that class is then the only thing said about it — it
+  // must not be skipped. (An unknown envelope never gets here: the whole rebalance is held.)
+  const addedClasses = new Set(tranche === 0n ? []
+    : rebalance.actions.filter((a) => a.kind === 'ADD').map((a) => a.assetClass));
+  // Unknown SIPs ⇒ unknown envelope ⇒ the rebalance proposes NOTHING this run, and the month
+  // stays open (owner, 2026-10-15; controller ruling, Task 7 fix 2). The whole set is then
+  // proposed once, against the known envelope, by the first run with fresh SIP data. Persisting
+  // part of it now would let the retry add a BUY beside today's redirect into the same class,
+  // or a TRIM beside today's no-sale redirect — and the duplicate guard cannot see either.
+  // One `rebalance:ALL` row per day says why. A known ₹0 envelope is an answer and goes on.
+  const holdRebalance = reviewDue && envelope.envelopePaise === null && rebalance.actions.length > 0;
+  if (holdRebalance) {
+    await db.query(
+      `insert into suppressed_actions (logged_on, action, reason, suppressed_by) values ($1, 'rebalance:ALL', $2, 'SIP_ENVELOPE')
+       on conflict (logged_on, action) do nothing`,
+      [asOf, envelope.reason ?? 'SIP data unknown'],
+    );
+  }
 
-  for (const action of (reviewDue ? rebalance.actions : [])) {
+  for (const action of (reviewDue && !holdRebalance ? rebalance.actions : [])) {
     // Redirecting new money into a class that is already getting a BUY is the same money twice.
     if (action.kind === 'DIRECT_FLOW' && addedClasses.has(action.assetClass)) continue;
+    // No free money this month: the BUY is logged, not dropped (FR-12 visibility).
+    // Same-day re-runs hit the (logged_on, action) key and write nothing.
+    if (action.kind === 'ADD' && tranche === 0n) {
+      await db.query(
+        `insert into suppressed_actions (logged_on, action, reason, suppressed_by) values ($1, $2, $3, 'SIP_ENVELOPE')
+         on conflict (logged_on, action) do nothing`,
+        [asOf, `rebalance:BUY:${action.assetClass}`, envelope.reason ?? 'no free money this month'],
+      );
+      continue;
+    }
     const amount = action.kind === 'ADD' && action.amountPaise > tranche ? tranche : action.amountPaise;
     const staged = amount !== action.amountPaise
       ? ` This is one monthly tranche of ${formatInr(amount as never)} toward a ${formatInr(action.amountPaise)} gap; the rest follows in later months.`
@@ -332,7 +392,7 @@ export async function buildReportInput(
     };
     built.push(buildRecommendation({
       kind: 'rebalance', createdOn: asOf, primary,
-      sameIntentAlternates: rebalanceAlternates(action, primary, positions),
+      sameIntentAlternates: rebalanceAlternates(action, primary, positions, tranche),
       engineEvidence: { drift: rebalance.summary, direction: rebalance.direction, ...(action.proceedsTo ? { proceedsTo: action.proceedsTo } : {}) },
     }));
   }
@@ -340,7 +400,7 @@ export async function buildReportInput(
   // Phase 2.5 advisor (src/jobs/report.ts → runAdvisor), which sizes them, reads their
   // news and asks for the owner's sign-off. The unsized satellite recommendations this
   // loop used to write could never become an order (drafting: "has no amount yet").
-  if (reviewDue) {
+  if (reviewDue && !holdRebalance) {
     await recordMonthlyReview(db, 'recommendations', month, {
       asOf, proposed: built.length - (opts.maturityRecommendations?.length ?? 0),
     });

@@ -19,7 +19,7 @@ import { recordLlmCall, recordProposal } from './proposals.js';
  * invalid reply. Neither of the last two is ever reported as HOLD.
  */
 
-const ADVISE_PROMPT_VERSION = 'advise-v1';
+const ADVISE_PROMPT_VERSION = 'advise-v2';
 const ADVISE_SCHEMA_VERSION = 'advise-schema-v1';
 export type Decision = 'BUY' | 'SELL' | 'HOLD' | 'WAIT' | 'NO_ACTION' | 'UNAVAILABLE';
 
@@ -35,6 +35,7 @@ const PROMPT = [
   '- An exit needs a reason that is not price. Good news is never a reason to buy.',
   '- You may only choose a candidateId you were given, with that candidate\'s action.',
   '- You never state an amount, a number of shares or a price: sizes are fixed by the system.',
+  '- "budget" shows his monthly budget, the SIPs already running and what is free. It is context: you still never state an amount.',
   '- Signal parts are scores out of the stated maximum ("outOf"): 9 of 30 is weak, not good value.',
   'Ask: would he be content holding this for five years, and what would have to be true for that to be wrong?',
   'Reply with JSON only:',
@@ -42,6 +43,22 @@ const PROMPT = [
   ' "horizonYears":<number >= 1>,"rationale":"<= 120 words","keyRisk":"...","falsification":"what would prove it wrong",',
   ' "counterargument":"the best case against","evidenceIds":["news:<id>",...],"alternates":["<candidateId>","WAIT"|"HOLD"]}',
 ].join('\n');
+
+/**
+ * The month's money, as the job saw it (SIP tracking Task 8). Formatted rupee strings, never
+ * numbers: context the model reads, not a size it may echo. Null is unknown, never ₹0 — a
+ * null `freeEnvelope` means the system is withholding sizing. Declared here so `src/advisor/`
+ * imports nothing from the SIP or sizing modules; `src/jobs/report.ts` builds it.
+ */
+export interface AdvisorBudget {
+  monthlyBudget: string; sipTotal: string | null; sipAsOf: string | null; freeEnvelope: string | null;
+  /** This month's BUY orders plus owner-logged purchases; always known. */
+  spentThisMonth: string;
+  /** freeEnvelope less spentThisMonth, floored at ₹0; null iff freeEnvelope is null. */
+  remaining: string | null;
+  /** Active SIPs, then any stopped this month after their instalment (`status` set): sums to sipTotal. */
+  sips: { fund: string; amount: string; assetClass: string; status?: string }[];
+}
 
 type Part = { score: number | null; outOf: number };
 
@@ -139,7 +156,7 @@ function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecisio
 
 export async function runAdvisor(
   db: Db,
-  opts: { asOf: string; candidates: Candidate[]; apiKey: string | undefined; model?: string | undefined; fetchImpl?: typeof fetch; now?: Date },
+  opts: { asOf: string; candidates: Candidate[]; apiKey: string | undefined; model?: string | undefined; fetchImpl?: typeof fetch; now?: Date; budget?: AdvisorBudget },
 ): Promise<{ proposalId: number; decision: Decision }> {
   const now = opts.now ?? new Date();
   const model = opts.model || TEXT_MODEL;
@@ -149,7 +166,9 @@ export async function runAdvisor(
     const { ctx, excluded: why } = await contextFor(db, c, now);
     if (ctx) shown.push(ctx); else excluded.push(why!);
   }
-  const snapshot = { asOf: opts.asOf, shown, excluded };
+  // The budget goes into the snapshot exactly as sent, so a replay sees what the model saw.
+  const budget = opts.budget ? { budget: opts.budget } : {};
+  const snapshot = { asOf: opts.asOf, shown, excluded, ...budget };
   const save = async (decision: Decision, payload: object, usedModel: string | null, evidence: string[] = []) => ({
     decision,
     proposalId: await recordProposal(db, {
@@ -173,7 +192,7 @@ export async function runAdvisor(
       const res = await (opts.fetchImpl ?? fetch)(OPENROUTER_CHAT_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: PROMPT }, { role: 'user', content: JSON.stringify({ asOf: opts.asOf, candidates: shown }) }] }),
+        body: JSON.stringify({ model, messages: [{ role: 'system', content: PROMPT }, { role: 'user', content: JSON.stringify({ asOf: opts.asOf, candidates: shown, ...budget }) }] }),
       });
       if (!res.ok) { outcome = 'unavailable'; error = `HTTP ${res.status}`; }
       else {

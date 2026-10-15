@@ -3,7 +3,7 @@ import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import {
-  completeMilestone, loadOwnerTimeline, logGoalMove, logNote,
+  completeMilestone, loadOwnerTimeline, logGoalMove, logNote, logPurchase,
 } from '../../src/domain/owner-log.js';
 
 /**
@@ -76,5 +76,45 @@ describe('the timeline', () => {
     expect(t.map((e) => e.on)).toEqual(['2026-09-26', '2026-09-25']);
     expect(t[0]!.summary).toContain('B3');
     expect(t.some((e) => e.kind === 'RSU')).toBe(false);
+  });
+});
+
+describe('a purchase made outside Sentinel', () => {
+  const base = { boughtOn: '2026-09-26', description: 'Zerodha Gold ETF', amountPaise: 1_000_000n };
+
+  it('is stored with as_of and owner-web source, and audited as the owner, in one go', async () => {
+    await logPurchase(db, { ...base, instrumentId: 'NSE:GOLDBEES', units: '12.5', note: ' top-up ' }, NOW);
+    const [row] = await db.query<Record<string, string | null>>(
+      `select bought_on::text, instrument_id, description, amount_paise::text, units::text, note, as_of::text, source from owner_purchases`);
+    expect(row).toMatchObject({
+      bought_on: '2026-09-26', instrument_id: 'NSE:GOLDBEES', description: 'Zerodha Gold ETF',
+      amount_paise: '1000000', units: '12.5', note: 'top-up', source: 'owner-web',
+    });
+    expect(row!['as_of']).not.toBeNull();
+    const [audit] = await db.query<{ entity: string; action: string; actor: string }>(
+      `select entity, action, actor from audit_log where entity = 'owner_purchase'`);
+    expect(audit).toEqual({ entity: 'owner_purchase', action: 'LOGGED', actor: 'owner' });
+  });
+
+  it('refuses a zero amount, a future date, and an empty or over-long description', async () => {
+    await expect(logPurchase(db, { ...base, amountPaise: 0n }, NOW)).rejects.toThrow(/positive/);
+    await expect(logPurchase(db, { ...base, amountPaise: -5n }, NOW)).rejects.toThrow(/positive/);
+    await expect(logPurchase(db, { ...base, boughtOn: '2026-09-28' }, NOW)).rejects.toThrow(/future/);
+    await expect(logPurchase(db, { ...base, description: '   ' }, NOW)).rejects.toThrow(/description/);
+    await expect(logPurchase(db, { ...base, description: 'x'.repeat(201) }, NOW)).rejects.toThrow(/200/);
+    expect(await db.query(`select 1 from owner_purchases`)).toHaveLength(0);
+    expect(await db.query(`select 1 from audit_log where entity = 'owner_purchase'`)).toHaveLength(0);
+  });
+
+  it('a purchase bought today in India is not "in the future" while UTC is still on yesterday', async () => {
+    // 01:30 IST on 28 September is 20:00 UTC on the 27th.
+    await logPurchase(db, { ...base, boughtOn: '2026-09-28' }, '2026-09-27T20:00:00Z');
+    expect(await db.query(`select 1 from owner_purchases`)).toHaveLength(1);
+  });
+
+  it('shows on the timeline as "Bought ₹X of <description>"', async () => {
+    await logPurchase(db, base, NOW);
+    const [e] = await loadOwnerTimeline(db);
+    expect(e).toMatchObject({ on: '2026-09-26', summary: 'Bought ₹10,000 of Zerodha Gold ETF' });
   });
 });

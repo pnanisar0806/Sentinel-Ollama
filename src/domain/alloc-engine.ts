@@ -268,7 +268,21 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
     // any class, so it counts once (its largest offer), never once per class.
     const sip = dilution.filter((r) => r.kind === 'sip').reduce((sum, r) => sum + r.monthlyCapacityPaise, 0n);
     const surplus = dilution.filter((r) => r.kind === 'fresh-surplus').reduce((m, r) => (r.monthlyCapacityPaise > m ? r.monthlyCapacityPaise : m), 0n);
-    const capacity = sip + surplus;
+    // Money still flowing INTO the overweight class (its own SIPs) works against the
+    // dilution (spec 2026-10-14 §1.7), but not rupee for rupee. Drift = value − max·NW, so
+    // a month moves the overshoot by inflow·(1−max) − max·dilution: the inflow costs
+    // inflow·(1−max)/max of dilution. (The spec's `dilution − inflow` overstated the drag
+    // and called a shrinking overshoot unclosable — controller ruling, Task 7 fix 1.)
+    // `max` is a ratio, so it is taken as exact basis points; the drag rounds UP so the
+    // capacity is never overstated. Floored at 0: flows then cannot close the gap.
+    const inflow = routes.filter((r) => r.kind === 'sip' && r.assetClass === row.assetClass)
+      .reduce((s, r) => s + r.monthlyCapacityPaise, 0n);
+    const dilutionPaise = sip + surplus;
+    const maxBp = BigInt(Math.round(row.max * 10_000));
+    const drag = inflow === 0n ? 0n
+      : maxBp === 0n ? dilutionPaise
+        : (inflow * (10_000n - maxBp) + maxBp - 1n) / maxBp;
+    const capacity = dilutionPaise > drag ? dilutionPaise - drag : 0n;
     const withinTolerance = row.actual - row.max < SELL_TOLERANCE;
     const flowCloses = capacity > 0n && row.driftPaise <= capacity * FLOW_HORIZON_MONTHS;
     if (withinTolerance || flowCloses) {
@@ -284,7 +298,12 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
           `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}); ` +
           (withinTolerance
             ? `an overshoot under ${Math.round(SELL_TOLERANCE * 100)} points is closed by sending new money into ${toClass}, not by selling`
-            : `sending new money into ${toClass} closes the gap within ${FLOW_HORIZON_MONTHS} months without a sale`),
+            : `sending new money into ${toClass} closes the gap within ${FLOW_HORIZON_MONTHS} months without a sale`) +
+          (inflow > 0n
+            ? `; SIPs add ${formatInr(inflow as Paise)}/month to ${row.assetClass}, which cancels `
+              + `${formatInr((drag < dilutionPaise ? drag : dilutionPaise) as Paise)} of the `
+              + `${formatInr(dilutionPaise as Paise)}/month new money elsewhere`
+            : ''),
       });
       taxNotes.push(NO_REALISATION_NOTE);
       continue;

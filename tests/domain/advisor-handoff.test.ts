@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
+import { persistSipSnapshot } from '../../src/domain/sips.js';
 import { recordProposal, loadProposals } from '../../src/advisor/proposals.js';
 import { signAdvice, dismissAdvice } from '../../src/domain/advisor-handoff.js';
 import type { Candidate } from '../../src/domain/sizing.js';
@@ -31,6 +32,8 @@ beforeEach(async () => {
   db = await openDb();
   await runMigrations(db);
   await seed(db, { asOf: '2026-08-12' });
+  // Zero SIPs synced, so the order gate's envelope is the ₹50,000 budget these tests assume.
+  await persistSipSnapshot(db, [], new Date().toISOString());
   await db.query(`insert into instruments (id, kind, name, currency) values ('NSE:BAJAJ-AUTO', 'EQUITY', 'Bajaj Auto', 'INR') on conflict do nothing`);
 });
 

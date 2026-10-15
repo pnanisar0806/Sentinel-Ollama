@@ -1,0 +1,62 @@
+{
+  "_captured": "2026-10-14, live INDmoney MCP tool mf_sips, after the owner reverted the amounts. Invesco India Midcap (registered 2026-10-13) is absent: not yet mandated.",
+  "_rateLimitedResponseNote": "NOT observed for mf_sips. This is the networth_holdings throttle body (tests/fixtures/indmoney-holdings-mcp.json) with only `tool` changed, on the assumption that one MCP server throttles every tool the same way. Recapture if mf_sips is ever seen throttling differently.",
+  "_rateLimitedResponse": {
+    "error": "rate_limit_exceeded",
+    "message": "Rate limit exceeded for this tool: 15 calls per min. Try again in 59s.",
+    "retry_after_seconds": 59,
+    "tool": "mf_sips"
+  },
+  "payload": {
+    "mf_sips": [
+      {
+        "name": "ICICI Prudential Nifty 50 Index Plan Direct Growth",
+        "fund_id": null,
+        "isin": "INF109K012M7",
+        "category": "Index Funds",
+        "fundType": "Equity",
+        "planType": "Direct",
+        "folio_id": "23569170",
+        "active_sips": [
+          {
+            "txn_id": "2560978", "sip_id": "2560978", "sip_type": "flexi_sip", "sip_frequency": "MONTHLY",
+            "fund_id": "5536", "folio_id": "23569170", "amount": 14001, "is_step_up_sip": true,
+            "step_up_by": 10, "step_up_freq": "YEARLY", "sip_start_date": "12-11-2026"
+          }
+        ]
+      },
+      {
+        "name": "Bandhan Small Cap Fund Direct Growth",
+        "fund_id": null,
+        "isin": "INF194KB1AL4",
+        "category": "Small-Cap",
+        "fundType": "Equity",
+        "planType": "Direct",
+        "folio_id": "6859481",
+        "active_sips": [
+          {
+            "txn_id": "45621886", "sip_id": "45621886", "sip_type": "flexi_sip", "sip_frequency": "MONTHLY",
+            "fund_id": "1005544", "folio_id": "6859481", "amount": 2251, "is_step_up_sip": true,
+            "step_up_by": 10, "step_up_freq": "YEARLY", "sip_start_date": "12-11-2026"
+          }
+        ]
+      },
+      {
+        "name": "Parag Parikh Flexi Cap Direct Growth",
+        "fund_id": null,
+        "isin": "INF879O01027",
+        "category": "Flexi Cap",
+        "fundType": "Equity",
+        "planType": "Direct",
+        "folio_id": "13562473",
+        "active_sips": [
+          {
+            "txn_id": "6828128", "sip_id": "6828128", "sip_type": "flexi_sip", "sip_frequency": "MONTHLY",
+            "fund_id": "3229", "folio_id": "13562473", "amount": 11001, "is_step_up_sip": true,
+            "step_up_by": 10, "step_up_freq": "YEARLY", "sip_start_date": "12-11-2026"
+          }
+        ]
+      }
+    ]
+  }
+}

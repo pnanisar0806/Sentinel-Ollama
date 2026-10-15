@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { openDb } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
+import { persistSipSnapshot } from '../../src/domain/sips.js';
 import { createOrder, getOrder, getPendingApprovals, approveOrder, modifyOrder, deferOrder, rejectOrder, expireOrders, acknowledgeAdvisory, simulatePaperEvent, getOrderHistory, awaitManualExecution, verifyAdvisory, abandonAdvisory, resurfaceDeferredOrder, recordAdvisoryReminder, type OrderStatus, type OrderIntent } from '../../src/domain/orders.js';
 import { buildRecommendation, type Recommendation, type RecLeg, persistRecommendation } from '../../src/domain/recommendations.js';
 import { paise } from '../../src/money/paise.js';
@@ -13,6 +14,8 @@ beforeEach(async () => {
   db = await openDb();
   await runMigrations(db);
   await seed(db, { asOf: SEED_DATE });
+  // Zero SIPs synced, so the order gate's envelope is the ₹50,000 budget these tests assume.
+  await persistSipSnapshot(db, [], new Date().toISOString());
 });
 
 function makeRecommendation(overrides: Partial<Recommendation> = {}): Recommendation {

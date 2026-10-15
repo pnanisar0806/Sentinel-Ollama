@@ -45,8 +45,9 @@ const captureClient = (asked: string[] = []) => ({
 const stubOnce = (payload: unknown) =>
   ({ callTool: async () => envelope(payload) } as unknown as McpClient);
 
+// sleep is a no-op so a throttle's one retry (deferred minor #9) never waits a real minute.
 const source = (client: McpClient, assetTypes?: readonly string[]) =>
-  new RemoteIndmoneySource({ client, spacingMs: 0, ...(assetTypes ? { assetTypes } : {}) });
+  new RemoteIndmoneySource({ client, spacingMs: 0, sleep: async () => {}, ...(assetTypes ? { assetTypes } : {}) });
 
 describe('RemoteIndmoneySource', () => {
   it('produces the same SourceRow shape as the file source', async () => {
@@ -116,6 +117,30 @@ describe('RemoteIndmoneySource', () => {
   it('treats a rate-limit reply as fatal rather than an empty portfolio', async () => {
     await expect(source(stubOnce(fixture._rateLimitedResponse), ['MF']).fetch())
       .rejects.toThrow(/rate_limit_exceeded/);
+  });
+
+  it('waits out a throttle once using retry_after_seconds, then succeeds', async () => {
+    const waits: number[] = [];
+    let calls = 0;
+    const client = {
+      callTool: async (_n: string, args: { asset_type: string }) => {
+        calls += 1;
+        return calls === 1 ? envelope(fixture._rateLimitedResponse) : envelope(capture(args.asset_type));
+      },
+    } as unknown as McpClient;
+    const s = new RemoteIndmoneySource({ client, spacingMs: 0, assetTypes: ['MF'], sleep: async (ms) => { waits.push(ms); } });
+    const { rows } = await s.fetch();
+    expect(rows.length).toBeGreaterThan(0);
+    expect(calls).toBe(2);
+    expect(waits).toEqual([((fixture._rateLimitedResponse['retry_after_seconds'] as number) + 1) * 1000]);
+  });
+
+  it('a second consecutive throttle is still fatal', async () => {
+    let calls = 0;
+    const client = { callTool: async () => { calls += 1; return envelope(fixture._rateLimitedResponse); } } as unknown as McpClient;
+    const s = new RemoteIndmoneySource({ client, spacingMs: 0, assetTypes: ['MF'], sleep: async () => {} });
+    await expect(s.fetch()).rejects.toThrow(/refused networth_holdings/);
+    expect(calls).toBe(2);
   });
 
   it('refuses a partial book flagged by holding_error', async () => {

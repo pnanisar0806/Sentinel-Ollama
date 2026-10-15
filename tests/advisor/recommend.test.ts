@@ -159,3 +159,64 @@ describe('what the model decides', () => {
     await db.close();
   });
 });
+
+describe('the budget the model sees (SIP tracking Task 8)', () => {
+  beforeEach(async () => { await covered('NSE:BAJAJ-AUTO'); });
+  const budget = {
+    monthlyBudget: '₹50,000', sipTotal: '₹30,254', sipAsOf: '2026-10-14', freeEnvelope: '₹19,746',
+    spentThisMonth: '₹5,000', remaining: '₹14,746',
+    sips: [{ fund: 'ICICI Nifty 50', amount: '₹14,001', assetClass: 'EQUITY' }],
+  };
+  const capture = () => {
+    const sent: string[] = [];
+    const f = (async (_u: string, init: { body: string }) => {
+      sent.push(init.body);
+      return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ ...good, decision: 'HOLD', candidateId: null }) } }] }) };
+    }) as unknown as typeof fetch;
+    return { f, user: () => JSON.parse(JSON.parse(sent[0]!).messages[1].content) };
+  };
+  const snapshot = async () => {
+    const [r] = await db.query<{ s: unknown }>(`select input_snapshot as s from advisor_proposals order by id desc limit 1`);
+    return (typeof r!.s === 'string' ? JSON.parse(r!.s) : r!.s) as Record<string, unknown>;
+  };
+
+  it('shows the model the budget, SIPs and free envelope, and records exactly that in the snapshot', async () => {
+    const { f, user } = capture();
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: f, now: NOW, budget });
+    expect(user().budget).toEqual(budget);
+    expect((await snapshot())['budget']).toEqual(budget);
+  });
+
+  it('an unknown envelope still goes in, as null, so the model sees sizing is withheld', async () => {
+    const unknown = { monthlyBudget: '₹50,000', sipTotal: null, sipAsOf: null, freeEnvelope: null, spentThisMonth: '₹0', remaining: null, sips: [] };
+    const { f, user } = capture();
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: f, now: NOW, budget: unknown });
+    expect(user().budget).toEqual(unknown);
+    expect((await snapshot())['budget']).toEqual(unknown);
+  });
+
+  it('no budget given: none is sent or recorded', async () => {
+    const { f, user } = capture();
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: f, now: NOW });
+    expect(user()).not.toHaveProperty('budget');
+    expect(await snapshot()).not.toHaveProperty('budget');
+  });
+
+  it('a reply echoing an amount from the budget is still rejected', async () => {
+    const { f, calls } = reply({ ...good, amount: '₹19,746' });
+    const r = await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: f, now: NOW, budget });
+    expect(r.decision).toBe('UNAVAILABLE');
+    expect(calls()).toBe(2);
+    expect((await db.query<{ error: string }>(`select error from llm_calls`)).every((c) => /"amount"/.test(c.error))).toBe(true);
+  });
+
+  it('the prompt tells the model the budget is context, and the version is advise-v2', async () => {
+    const { f } = capture();
+    let system = '';
+    const spy = (async (u: string, init: { body: string }) => { system = JSON.parse(init.body).messages[0].content; return f(u, init as never); }) as unknown as typeof fetch;
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: spy, now: NOW, budget });
+    expect(system).toMatch(/"budget" shows his monthly budget.*you still never state an amount/);
+    const [p] = await db.query<{ prompt_version: string }>(`select prompt_version from advisor_proposals order by id desc limit 1`);
+    expect(p!.prompt_version).toBe('advise-v2');
+  });
+});

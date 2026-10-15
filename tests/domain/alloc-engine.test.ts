@@ -128,6 +128,57 @@ describe('rebalanceRec — tax awareness', () => {
     expect(rec.taxNotes.join(' ')).toMatch(/no (taxable event|realisation)/i);
   });
 
+  // Each month moves the overshoot by inflow·(1−max) − max·dilution, so new money closes it
+  // exactly while the overweight class takes less than `max` of it: inflow/(inflow+dilution) < max.
+  const withEquitySip = (state: AllocationState, inflow: bigint): AllocationState => ({
+    ...state, routes: [...(state.routes ?? []), {
+      id: 'sip-equity', kind: 'sip', assetClass: 'EQUITY', monthlyCapacityPaise: inflow as Paise, loadFree: true,
+    }],
+  });
+  const overweightSetup = () => {
+    // overweightEquity() is EQUITY 70% against a 60% ceiling: 10 points over, well beyond
+    // SELL_TOLERANCE (2 points), so the flow-vs-trim decision is live. Inside the tolerance
+    // the engine always answers DIRECT_FLOW and these tests could not go red.
+    const state = stateOf(overweightEquity(), [sipRoute('DEBT', 30_000)]);
+    const equity = rebalanceRec(state, '2026-10').drift.find((d) => d.assetClass === 'EQUITY')!;
+    expect(equity.actual - equity.max).toBeGreaterThan(SELL_TOLERANCE);
+    expect(rebalanceRec(state, '2026-10').actions.some((a) => a.kind === 'DIRECT_FLOW')).toBe(true);
+    const dilution = (state.routes ?? []).filter((r) => r.assetClass !== 'EQUITY')
+      .reduce((s, r) => s + r.monthlyCapacityPaise, 0n);
+    const maxBp = BigInt(Math.round(equity.max * 10_000));
+    return { state, dilution, maxBp };
+  };
+
+  it('an equity SIP that takes the ceiling share of new money leaves nothing to dilute: trim', () => {
+    const { state, dilution, maxBp } = overweightSetup();
+    // Break-even: inflow/(inflow+dilution) = max exactly, so new money no longer moves the
+    // overshoot at all (₹45,000 against ₹30,000 at a 60% ceiling).
+    const inflow = (dilution * maxBp) / (10_000n - maxBp);
+    expect((inflow * (10_000n - maxBp)) % maxBp).toBe(0n); // exact, no rounding in the premise
+    const after = rebalanceRec(withEquitySip(state, inflow), '2026-10');
+    expect(after.actions.some((a) => a.kind === 'TRIM')).toBe(true);
+    expect(after.actions.some((a) => a.kind === 'DIRECT_FLOW')).toBe(false);
+  });
+
+  it('an equity SIP larger than the dilution still flows while its share stays under the ceiling', () => {
+    const { state, dilution, maxBp } = overweightSetup();
+    // inflow = 4/3 × dilution (₹40,000 vs ₹30,000): bigger than the dilution, but equity gets
+    // 4/7 ≈ 57% of new money, under the 60% ceiling, so the overshoot still shrinks each month.
+    const inflow = (dilution * 4n) / 3n;
+    expect(inflow > dilution).toBe(true);
+    expect(inflow * 10_000n < maxBp * (inflow + dilution)).toBe(true);
+    const after = rebalanceRec(withEquitySip(state, inflow), '2026-10');
+    expect(after.actions.some((a) => a.kind === 'DIRECT_FLOW')).toBe(true);
+    expect(after.actions.some((a) => a.kind === 'TRIM')).toBe(false);
+  });
+
+  it('an inflow SIP smaller than the dilution still flows, and says what it costs', () => {
+    // ₹15,000 of equity SIPs at a 60% ceiling cancels ₹10,000 of the ₹30,000 dilution.
+    const state = stateOf(overweightEquity(), [sipRoute('DEBT', 30_000), sipRoute('EQUITY', 15_000)]);
+    const flow = rebalanceRec(state, '2026-10').actions.find((a) => a.kind === 'DIRECT_FLOW')!;
+    expect(flow.rationale).toMatch(/SIPs add ₹15,000\/month to EQUITY, which cancels ₹10,000 of the ₹30,000\/month/);
+  });
+
   it('falls back to a trim only when no funding route can absorb the drift', () => {
     const rec = rebalanceRec(stateOf(overweightEquity()), '2026-09');
     const trim = rec.actions.find((a) => a.kind === 'TRIM')!;

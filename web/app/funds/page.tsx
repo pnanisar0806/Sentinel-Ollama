@@ -1,4 +1,4 @@
-import { getMfRanking, getMfSwitches } from '@/lib/data';
+import { getMfRanking, getMfSwitches, getSips } from '@/lib/data';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
 
@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic';
 export default async function FundsPage() {
   const { ranked, caveats } = await getMfRanking();
   const { switches, margin } = await getMfSwitches();
+  const sips = await getSips();
+  // Ranking rows carry the position id, which for an INDmoney fund is IND:<fund_id> — the
+  // same id the SIP sync writes, so no canonical/sibling mapping is needed.
+  // Active SIPs only: a SIP stopped this month still counts toward the month, but is not running.
+  const sipOf = new Map(sips.rows.filter((r) => !r.departed).map((r) => [r.instrumentId, r.amountPaise]));
   const total = ranked.reduce((a, r) => a + r.valuePaise, 0n);
 
   return (
@@ -60,6 +65,17 @@ export default async function FundsPage() {
                 { label: 'Cost', value: ({ r }) => r.components?.expense ?? '—' },
                 { label: 'Size', value: ({ r }) => r.components?.aum ?? '—' },
                 { label: 'Months', value: ({ r }) => r.monthsOfHistory },
+                {
+                  label: 'SIP',
+                  value: ({ r }) => (sips.asOf === null
+                    ? <span className="dim">unknown</span>
+                    // Stale (or a non-MONTHLY SIP in the set): the list is not a current monthly figure.
+                    : sips.stale || sips.sipTotalPaise === null
+                      ? <span className="dim">unknown (as of {sips.asOf.slice(0, 10)})</span>
+                    : sipOf.has(r.instrumentId)
+                      ? <><Money p={sipOf.get(r.instrumentId)! as never} />/mo</>
+                      : <span className="dim">no active SIP</span>),
+                },
               ]}
             />
           </Card>

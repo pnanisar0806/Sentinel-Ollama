@@ -65,8 +65,9 @@ describe('staleness engine', () => {
     const expected = rows.filter((r) => r.stale).length;
     // manual-seed, indmoney, frankfurter, bhavcopy, amfi, screener. `composite` was
     // removed on 2026-09-20 — nothing ever wrote it, so it held an incident that could
-    // never clear. One fewer source, hence 6 rather than 7.
-    expect(expected).toBe(6);
+    // never clear. One fewer source, hence 6 rather than 7. `indmoney-sips` (2026-10-14)
+    // has no snapshot either: 7.
+    expect(expected).toBe(7);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     expect(await raiseIncidents(db, rows)).toBe(0);
@@ -82,8 +83,9 @@ describe('staleness engine', () => {
     );
     const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
     // Portfolio (3) + frankfurter (stale at 5 days) + bhavcopy + amfi + screener (all empty) = 7.
+    // Plus indmoney-sips (no snapshot, 2026-10-14).
     const expected = rows.filter((r) => r.stale).length;
-    expect(expected).toBe(6);
+    expect(expected).toBe(7);
 
     expect(await raiseIncidents(db, rows)).toBe(expected);
     const open = await db.query<{ n: string }>(
@@ -98,9 +100,9 @@ describe('staleness engine', () => {
     const fresher = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
     await raiseIncidents(db, fresher);
 
-    // manual-seed recovers; indmoney/frankfurter/bhavcopy/amfi still have no data at all.
+    // manual-seed recovers; indmoney/frankfurter/bhavcopy/amfi/indmoney-sips still have no data at all.
     const expected = fresher.filter((r) => r.stale).length;
-    expect(expected).toBe(5);
+    expect(expected).toBe(6);
     expect(fresher.find((r) => r.source === 'manual-seed')!.stale).toBe(false);
 
     const open = await db.query<{ n: string }>(
@@ -122,10 +124,11 @@ describe('staleness engine', () => {
     await raiseIncidents(db, after);
 
     // frankfurter recovers (12.5h < 48h); manual-seed is 90h old and stays stale, as do
-    // the two portfolio sources that never produced a row and the three empty market tables.
+    // the two portfolio sources that never produced a row, the three empty market tables
+    // and indmoney-sips, which has no snapshot.
     expect(after.find((r) => r.source === 'frankfurter')!.stale).toBe(false);
     const expected = after.filter((r) => r.stale).length;
-    expect(expected).toBe(5);
+    expect(expected).toBe(6);
 
     const open = await db.query<{ n: string }>(
       `select count(*) as n from incidents where kind = 'STALE_DATA' and resolved_at is null`,

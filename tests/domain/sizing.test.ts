@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { sizeCandidates, type SizingInput } from '../../src/domain/sizing.js';
+import { openDb } from '../../src/db/client.js';
+import { runMigrations } from '../../src/db/migrate.js';
+import { seed } from '../../src/seed/seed.js';
+import { istDate, loadFreeEnvelope, persistSipSnapshot } from '../../src/domain/sips.js';
+import { logPurchase } from '../../src/domain/owner-log.js';
+import { loadSizingInput } from '../../src/domain/sizing-input.js';
 
 /**
  * Phase 2.5 Task 4. The LLM advisor chooses among candidates; this decides how much. Every
@@ -10,6 +16,7 @@ const AS_OF = '2026-09-27';
 const base = (over: Partial<SizingInput> = {}): SizingInput => ({
   asOf: AS_OF,
   tacticalBudgetPaise: 5_000_000n,       // ₹50k a month
+  envelopeReason: null,
   maxOrderPaise: 10_000_000n,
   cashAvailablePaise: 20_000_000n,       // ₹2L free cash
   reservedPaise: 0n,
@@ -103,5 +110,50 @@ describe('identity', () => {
     expect(sizeCandidates(base())[0]!.id).toBe(sizeCandidates(base())[0]!.id);
     expect(sizeCandidates(base())[0]!.id).not.toBe(sizeCandidates(base({ tacticalBudgetPaise: 4_000_000n }))[0]!.id);
     expect(eligible(sizeCandidates(base())).every((c) => c.policyVersion === 'sizing-v1')).toBe(true);
+  });
+});
+
+describe('the free envelope', () => {
+  it('an unknown envelope withholds every BUY with its reason', () => {
+    const reason = 'SIP commitment unknown: last SIP sync 2026-09-30 is older than 7 days';
+    const out = sizeCandidates(base({ tacticalBudgetPaise: 0n, envelopeReason: reason }));
+    expect(out.every((c) => c.status === 'WITHHELD' && c.withheldReason === reason)).toBe(true);
+  });
+
+  it('a zero envelope with a reason withholds with that reason, not the generic one', () => {
+    const out = sizeCandidates(base({ tacticalBudgetPaise: 0n, envelopeReason: 'SIPs already use the whole budget' }));
+    expect(out[0]!.withheldReason).toBe('SIPs already use the whole budget');
+  });
+
+  it('sells are unaffected by the envelope', () => {
+    const out = sizeCandidates(base({
+      tacticalBudgetPaise: 0n, envelopeReason: 'SIPs already use the whole budget', buys: [],
+      holdings: [{ instrumentId: 'NSE:B', valuePaise: 800_000n, units: '10', kind: 'EQUITY', costKnown: true }],
+      sells: [{ instrumentId: 'NSE:B', name: 'B', kind: 'EQUITY', action: 'SELL', amountPaise: null, blockedByMinimumHold: false, reason: 'falsified' }],
+    }));
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ action: 'SELL', status: 'ELIGIBLE', units: '10' });
+  });
+});
+
+describe('loadSizingInput offers at most what remains this month (SIP gaps Task 2)', () => {
+  it('the budget is the envelope less this month\'s logged purchases; fully spent withholds with the reason', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-12' });
+    const now = new Date().toISOString();
+    await persistSipSnapshot(db, [], now);
+    const envelope = (await loadFreeEnvelope(db, now)).envelopePaise!;
+    const spent = 3_000_000n;
+    await logPurchase(db, { boughtOn: istDate(now), description: 'Gold ETF', amountPaise: spent }, now);
+    const input = await loadSizingInput(db, AS_OF);
+    expect(input.tacticalBudgetPaise).toBe(envelope - spent);
+    expect(input.tacticalBudgetPaise < envelope).toBe(true);
+
+    await logPurchase(db, { boughtOn: istDate(now), description: 'Gold ETF', amountPaise: envelope }, now);
+    const spentOut = await loadSizingInput(db, AS_OF);
+    expect(spentOut.tacticalBudgetPaise).toBe(0n);
+    expect(spentOut.envelopeReason).toMatch(/already deployed/);
+    await db.close();
   });
 });

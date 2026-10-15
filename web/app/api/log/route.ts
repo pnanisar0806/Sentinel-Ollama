@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
-import { completeMilestone, logGoalMove, logNote, type GoalMoveKind } from '../../../../src/domain/owner-log';
+import { completeMilestone, logGoalMove, logNote, logPurchase, type GoalMoveKind } from '../../../../src/domain/owner-log';
 import { recordRedemption, stateRedemptionAmount } from '../../../../src/domain/bond-redemptions';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,8 @@ type Body =
   | { action: 'goal'; bucketId: string; on: string; rupees: string; kind: GoalMoveKind; note: string }
   | { action: 'milestone'; id: string; on: string }
   | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string }
-  | { action: 'note'; on: string; text: string };
+  | { action: 'note'; on: string; text: string }
+  | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string };
 
 function paise(rupees: string): bigint {
   const m = /^\s*(\d{1,12})(?:\.(\d{1,2}))?\s*$/.exec(rupees.replace(/,/g, ''));
@@ -40,6 +41,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const fresh = await recordRedemption(d, body.instrumentId, { receivedOn: body.on, amountPaise: null, note: body.note ?? '' });
         await stateRedemptionAmount(d, body.instrumentId, amount, body.note ?? '');
         return NextResponse.json({ ok: true, message: fresh ? 'Redemption recorded.' : 'Already redeemed; the amount was added.' });
+      }
+      case 'purchase': {
+        // Units are optional exact decimal text; the column is numeric > 0, but its error is not readable.
+        const units = (body.units ?? '').trim();
+        if (units !== '' && !(/^\d+(\.\d+)?$/.test(units) && /[1-9]/.test(units))) {
+          return NextResponse.json({ error: `"${units}" is not a positive number of units` }, { status: 400 });
+        }
+        await logPurchase(d, {
+          boughtOn: body.on, description: body.description ?? '', amountPaise: paise(body.rupees ?? ''),
+          instrumentId: body.instrumentId || null, units: units || null, note: body.note ?? '',
+        });
+        return NextResponse.json({ ok: true, message: 'Purchase recorded; it counts against that month.' });
       }
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });

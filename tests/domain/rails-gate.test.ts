@@ -1,13 +1,18 @@
+import { readFile } from 'node:fs/promises';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
-import { checkRails } from '../../src/domain/rails.js';
+import { checkPortfolioRails, checkRails } from '../../src/domain/rails.js';
 import { buildRecommendation, type Recommendation } from '../../src/domain/recommendations.js';
 import { concentration } from '../../src/domain/allocation.js';
-import { createOrder } from '../../src/domain/orders.js';
+import { createOrder, deferOrder, getOrder, modifyOrder } from '../../src/domain/orders.js';
 import { persistRecommendation } from '../../src/domain/recommendations.js';
 import { loadPositions } from '../../src/domain/networth.js';
+import { istDate, loadFreeEnvelope, loadMonthSpend, persistSipSnapshot } from '../../src/domain/sips.js';
+import { logPurchase } from '../../src/domain/owner-log.js';
+import { netWorth } from '../../src/domain/networth.js';
+import { parseMfSips } from '../../src/sources/indmoney.js';
 
 /**
  * `checkRails` is the per-order rail gate: MAX_ORDER_EXCEEDED, TACTICAL_BUDGET_EXCEEDED,
@@ -149,7 +154,8 @@ describe('the order gate enforces the rails', () => {
   beforeEach(async () => {
     db = await openDb();
     await runMigrations(db);
-    await seed(db, { asOf: '2026-08-12' });
+    await seed(db, { asOf: '2026-08-12' });    // Zero SIPs synced: the envelope is the ₹50,000 these tests were written against.
+    await persistSipSnapshot(db, [], new Date().toISOString());
   });
 
   const order = async (r: Recommendation) => {
@@ -187,6 +193,154 @@ describe('the order gate enforces the rails', () => {
 
     const twoMonthsLater = { ...buy(), createdOn: '2026-11-17' };
     await expect(order(twoMonthsLater)).rejects.toThrow(/HOLD_PERIOD/);
+    await db.close();
+  });
+});
+
+const live = parseMfSips({
+  result: JSON.stringify(JSON.parse(await readFile('tests/fixtures/indmoney-mf-sips-2026-10-14.json', 'utf8')).payload),
+});
+
+/**
+ * Since 2026-10-15 the monthly cap is the free envelope: the owner's budget minus the
+ * live SIPs, inside the tactical rail. SIPs already spend part of the budget every
+ * month, so a ₹50k tactical rail on top of them would let the owner deploy twice.
+ */
+describe('the tactical cap is the free envelope', () => {
+  let db: Db;
+  beforeEach(async () => {
+    db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-12' });
+  });
+
+  const tactical = async (r: Recommendation) =>
+    (await checkRails(db, r)).find((v) => v.code === 'TACTICAL_BUDGET_EXCEEDED');
+
+  it('measures a BUY against budget minus live SIPs', async () => {
+    await persistSipSnapshot(db, live, new Date().toISOString());
+    // Seeded budget is ₹50,000 and the fixture's SIPs are under it, so the envelope is the
+    // budget less the SIPs (the ₹50,000 tactical rail does not bind).
+    const envelope = 50_00_000n - live.reduce((s, r) => s + r.amountPaise, 0n);
+    expect(envelope > 0n && envelope < 50_00_000n).toBe(true);
+
+    const over = await tactical(rec({ amountPaise: String(envelope + 100n) }));
+    expect(over?.detail).toMatch(/budget ₹.*SIPs ₹/);
+    expect(await tactical(rec({ amountPaise: String(envelope) }))).toBeUndefined();
+    await db.close();
+  });
+
+  it("measures a BUY against what remains after this month's logged purchases, naming spent and remaining", async () => {
+    const now = new Date().toISOString();
+    await persistSipSnapshot(db, live, now);
+    const envelope = (await loadFreeEnvelope(db, now)).envelopePaise!;
+    const spent = 500_000n; // ₹5,000 bought outside Sentinel today
+    await logPurchase(db, { boughtOn: istDate(now), description: 'Zerodha Gold ETF', amountPaise: spent }, now);
+    const remaining = envelope - spent;
+
+    const over = await tactical(rec({ amountPaise: String(remaining + 100n) }));
+    expect(over?.detail).toMatch(/budget ₹.*SIPs ₹.*spent ₹5,000.*remaining ₹/);
+    expect(await tactical(rec({ amountPaise: String(remaining) }))).toBeUndefined();
+    await db.close();
+  });
+
+  it('the portfolio check reports a month whose spend is past the envelope', async () => {
+    const now = new Date().toISOString();
+    await persistSipSnapshot(db, live, now);
+    const envelope = (await loadFreeEnvelope(db, now)).envelopePaise!;
+    const positions = await loadPositions(db);
+    const tactical = async () => (await checkPortfolioRails(db, positions, netWorth(positions, 0n as never).assetsPaise))
+      .find((v) => v.code === 'TACTICAL_BUDGET_EXCEEDED');
+    await logPurchase(db, { boughtOn: istDate(now), description: 'Gold ETF', amountPaise: envelope }, now);
+    expect(await tactical()).toBeUndefined(); // exactly the envelope is not a breach
+    await logPurchase(db, { boughtOn: istDate(now), description: 'Gold ETF', amountPaise: 100n }, now);
+    expect((await tactical())?.detail).toMatch(/spent/);
+    await db.close();
+  });
+
+  it('refuses a BUY when the SIP commitment is unknown', async () => {
+    expect((await tactical(rec({ amountPaise: '100000' })))?.detail).toMatch(/never synced/);
+    await db.close();
+  });
+
+  it('never measures a SELL, even with the SIP commitment unknown', async () => {
+    expect(await tactical(rec({ instrumentId: 'US:NOW', action: 'SELL', amountPaise: '9000000' }))).toBeUndefined();
+    await db.close();
+  });
+});
+
+/**
+ * Final fix M3. Re-gating an EXISTING order (a modify, or a deferred order resurfacing) must
+ * not count that order against itself: its open quantity is already inside this month's
+ * spend, and adding its amount again refused a legitimate order. A modify is measured at its
+ * new amount, once; spend reads the latest revision's quantity, not the original.
+ */
+describe('re-gating an existing order counts it once', () => {
+  let db: Db;
+  let envelope: bigint;
+  beforeEach(async () => {
+    db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-12' });
+    const now = new Date().toISOString();
+    await persistSipSnapshot(db, live, now);
+    envelope = (await loadFreeEnvelope(db, now)).envelopePaise!;
+  });
+
+  // RPOWER: the rebalance's GOLDBEES is concentration-capped on the seeded book.
+  const order = async (amount: bigint) => {
+    const r = rec({ instrumentId: 'NSE:RPOWER', amountPaise: amount.toString() });
+    const persisted = await persistRecommendation(db, r);
+    return createOrder(db, { recommendationId: persisted.id!, recommendation: r, createdBy: 'advisor' });
+  };
+
+  it('a deferred order inside the envelope passes the gate again (the resurface re-gate)', async () => {
+    // `resurfaceDeferredOrder` re-gates with `excludeOrderIntentId: order.id`; this is that call.
+    // (The function itself cannot be reached end to end today: it reads `defer_until` from the
+    // order row, which `deferOrder` never writes — see the final-fix report.)
+    const amount = (envelope * 3n) / 4n; // fits once, not twice
+    expect(2n * amount > envelope).toBe(true);
+    const o = await order(amount);
+    await deferOrder(db, o.id, { idempotencyKey: `d:${o.id}`, actor: 'owner', deferUntil: '2020-01-01' });
+    expect((await loadMonthSpend(db, new Date().toISOString())).ordersPaise).toBe(amount); // the premise: it is spend
+    const r = rec({ instrumentId: 'NSE:RPOWER', amountPaise: amount.toString() });
+    const tactical = async (opts: Parameters<typeof checkRails>[2]) =>
+      (await checkRails(db, r, opts)).find((v) => v.code === 'TACTICAL_BUDGET_EXCEEDED');
+    expect(await tactical({})).toBeDefined(); // counted against itself, it is refused
+    expect(await tactical({ excludeOrderIntentId: o.id })).toBeUndefined();
+    await db.close();
+  });
+
+  it('a modify is measured at its new amount, once, and spend then reads the revision', async () => {
+    const o = await order(envelope / 3n);
+    const raised = (envelope * 3n) / 4n; // old + new > envelope; new alone fits
+    expect(envelope / 3n + raised > envelope).toBe(true);
+    await modifyOrder(db, o.id, { idempotencyKey: `m:${o.id}`, actor: 'owner', quantity: raised.toString() });
+    expect((await loadMonthSpend(db, new Date().toISOString())).ordersPaise).toBe(raised);
+    await db.close();
+  });
+
+  it('two transitions at the same instant: the gate and the order state read the same one', async () => {
+    const o = await order(envelope / 2n);
+    const at = '2030-01-01T00:00:00Z'; // after the create transition, identical for both rows
+    const ins = (id: string, to: string) => db.query(
+      `insert into order_transitions (id, order_intent_id, revision_number, from_status, to_status, actor, at, payload_snapshot, expected_revision)
+       values ($1, $2, 1, 'PENDING_APPROVAL', $3, 'owner', $4, '{}'::jsonb, 1)`, [id, o.id, to, at]);
+    await ins('ffffffff-ffff-4fff-bfff-ffffffffffff', 'REJECTED');
+    await ins('00000000-0000-4000-8000-000000000000', 'APPROVED');
+    expect((await getOrder(db, o.id))!.status).toBe('REJECTED');
+    expect((await loadMonthSpend(db, new Date().toISOString())).ordersPaise).toBe(0n); // released, as the state says
+    await db.close();
+  });
+
+  it('a modify past the envelope is still refused: the exclusion is the order itself, not the month', async () => {
+    const o = await order(envelope / 4n);
+    await expect(modifyOrder(db, o.id, { idempotencyKey: `m:${o.id}`, actor: 'owner', quantity: (envelope + 100n).toString() }))
+      .rejects.toThrow(/TACTICAL_BUDGET_EXCEEDED/);
+    // And another order's spend still counts against it: o's quarter plus three quarters and ₹1.
+    const other = await order(envelope / 2n);
+    await expect(modifyOrder(db, other.id, { idempotencyKey: `m:${other.id}`, actor: 'owner', quantity: ((envelope * 3n) / 4n + 100n).toString() }))
+      .rejects.toThrow(/TACTICAL_BUDGET_EXCEEDED/);
     await db.close();
   });
 });

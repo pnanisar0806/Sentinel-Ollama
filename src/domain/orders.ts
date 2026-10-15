@@ -217,6 +217,7 @@ async function validateOrderGate(
   recommendation: Recommendation,
   skipStalenessCheck = false,
   forRecommendationId?: number,
+  excludeOrderIntentId?: string,
 ): Promise<void> {
   // Skip staleness check if explicitly requested (e.g., for tests)
   if (!skipStalenessCheck) {
@@ -266,7 +267,7 @@ async function validateOrderGate(
   //
   // STALE_DATA is dropped: the block above already raises it, with the offending sources
   // named, and honours `skipStalenessCheck`. Every other violation refuses the order.
-  const railViolations = (await checkRails(db, recommendation, { forRecommendationId }))
+  const railViolations = (await checkRails(db, recommendation, { forRecommendationId, excludeOrderIntentId }))
     .filter((v) => v.code !== 'STALE_DATA');
   if (railViolations.length > 0) {
     throw new Error(
@@ -277,7 +278,7 @@ async function validateOrderGate(
 
 async function getCurrentStatus(db: Db, orderIntentId: string): Promise<OrderStatus> {
   const [row] = await db.query<Record<string, unknown>>(
-    `select to_status from order_transitions where order_intent_id = $1 order by at desc limit 1`,
+    `select to_status from order_transitions where order_intent_id = $1 order by at desc, id desc limit 1`,
     [orderIntentId],
   );
   if (!row) return 'DRAFT';
@@ -498,7 +499,8 @@ export async function modifyOrder(db: Db, id: string, input: ModifyInput): Promi
       paperMode: baseRec.paperMode,
     };
     const targetInstrumentId = (newPayload.alternateInstrumentId as string) ?? (newPayload.instrumentId as string) ?? primary.instrumentId ?? order.instrumentId;
-    await validateOrderGate(tx, targetInstrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId);
+    // Re-gated without its own current amount: the modify is measured once, at the new amount.
+    await validateOrderGate(tx, targetInstrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId, id);
 
     await tx.query(
       `insert into order_revisions
@@ -604,7 +606,7 @@ export async function expireOrders(
     if (!expiresAt || expiresAt > now) continue;
     
     const [transition] = await db.query<{ to_status: OrderStatus }>(
-      `select to_status from order_transitions where order_intent_id = $1 order by at desc limit 1`,
+      `select to_status from order_transitions where order_intent_id = $1 order by at desc, id desc limit 1`,
       [order.id],
     );
     
@@ -832,7 +834,8 @@ export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderI
   };
 
   // Re-validate rails and freshness (skip staleness in tests)
-  await validateOrderGate(db, order.instrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId);
+  // Its own open amount is already this month's spend; it must not be counted twice.
+  await validateOrderGate(db, order.instrumentId, modifiedRec, process.env.NODE_ENV === 'test', order.recommendationId, id);
 
   // Check if score (if available in engineEvidence) fell below threshold
   const composite = modifiedRec.engineEvidence?.composite;
