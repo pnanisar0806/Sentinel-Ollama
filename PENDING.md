@@ -5,6 +5,13 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [ ] **WORK ORDER (owner, 2026-10-16):** finish SIP piece 1 (branch `fix/monthly-investing-controls`:
+      owner SIP payments + rupee budget editor; migration 0034 → prod, push, record HDFC ₹3,001
+      2026-10-12 via `recordSipPayment` source `owner-chat`) → **piece 2** (goal tracker + goal plan;
+      brainstorm opens with the five spec §2.5 owner inputs) → **log batch A** (2,5,6,13) →
+      **piece 3** (funds-first) → **batch B** (3,4,8; Invesco/mandates live here) → **batch C** (9,10).
+      Each: design for owner approval → opus SDD → one squashed push. Migration 0035 (drop the 18
+      permissive `using (true)` RLS policies) already applied to prod 2026-10-16.
 - [ ] **SIPs → goals → funds-first (owner, 2026-10-13/14).** Spec:
       `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` — approved.
   - [x] **Piece 1 (SIP tracking) — SHIPPED 2026-10-15**, branch `feat/sip-tracking`,
@@ -23,8 +30,14 @@ MEMORY.md; the code map lives in index.md.
       FIXED 2026-10-15 (departed SIPs count; plan `2026-10-15-sip-gaps.md`).
 - [x] **Envelope gap: purchases made outside Sentinel are not counted** — FIXED 2026-10-15
       (`owner_purchases`, migration 0033 applied to prod 2026-10-15; "remaining to invest").
-- [ ] **Owner: log the Zerodha Gold ETF purchase on /log** — ₹19,722, dated 2026-10-14 — so
-      October reads ₹24 remaining instead of ₹19,746.
+- [x] **Owner: log the Zerodha Gold ETF purchase on /log** — done; prod reads ₹19,724 spent
+      (the note above said ₹19,722 — the logged figure stands).
+- [ ] **Owner SIP payments + rupee budget editor (branch `fix/monthly-investing-controls`,
+      2026-10-16, committed locally, NOT pushed).** After deploy: apply migration 0034 to
+      Supabase, then the controller records HDFC Mid Cap ₹3,001 paid 2026-10-12 via
+      `recordSipPayment(..., source: 'owner-chat')` → Overview reads SIPs ₹30,254, remaining ₹22.
+- [ ] **Later batch: upcoming SIPs / pending mandates** (Invesco ₹3,001, first instalment Nov
+      2026) — dropped from 0034 by owner decision 2026-10-16; the feed counts it once live.
 - [ ] **PRE-EXISTING DEFECT — deferred orders never resurface.** `resurfaceDeferredOrder`
       reads `order_intents.defer_until`, which `deferOrder` never writes; the scheduler reads
       PENDING_APPROVAL only. Its withdrawal path writes DEFERRED→DEFERRED, violating

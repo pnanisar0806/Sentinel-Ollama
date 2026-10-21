@@ -112,4 +112,9 @@ describe('row level security', () => {
     const unprotected = rows.filter((r) => !r.rowsecurity).map((r) => r.tablename);
     expect(unprotected).toEqual([]);
   });
+
+  it('no public-schema RLS policy exists: RLS on, no policy, so anon/authenticated get nothing (0034, 0035)', async () => {
+    const [r] = await db.query<{ n: string | number }>(`select count(*)::int n from pg_policies where schemaname = 'public'`);
+    expect(Number(r!.n)).toBe(0);
+  });
 });

@@ -4,16 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 /**
- * Freeze, unfreeze, breaker reset and rail changes.
+ * Freeze, unfreeze and breaker reset. Rail changes are entered in rupees on BudgetEditor.
  *
  * Unfreeze and reset take a typed phrase: a tap is not a decision. Both are checked
  * server-side in the domain, so this form cannot be talked past.
  */
-const RAIL_KEYS = [
-  'monthly_budget_paise', 'max_order_paise', 'tactical_monthly_paise', 'cash_ceiling_pct', 'single_stock_cap_pct',
-  'employer_cap_pct', 'mf_scheme_cap_pct', 'sector_cap_pct', 'issuer_cap_pct',
-];
-
 export default function ControlsPanel(
   { frozen, breakerTripped }: { frozen: boolean; breakerTripped: boolean },
 ) {
@@ -22,8 +17,6 @@ export default function ControlsPanel(
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [reason, setReason] = useState('');
   const [typed, setTyped] = useState('');
-  const [railKey, setRailKey] = useState(RAIL_KEYS[0]!);
-  const [railValue, setRailValue] = useState('');
 
   async function send(body: Record<string, unknown>) {
     setBusy(true);
@@ -36,7 +29,7 @@ export default function ControlsPanel(
       });
       const json = await res.json() as { message?: string; error?: string };
       setMessage({ ok: res.ok, text: json.message ?? json.error ?? `failed (${res.status})` });
-      if (res.ok) { setTyped(''); setReason(''); setRailValue(''); router.refresh(); }
+      if (res.ok) { setTyped(''); setReason(''); router.refresh(); }
     } catch (e) {
       setMessage({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -74,20 +67,6 @@ export default function ControlsPanel(
             onClick={() => send({ action: 'reset_breaker', typed })}>Reset breaker</button>
         </label>
       )}
-
-      <label className="dim">
-        Change a rail. It takes effect after 48 hours; a loosening is refused above 15%
-        drawdown, at proposal and again when it would take effect.
-        <select style={field} value={railKey} onChange={(e) => setRailKey(e.target.value)}>
-          {RAIL_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
-        </select>
-        <input style={field} value={railValue} inputMode="numeric" placeholder={railKey.endsWith('_paise') ? 'in paise (₹50,000 = 5000000)' : 'new value'}
-          onChange={(e) => setRailValue(e.target.value)} />
-        <button className="btn" style={{ marginTop: 6 }} disabled={busy || railValue === ''}
-          onClick={() => send({ action: 'propose_rail', key: railKey, value: Number(railValue) })}>
-          Propose change
-        </button>
-      </label>
 
       {message !== null && (
         <p className={message.ok ? 'tone-green' : 'tone-red'} role="status" style={{ whiteSpace: 'pre-wrap' }}>

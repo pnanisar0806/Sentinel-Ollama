@@ -106,6 +106,8 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today }:
               A buy you made yourself, outside Sentinel. It counts against that month&apos;s remaining-to-invest.
               An order Sentinel proposed is marked on Approvals instead — logging it here too would count it twice.
               SIP instalments are already counted in the SIP commitment: never log them here.
+              It updates the monthly budget immediately. Holdings and the allocation bar update from
+              the daily holdings sync, not from this form; the IPS target bands never change.
               Only log buys paid from this month&apos;s budget. A buy funded by a maturity, an RSU vest or a
               redemption is not logged here.
             </p>

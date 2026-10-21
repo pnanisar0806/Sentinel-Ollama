@@ -709,6 +709,18 @@ no double count. Rebalance route capacity stays on the envelope; only the BUY tr
 remaining (spend must not push the engine toward a SALE). At a ₹0 tranche the redirect A1
 names the target fund (FR-11). Owner-log "today" is the IST date.
 
+**Owner SIP payments (2026-10-16, migration 0034):** `owner_sip_payments` holds an
+owner-stated instalment the feed cannot see (HDFC Mid Cap ₹3,001, 12 Oct, stopped before
+tracking began). `loadSipCommitment` adds, per fund (ISIN/canonical aliases joined by
+`sipInstrumentKey`), only `max(0, recorded − feed amount incl. departed)` and only in the
+row's IST month — never on top of the feed. Surfaced as `SipCommitment.ownerPaidThisMonth`
+(`countedPaise`). Stale/absent feed still ⇒ total null. Written only by
+`recordSipPayment` (required `source`, e.g. `owner-chat`); no web form by owner decision.
+Pending mandates (Invesco) are NOT modelled — deferred to a later batch. `advisorBudget`
+lists the counted part too, so its SIP list still sums to `sipTotal`.
+**RLS posture restored (0035, 2026-10-16):** no public-schema policy may exist; a new table
+gets `enable row level security` and nothing else. Test-enforced (`pg_policies` = 0).
+
 **Rebalance capacity with SIP drag (Task 7 ruling, replaces the spec's
 `dilution − inflow`):** `capacity = max(0, dilution − inflow·(1−max)/max)`. The spec's form
 called a shrinking overshoot unclosable and proposed a SALE. **Owner note:** the

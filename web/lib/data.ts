@@ -22,6 +22,7 @@ import { listRedemptionsUntil, type Redemption } from '../../src/domain/redempti
 import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { pendingRailChanges, type PendingRailChange } from '../../src/domain/controls.js';
+import { DEFAULT_OWNER_RAILS } from '../../src/domain/rail-values.js';
 import { loadRatingFilings, watchedIssuers, type StoredFiling } from '../../src/sources/credit-ratings.js';
 import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
 import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src/domain/mf-switch.js';
@@ -780,6 +781,9 @@ export interface SipsData {
   remainingPaise: bigint | null;
   /** Active SIPs, then SIPs stopped this month after their instalment (`departed`, still counted). */
   rows: { key: string; fund: string; instrumentId: string; assetClass: string; amountPaise: bigint; departed: boolean;
+          ownerPaid: boolean; paidOn?: string;
+          /** Owner-recorded rows: the full amount recorded; `amountPaise` is only the part beyond the feed. */
+          recordedPaise?: bigint;
           stepUp: string | null; stepUpInferred: boolean; nextOn: string | null; nextAmountPaise: bigint | null }[];
   nextStepUp: { on: string; totalPaise: bigint | null } | null;
 }
@@ -798,7 +802,7 @@ export async function getSips(): Promise<SipsData> {
       // Rupee step-ups to paise exactly, as nextStepUp does; rounding to the rupee would invent paise.
       stepUp: s.stepUpKind === null ? null : s.stepUpKind === 'percent' ? `${s.stepUpRaw}%`
         : s.stepUpKind === 'rupees' ? formatInr(paise(Math.round(s.stepUpRaw! * 100))) : 'unknown',
-      stepUpInferred: s.stepUpInferred, nextOn: n.on, nextAmountPaise: n.amountPaise, departed: false,
+      stepUpInferred: s.stepUpInferred, nextOn: n.on, nextAmountPaise: n.amountPaise, departed: false, ownerPaid: false,
     };
   });
   const first = rows.map((r) => r.nextOn).filter((x): x is string => x !== null).sort()[0];
@@ -813,9 +817,27 @@ export async function getSips(): Promise<SipsData> {
   // Departed SIPs step up never again; listed after the step-up maths so they cannot move it.
   const departed = c.departedThisMonth.map((s) => ({
     key: s.sipId, fund: s.fundName, instrumentId: s.instrumentId, assetClass: sipAssetClass(s), amountPaise: s.amountPaise,
-    stepUp: null, stepUpInferred: false, nextOn: null, nextAmountPaise: null, departed: true,
+    stepUp: null, stepUpInferred: false, nextOn: null, nextAmountPaise: null, departed: true, ownerPaid: false,
+  }));
+  const paid = c.ownerPaidThisMonth.filter((s) => s.countedPaise > 0n).map((s) => ({
+    key: `paid:${s.instrumentId}`, fund: s.fundName, instrumentId: s.instrumentId,
+    assetClass: sipAssetClass({ instrumentId: s.instrumentId, fundName: s.fundName, fundType: null, category: null }),
+    amountPaise: s.countedPaise, recordedPaise: s.amountPaise, departed: false, ownerPaid: true, paidOn: s.paidOn,
+    stepUp: null, stepUpInferred: false, nextOn: null, nextAmountPaise: null,
   }));
   return { asOf: c.asOf, stale: c.stale, budgetPaise: e.budgetPaise, tacticalPaise: e.tacticalPaise, sipTotalPaise: c.totalPaise,
     envelopePaise: e.envelopePaise, reason: e.reason, spentPaise: e.spentPaise, remainingPaise: e.remainingPaise,
-    rows: [...rows, ...departed], nextStepUp: nextStepUpTotal };
+    rows: [...rows, ...departed, ...paid], nextStepUp: nextStepUpTotal };
+}
+
+export interface InvestmentControls { values: Record<string, number>; pending: PendingRailChange[] }
+
+/** Current owner rails (settings_rails, else the seeded default) and changes waiting out their 48 hours. */
+export async function getInvestmentControls(): Promise<InvestmentControls> {
+  const d = await db();
+  const rows = await d.query<{ key: string; value: number }>(
+    'select key, value from settings_rails where key = any($1::text[])', [Object.keys(DEFAULT_OWNER_RAILS)]);
+  const values = Object.fromEntries(Object.entries(DEFAULT_OWNER_RAILS).map(([key, value]) => [key, Number(value)]));
+  for (const row of rows) values[row.key] = Number(row.value);
+  return { values, pending: await pendingRailChanges(d) };
 }

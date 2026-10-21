@@ -67,11 +67,16 @@ export async function advisorBudget(db: Db, nowIso: string): Promise<AdvisorBudg
     freeEnvelope: inr(env.envelopePaise),
     spentThisMonth: formatInr(env.spentPaise as Paise),
     remaining: inr(env.remainingPaise),
-    // Departed SIPs are inside sipTotal (debited this month), so they are listed too, tagged.
+    // Departed SIPs and owner-recorded payments are inside sipTotal, so they are listed too, tagged.
     sips: c.totalPaise === null ? [] : [
       ...c.sips.map((s) => ({ fund: s.fundName, amount: formatInr(s.amountPaise as Paise), assetClass: sipAssetClass(s) })),
       ...c.departedThisMonth.map((s) => ({ fund: s.fundName, amount: formatInr(s.amountPaise as Paise),
         assetClass: sipAssetClass(s), status: 'stopped — counted this month' })),
+      // Owner-recorded payments: only the part the feed does not carry is inside sipTotal.
+      ...c.ownerPaidThisMonth.filter((p) => p.countedPaise > 0n).map((p) => ({ fund: p.fundName,
+        amount: formatInr(p.countedPaise as Paise),
+        assetClass: sipAssetClass({ instrumentId: p.instrumentId, fundName: p.fundName, fundType: null, category: null }),
+        status: `paid ${p.paidOn} — owner-recorded, counted this month` })),
     ],
   };
 }

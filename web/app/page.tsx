@@ -1,5 +1,6 @@
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getOverview, getSips } from '../lib/data';
+import { getInvestmentControls, getOverview, getSips } from '../lib/data';
+import BudgetEditor from './budget-editor';
 import { AllocationBar, Badge, Card, ClassChip, DataTable, GoalList, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
 
 export const dynamic = 'force-dynamic';
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic';
 export default async function OverviewPage() {
   const { input, blocked } = await getOverview();
   const sips = await getSips();
+  const controls = await getInvestmentControls();
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
@@ -46,6 +48,7 @@ export default async function OverviewPage() {
             tone={input.breaches.length === 0 ? 'ok' : 'warn'}
           >
             <AllocationBar drift={input.drift} />
+            <p className="help">Based on synced holdings. A purchase recorded in Log updates the monthly budget immediately; allocation changes after the holdings sync includes it.</p>
           </Card>
         </div>
 
@@ -64,7 +67,7 @@ export default async function OverviewPage() {
                   : null}
             <div className="stat-grid">
               <Stat label="Budget" value={<Money p={sips.budgetPaise as Paise} />} accent="sky" />
-              <Stat label="SIPs" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} accent="violet" />
+              <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + recorded payments" accent="violet" />
               <Stat
                 label="Spent this month"
                 value={<Money p={sips.spentPaise as Paise} />}
@@ -98,13 +101,17 @@ export default async function OverviewPage() {
                   cols={[
                     {
                       label: 'Fund',
-                      value: (r) => (r.departed
+                      value: (r) => (r.ownerPaid
+                        ? <>{r.fund} <Badge tone="green">{r.recordedPaise === r.amountPaise
+                          ? <>paid {formatInr(r.recordedPaise as Paise)} on {r.paidOn} · counted this month</>
+                          : <>paid {formatInr(r.recordedPaise as Paise)} on {r.paidOn} · {formatInr(r.amountPaise as Paise)} beyond the feed</>}</Badge></>
+                        : r.departed
                         ? <><span className="dim">{r.fund}</span> <Badge tone="gray">stopped — counted this month</Badge></>
                         : r.fund),
                     },
                     { label: 'Class', value: (r) => <ClassChip assetClass={r.assetClass} /> },
                     {
-                      label: 'Monthly',
+                      label: 'Amount counted',
                       value: (r) => (r.departed ? <span className="dim"><Money p={r.amountPaise as Paise} /></span> : <Money p={r.amountPaise as Paise} />),
                       align: 'right',
                     },
@@ -118,6 +125,7 @@ export default async function OverviewPage() {
                 />
               )
               : null}
+            <BudgetEditor controls={controls} budgetOnly />
           </Card>
         </div>
 

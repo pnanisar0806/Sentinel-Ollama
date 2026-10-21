@@ -1,14 +1,17 @@
-import { getCleanupCalendar, getRatingFilings } from '@/lib/data';
+import { getCleanupCalendar, getInvestmentControls, getRatingFilings } from '@/lib/data';
 import { Badge, Card, DataTable, Notice, PageHead, Pct } from '@/lib/ui';
 import { fmtDateTime, relTime, rupees } from '@/lib/format';
 import PromoteExit from './promote-exit';
 import ControlsPanel from './controls-panel';
+import BudgetEditor from '../budget-editor';
+import { formatRailValue, RAIL_LABELS } from '@/lib/rail-form';
 
 export const dynamic = 'force-dynamic';
 
 export default async function CleanupPage() {
   const { redemptions, freezeState, breakerState, railChanges, exitCandidates, drawdownPct } = await getCleanupCalendar();
   const ratings = await getRatingFilings();
+  const controls = await getInvestmentControls();
 
   const statusMap: Record<string, { label: string; tone: 'green' | 'amber' | 'indigo' | 'gray' | 'red' }> = {
     falsification: { label: 'FALSIFICATION', tone: 'red' },
@@ -63,13 +66,18 @@ export default async function CleanupPage() {
       <div className="grid">
         <section className="card span-2">
           <header className="card-head">
-            <span className="card-title">Controls</span>
-            <span className="card-aside">freeze · breaker · rails</span>
+            <span className="card-title">Emergency controls</span>
+            <span className="card-aside">freeze · breaker</span>
           </header>
           <div className="card-body">
             <ControlsPanel frozen={freezeState.active} breakerTripped={breakerState.active} />
           </div>
         </section>
+        <div className="span-2">
+          <Card title="Investment limits" aside="48-hour cooling period">
+            <BudgetEditor controls={controls} />
+          </Card>
+        </div>
         <section className="card span-2">
           <header className="card-head">
             <span className="card-title">Freeze state</span>
@@ -119,8 +127,8 @@ export default async function CleanupPage() {
               ? <Badge tone="green">No rail change waiting out its 48 hours</Badge>
               : railChanges.map((c) => (
                 <div key={c.key}>
-                  <Badge tone="amber">{c.key}: {c.current} → {c.proposed}</Badge>{' '}
-                  <span className="dim">takes effect {fmtDateTime(c.activatesAt)}</span>
+                  <Badge tone="amber">{RAIL_LABELS[c.key] ?? c.key}: {formatRailValue(c.key, c.current)} → {formatRailValue(c.key, c.proposed)}</Badge>{' '}
+                  <span className="dim">eligible {fmtDateTime(c.activatesAt)} · awaiting activation checks</span>
                 </div>
               ))}
             {drawdownPct === null ? (

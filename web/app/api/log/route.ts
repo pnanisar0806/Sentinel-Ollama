@@ -52,7 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           boughtOn: body.on, description: body.description ?? '', amountPaise: paise(body.rupees ?? ''),
           instrumentId: body.instrumentId || null, units: units || null, note: body.note ?? '',
         });
-        return NextResponse.json({ ok: true, message: 'Purchase recorded; it counts against that month.' });
+        return NextResponse.json({ ok: true, message: 'Purchase recorded against that month’s budget. Holdings and allocation update separately through the daily holdings sync.' });
       }
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });

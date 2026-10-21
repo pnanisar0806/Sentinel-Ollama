@@ -1,8 +1,9 @@
 /**
  * Live SIP commitment (spec 2026-10-14 §1.4–1.6) and this month's spend and remaining
  * (SIP gaps Task 2). Reads only `sip_snapshots`, `sips`, `settings_rails`, `order_intents`,
- * `order_transitions` and `owner_purchases`. Must never import buckets.ts or funded-status.ts: the free envelope
- * feeds sizing, and sizing is behind the no-catch-up firewall.
+ * `order_transitions`, `owner_purchases` and `owner_sip_payments`. Must
+ * never import buckets.ts or funded-status.ts: the free envelope feeds sizing, and sizing is
+ * behind the no-catch-up firewall.
  */
 import type { Db } from '../db/client.js';
 import type { SipRow } from '../sources/indmoney.js';
@@ -121,10 +122,39 @@ function istMonthBounds(month: string): [string, string] {
   return [`${month}-01T00:00:00+05:30`, `${next}-01T00:00:00+05:30`];
 }
 
+export interface OwnerSipPayment {
+  instrumentId: string; fundName: string; paidOn: string; amountPaise: bigint; note: string; asOf: string; source: string;
+}
+
+/**
+ * Canonical/ISIN aliases (an AMFI row and the IND holding row of one fund) share one key.
+ * ponytail: one hop only — a reaches b when they share an ISIN or canonical_id directly; a chain
+ * a~b (ISIN) and b~c (canonical_id) does not join a and c. Upgrade: a recursive CTE over both
+ * links if such chains ever appear in `instruments`.
+ */
+export async function sipInstrumentKey(db: Db, instrumentId: string): Promise<string> {
+  const [row] = await db.query<{ key: string }>(
+    `select min(b.id) key from instruments a join instruments b on b.id=a.id
+       or (a.canonical_id is not null and b.canonical_id=a.canonical_id)
+       or (a.isin is not null and b.isin=a.isin) where a.id=$1`, [instrumentId]);
+  return row?.key ?? instrumentId;
+}
+
+/** Owner-recorded SIP payments (`owner_sip_payments`) for the IST month of `now`. */
+export async function loadOwnerSipPayments(db: Db, now: string): Promise<OwnerSipPayment[]> {
+  const rows = await db.query<{ instrument_id: string; fund_name: string; paid_on: string; amount_paise: string; note: string; as_of: string | Date; source: string }>(
+    `select p.instrument_id, i.name fund_name, p.paid_on::text, p.amount_paise::text, p.note, p.as_of, p.source
+       from owner_sip_payments p join instruments i on i.id = p.instrument_id where p.month = $1 order by p.id`, [istMonth(now)]);
+  return rows.map((r) => ({ instrumentId: r.instrument_id, fundName: r.fund_name, paidOn: r.paid_on,
+    amountPaise: BigInt(r.amount_paise), note: r.note, asOf: new Date(r.as_of).toISOString(), source: r.source }));
+}
+
 export interface SipCommitment {
   totalPaise: bigint | null; asOf: string | null; stale: boolean; sips: ActiveSip[];
   /** Absent from the latest snapshot, but seen this IST month on or after its instalment day: debited, still counted. */
   departedThisMonth: ActiveSip[];
+  /** Owner-recorded payments this IST month; `countedPaise` is what the feed does not already cover for that fund. */
+  ownerPaidThisMonth: (OwnerSipPayment & { countedPaise: bigint })[];
   /** Why a fresh snapshot's total is still unknown (a non-MONTHLY SIP). */
   unknownReason?: string;
 }
@@ -184,7 +214,9 @@ async function departedThisMonth(db: Db, latestId: string | number, nowIso: stri
 export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipCommitment> {
   const [snap] = await db.query<{ id: string | number; as_of: string | Date }>(
     `select id, as_of from sip_snapshots order by as_of desc, id desc limit 1`);
-  if (!snap) return { totalPaise: null, asOf: null, stale: true, sips: [], departedThisMonth: [] };
+  const ownerPaidThisMonth = (Number.isFinite(Date.parse(nowIso)) ? await loadOwnerSipPayments(db, nowIso) : [])
+    .map((p) => ({ ...p, countedPaise: 0n }));
+  if (!snap) return { totalPaise: null, asOf: null, stale: true, sips: [], departedThisMonth: [], ownerPaidThisMonth };
   const rows = await db.query<SipDbRow>(
     `select ${SIP_COLS} from sips x where x.snapshot_id = $1 order by x.amount_paise desc, x.sip_id`,
     [snap.id],
@@ -195,12 +227,27 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   const sips = rows.map((r) => toSip(r, asOf));
   const departed = await departedThisMonth(db, snap.id, nowIso);
   const odd = [...rows.filter((r) => r.frequency !== 'MONTHLY'), ...departed.odd].map((r) => `${r.fund_name} (${r.frequency})`);
-  const base = { asOf, stale, sips, departedThisMonth: departed.sips };
+  // Per fund (aliases joined by sipInstrumentKey): the feed's amount, topped up to an owner-recorded
+  // monthly total only by what the feed does not already carry — never counted on top of it.
+  // No owner payment (the usual month): the plain feed sum, with no per-SIP alias queries.
+  const amounts = new Map<string, bigint>();
+  if (ownerPaidThisMonth.length === 0) amounts.set('', [...sips, ...departed.sips].reduce((s, x) => s + x.amountPaise, 0n));
+  else for (const s of [...sips, ...departed.sips]) {
+    const key = await sipInstrumentKey(db, s.instrumentId);
+    amounts.set(key, (amounts.get(key) ?? 0n) + s.amountPaise);
+  }
+  for (const p of ownerPaidThisMonth) {
+    const key = await sipInstrumentKey(db, p.instrumentId);
+    const covered = amounts.get(key) ?? 0n;
+    p.countedPaise = p.amountPaise > covered ? p.amountPaise - covered : 0n;
+    amounts.set(key, covered + p.countedPaise);
+  }
+  const base = { asOf, stale, sips, departedThisMonth: departed.sips, ownerPaidThisMonth };
   if (odd.length > 0) {
     return { ...base, totalPaise: null,
       unknownReason: `SIP commitment unknown: non-MONTHLY SIP ${odd.join(', ')} — its monthly amount is not known` };
   }
-  return { ...base, totalPaise: stale ? null : [...sips, ...departed.sips].reduce((s, x) => s + x.amountPaise, 0n) };
+  return { ...base, totalPaise: stale ? null : [...amounts.values()].reduce((sum, amount) => sum + amount, 0n) };
 }
 
 /**

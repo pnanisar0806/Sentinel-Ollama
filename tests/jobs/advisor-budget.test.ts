@@ -6,6 +6,7 @@ import { classify } from '../../src/domain/networth.js';
 import type { SipRow } from '../../src/sources/indmoney.js';
 import { advisorBudget } from '../../src/jobs/report.js';
 import { logPurchase } from '../../src/domain/owner-log.js';
+import { recordSipPayment } from '../../src/domain/owner-sips.js';
 
 /**
  * SIP tracking Task 8. The weekly job hands the advisor the month's budget as formatted
@@ -68,6 +69,19 @@ describe('advisorBudget', () => {
       { fund: 'Axis Treasury Advantage', amount: '₹16,253', assetClass: 'DEBT' },
       { fund: 'ICICI Nifty 50 Index Fund', amount: '₹14,001', assetClass: 'EQUITY', status: 'stopped — counted this month' },
     ]);
+    await db.close();
+  });
+
+  it('lists an owner-recorded payment (only what the feed lacks), so the list still sums to sipTotal', async () => {
+    await db.query(`insert into instruments (id, kind, name) values ('IND:hdfc','MF','HDFC Mid Cap')`);
+    await persistSipSnapshot(db, [nifty, mm], NOW);
+    await recordSipPayment(db, { instrumentId: 'IND:hdfc', paidOn: '2026-10-12', amountPaise: 300_100n, source: 'owner-chat' }, NOW);
+    const b = await advisorBudget(db, NOW);
+    const rupees = (s: string) => BigInt(s.replace(/[^\d]/g, ''));
+    expect(b.sipTotal).toBe('₹33,255');
+    expect(b.sips.reduce((s, x) => s + rupees(x.amount), 0n)).toBe(rupees(b.sipTotal!));
+    expect(b.sips).toContainEqual({ fund: 'HDFC Mid Cap', amount: '₹3,001', assetClass: 'EQUITY',
+      status: 'paid 2026-10-12 — owner-recorded, counted this month' });
     await db.close();
   });
 });

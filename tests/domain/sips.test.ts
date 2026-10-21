@@ -105,7 +105,7 @@ describe('loadSipCommitment', () => {
   beforeEach(async () => { db = await openDb(); await runMigrations(db); });
 
   it('no snapshot ever: unknown, not zero', async () => {
-    expect(await loadSipCommitment(db, '2026-10-14T10:00:00Z')).toEqual({ totalPaise: null, asOf: null, stale: true, sips: [], departedThisMonth: [] });
+    expect(await loadSipCommitment(db, '2026-10-14T10:00:00Z')).toEqual({ totalPaise: null, asOf: null, stale: true, sips: [], departedThisMonth: [], ownerPaidThisMonth: [] });
   });
 
   it('the latest snapshot is the active set, totalled exactly', async () => {

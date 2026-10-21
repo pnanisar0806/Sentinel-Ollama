@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
+import { validRailValue } from '@/lib/rail-form';
 import {
   freeze, proposeRailChange, resetBreakerWithPostMortem, unfreeze,
 } from '../../../../src/domain/controls';
@@ -38,7 +39,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ ok: true, message: `Breaker reset. Post-mortem recorded:\n${note}` });
       }
       case 'propose_rail': {
-        const r = await proposeRailChange(d, body.key, Number(body.value));
+        if (typeof body.key !== 'string' || !validRailValue(body.key, body.value)) {
+          return NextResponse.json({ error: 'Invalid investment limit: use positive integer paise for money or a percentage up to 100.' }, { status: 400 });
+        }
+        const r = await proposeRailChange(d, body.key, body.value);
         return NextResponse.json({
           ok: true,
           message: `${body.key} → ${body.value} takes effect ${r.activatesAt}`
