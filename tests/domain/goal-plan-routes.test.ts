@@ -112,6 +112,15 @@ describe('goal plan: money routes', () => {
     const held = [...POSITIONS, pos('MF:EDEL-ARB', 'Edelweiss Arbitrage Fund - Direct Growth', 'MF', 'DEBT', 50)];
     const linked = buildGoalPlan(tracker(), held, 60).money.find((r) => r.goal === 'HOUSE')!;
     expect(linked.legs).toEqual([{ assetClass: 'DEBT', instrumentId: 'MF:EDEL-ARB', label, paise: rupees(23_457) }]);
+    // Real look-alikes: the held Edelweiss 2033 bond, and a Regular plan of the same fund.
+    const bond = pos('BOND:EDELWEISS-2033', 'Edelweiss Financial 10.45% 26-Oct-2033', 'BOND', 'DEBT', 50);
+    const regular = pos('MF:EDEL-ARB-REG', 'Edelweiss Arbitrage Fund - Regular Growth', 'MF', 'DEBT', 50);
+    for (const decoys of [[bond], [regular], [bond, regular]]) {
+      const r = buildGoalPlan(tracker(), [...POSITIONS, ...decoys], 60).money.find((x) => x.goal === 'HOUSE')!;
+      expect(r.legs).toEqual([{ assetClass: 'DEBT', instrumentId: null, label, paise: rupees(23_457) }]);
+    }
+    const withBond = buildGoalPlan(tracker(), [bond, ...held], 60).money.find((x) => x.goal === 'HOUSE')!;
+    expect(withBond.legs[0]!.instrumentId).toBe('MF:EDEL-ARB');
   });
 
   it('education all equity from 2028', () => {

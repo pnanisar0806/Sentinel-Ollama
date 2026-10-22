@@ -749,7 +749,8 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
   A higher set-aside is a TIGHTENING (`isLoosening` exception); 0 is allowed for that key only.
   FI projects on budget − set-aside. The owner still moves the money and logs it on /log.
 - **House default fund (owner 2026-10-22):** the HOUSE route is one DEBT leg labelled `HOUSE_FUND`
-  (Edelweiss Arbitrage Fund (Direct Growth)), linked to a held position matching /edelweiss arbitrage/i,
+  (Edelweiss Arbitrage Fund (Direct Growth)), linked to a held position matching both /edelweiss arbitrage/i and /direct/i
+  (a Regular plan or the Edelweiss 2033 bond never links),
   else `instrumentId` null — never `addTarget`, never LIQUIDBEES.
 - **Advisor budget hold:** the monthly advisor waits until the month's budget is confirmed
   (`confirmBudget`, the "Keep ₹X" button) or changed, or the 7th IST passes; a pending budget

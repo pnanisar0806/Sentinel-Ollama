@@ -9,6 +9,7 @@ import {
   sendBudgetReminder, unfreeze, UNFREEZE_PHRASE,
 } from '../../src/domain/controls.js';
 import { getBreakerState, getFreezeState } from '../../src/domain/rails.js';
+import { BUDGET_RAIL_NAMES } from '../../src/domain/rail-values.js';
 import { createOrder, getOrder } from '../../src/domain/orders.js';
 import {
   buildRecommendation, persistRecommendation, type RecLeg,
@@ -397,8 +398,10 @@ describe('the budget reminder', () => {
     await db.close();
   });
 
-  it('is not sent while a budget or tactical change is pending, and writes no marker', async () => {
-    for (const key of ['monthly_budget_paise', 'tactical_monthly_paise']) {
+  it('is not sent while any BUDGET_RAIL_NAMES change (budget, tactical, set-aside) is pending, and writes no marker', async () => {
+    // Pin the set-aside: dropping it from the shared list would otherwise also drop it from this loop.
+    expect(Object.keys(BUDGET_RAIL_NAMES)).toContain('goal_setaside_monthly_paise');
+    for (const key of Object.keys(BUDGET_RAIL_NAMES)) {
       const t = tg();
       await proposeRailChange(db, key, 40_00_000, new Date('2026-10-31T06:00:00Z')); // a tightening: no drawdown check
       expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), t)).toBe(false);

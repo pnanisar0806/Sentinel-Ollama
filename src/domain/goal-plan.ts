@@ -341,7 +341,7 @@ export function buildGoalPlan(t: GoalTracker, positions: Position[], signedCeili
   const nowIdx = monthIndex(istMonth(t.asOf));
   const educationStart = `${A.childArrivalYear}-01`;
   const goalMix: Record<'FI' | 'EDUCATION', Mix> = { FI: newMoneyMix(signedCeilingPct), EDUCATION: ALL_EQUITY };
-  const houseId = positions.find((p) => /edelweiss arbitrage/i.test(p.name))?.instrumentId ?? null;
+  const houseId = positions.find((p) => /edelweiss arbitrage/i.test(p.name) && /direct/i.test(p.name))?.instrumentId ?? null;
 
   const money: MoneyRoute[] = [];
   for (const c of t.cards) {
