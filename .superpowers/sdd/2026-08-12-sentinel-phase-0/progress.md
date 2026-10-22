@@ -878,3 +878,4 @@ Web: funds say "redeem/invest at the day's NAV". Mutation-checked: tolerance, ho
 quality order. Real data (read-only): October = DIRECT_FLOW + ADD gold, no sales. 1082 tests.
 SIP tracking (spec 2026-10-14 piece 1): complete 2026-10-15 — 10 tasks + final fix wave, all reviews clean; Task 7 two fix rounds; see MEMORY.md
 SIP gaps (2026-10-15): departed SIPs + owner purchases + remaining; 3 tasks + final fix wave, reviews clean; see MEMORY.md
+Goal set-aside (2026-10-22): goal_setaside_monthly_paise rail, house/emergency signable, cosmetic a/b/c; 1327 tests; mutation-checked; report .superpowers/sdd/2026-10-22-goal-setaside/report.md

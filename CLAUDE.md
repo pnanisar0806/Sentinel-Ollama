@@ -44,8 +44,14 @@ Keep them terse. They are read in full at every session start; length is a tax.
   TRUNCATE) plus RLS in Supabase.
 - **The Kolkata property is not an optimization target.** Never recommend selling or
   renting it.
-- **`funded_status` is unreadable by any sizing or risk function.** No catch-up behavior.
-  There is an architecture test enforcing this (Task 10).
+- **The normal plan never reads goal status** (`funded_status` or the goal tracker). No catch-up behavior. `src/domain/goal-plan.ts`
+  is the only goal-status reader besides the reporting surface, and no normal-plan entry
+  point may reach it — only `web/` calls it (`tests/architecture/no-catch-up.test.ts`). The
+  goal plan acts only through owner-signed rail changes (`monthly_budget_paise`,
+  `tactical_monthly_paise`, `goal_equity_ceiling_pct` — the rebalance's portfolio equity ceiling,
+  which a raise never turns into a sale, and `goal_setaside_monthly_paise`) and never sells. House
+  and emergency raise the budget and the set-aside together; the set-aside shrinks the normal
+  plan's envelope, so that money is never invested.
 
 ## Working rules
 

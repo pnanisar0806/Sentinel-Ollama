@@ -5,6 +5,7 @@ import { installIps } from '../../src/domain/ips.js';
 import { monthlyReviewDone } from '../../src/domain/cadence.js';
 import { persistSipSnapshot } from '../../src/domain/sips.js';
 import { monthlyAdvice } from '../../src/jobs/report.js';
+import { confirmBudget } from '../../src/domain/controls.js';
 
 /**
  * Owner decision 2026-10-15: a purchase withheld because SIPs are unknown must not consume
@@ -47,6 +48,22 @@ describe('monthlyAdvice', () => {
     await monthlyAdvice(db, AS_OF, NOW, { apiKey: 'k', model: undefined, fetchImpl });
     expect(await advised()).toBe(1);
     expect(await monthlyReviewDone(db, 'advice', '2026-10')).toBe(true);
+    await db.close();
+  });
+
+  it('IST days 1–7 without a budget confirmation: held before the SIP check, month open; it runs once settled', async () => {
+    const early = '2026-11-03T05:00:00.000Z';
+    const line = await monthlyAdvice(db, '2026-11-03', early, { apiKey: 'k', model: undefined, fetchImpl });
+    expect(line).toBe("\n\nAdvisor (2026-11): held — waiting for this month's budget (until the 7th).");
+    expect(calls).toBe(0);
+    expect(await advised()).toBe(0);
+    expect(await monthlyReviewDone(db, 'advice', '2026-11')).toBe(false);
+
+    await confirmBudget(db, new Date(early));
+    await persistSipSnapshot(db, [], early);
+    const next = await monthlyAdvice(db, '2026-11-03', early, { apiKey: 'k', model: undefined, fetchImpl });
+    expect(next).toMatch(/^\n\nAdvisor \(2026-11\): NO_ACTION\./);
+    expect(await monthlyReviewDone(db, 'advice', '2026-11')).toBe(true);
     await db.close();
   });
 });

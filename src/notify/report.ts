@@ -333,9 +333,12 @@ export async function buildReportInput(
     `select distinct on (instrument_id) instrument_id, composite::text from signal_scores order by instrument_id, score_date desc`);
   const quality = new Map(scores.map((r) => [r.instrument_id, Number(r.composite)]));
 
-  // Allocation: one recommendation per breach direction, sized off the Phase 0 basis.
+  // Allocation: one recommendation per breach direction, sized off the Phase 0 basis. The
+  // equity ceiling is the owner-signed `goal_equity_ceiling_pct` rail (goal-plan spec §9),
+  // 60 unless signed higher — a rail, never goal status; allocationDrift refuses out-of-range.
+  const equityMax = Number(await railPaise(db, 'goal_equity_ceiling_pct')) / 100;
   const rebalance = rebalanceRec(
-    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? [...surplusRoutes, ...sipRoutes], quality },
+    { netWorth: netWorth(positions, 0n as never), positions, routes: opts.routes ?? [...surplusRoutes, ...sipRoutes], quality, equityMax },
     month,
   );
   const built: Recommendation[] = [...(opts.maturityRecommendations ?? [])];

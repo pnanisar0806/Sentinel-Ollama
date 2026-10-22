@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
-import { validRailValue } from '@/lib/rail-form';
+import { railChangeMessage, validRailValue } from '@/lib/rail-form';
 import {
-  freeze, proposeRailChange, resetBreakerWithPostMortem, unfreeze,
+  confirmBudget, freeze, istDateTime, proposeRailChange, resetBreakerWithPostMortem, unfreeze,
 } from '../../../../src/domain/controls';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +19,8 @@ type Body =
   | { action: 'freeze'; reason: string }
   | { action: 'unfreeze'; typed: string }
   | { action: 'reset_breaker'; typed: string }
-  | { action: 'propose_rail'; key: string; value: number };
+  | { action: 'propose_rail'; key: string; value: number; note?: string }
+  | { action: 'confirm_budget' };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = await request.json().catch(() => null) as Body | null;
@@ -42,13 +43,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (typeof body.key !== 'string' || !validRailValue(body.key, body.value)) {
           return NextResponse.json({ error: 'Invalid investment limit: use positive integer paise for money or a percentage up to 100.' }, { status: 400 });
         }
-        const r = await proposeRailChange(d, body.key, body.value);
+        if (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 2_000)) {
+          return NextResponse.json({ error: 'A note must be text of at most 2,000 characters.' }, { status: 400 });
+        }
+        const r = await proposeRailChange(d, body.key, body.value, new Date(), body.note);
         return NextResponse.json({
           ok: true,
-          message: `${body.key} → ${body.value} takes effect ${r.activatesAt}`
-            + (r.loosening ? ' (a loosening: drawdown is checked again then)' : ''),
+          message: railChangeMessage(body.key, body.value, istDateTime(r.activatesAt), r.loosening),
         });
       }
+      case 'confirm_budget':
+        await confirmBudget(d, new Date());
+        return NextResponse.json({ ok: true, message: "This month's budget is confirmed. The advisor runs at the next weekly report." });
       default:
         return NextResponse.json({ error: 'unknown action' }, { status: 400 });
     }

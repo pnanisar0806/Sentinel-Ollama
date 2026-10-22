@@ -23,7 +23,7 @@ export const AREAS: Area[] = [
     name: 'Advisor (Phase 2.5)',
     stage: 'live',
     what: 'Monthly buy / sell / hold / wait decision by the model among deterministically sized candidates, with news, owner sign-off, quarterly watchlist revision, commentary and track record.',
-    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20'],
+    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20', 'Goal plan beside the normal plan: extra money per goal with its funds, "raise budget" as a 48-hour rail change (tactical cap too when it binds)', 'FI more-risk route with the full crash disclosure, sent as the rail change’s note; signing proposes the rebalance’s portfolio equity ceiling (a raise never triggers a sale), revocable with a trim warning', 'House and emergency routes are set-aside guidance only: nothing to sign', 'Monthly advice waits for the budget to be confirmed or changed, until the 7th'],
     missing: ['The model reads filing headlines, not the PDFs', 'US holdings have no news source', 'Past rails and cash are not versioned, so replay does not re-size'],
   },
 
@@ -40,8 +40,8 @@ export const AREAS: Area[] = [
     name: 'Net worth & day-over-day',
     stage: 'live',
     what: 'Assets, liabilities, net worth, and the previous-day change.',
-    works: ['Real balances from snapshots', 'Day change', 'FI floor / stretch reporting band', 'Live SIPs (incl. ones stopped after this month’s instalment), the monthly budget, this month’s spend and what remains to invest'],
-    missing: ['Goal progress against target dates (piece 2 of the 2026-10-14 spec)'],
+    works: ['Real balances from snapshots', 'Day change', 'FI floor / stretch reporting band', 'A verdict line per goal from the goal tracker', '“Keep ₹X this month” budget confirmation', 'Live SIPs (incl. ones stopped after this month’s instalment), the monthly budget, this month’s spend and what remains to invest'],
+    missing: [],
   },
   {
     slug: 'holdings',
@@ -61,11 +61,11 @@ export const AREAS: Area[] = [
   },
   {
     slug: 'buckets',
-    name: 'Buckets & milestones',
+    name: 'Goal tracker & milestones',
     stage: 'live',
-    what: 'FI corpus, house, emergency and education goals vs their flows.',
-    works: ['Bucket balances & funded ratio', 'M1 / M2 milestone state'],
-    missing: ['raised_on timestamps for open milestones (owner true-up)'],
+    what: 'Am I on track? FI, house, emergency and education in today’s money at the current budget.',
+    works: ['Per goal: target and date, money attributed today with its parts, projection at the date, verdict, ₹/month short, finish-year band, assumptions', 'House counts vested, held ServiceNow shares at the latest close; a stale or missing price is unknown, never ₹0', 'M1 / M2 milestone state'],
+    missing: ['Future RSU vests and bonuses are not projected; each counts once it lands', 'A sale logged to the house or emergency fund double counts until the RSU quantity is updated', 'raised_on timestamps for open milestones (owner true-up)'],
   },
   {
     slug: 'rails',

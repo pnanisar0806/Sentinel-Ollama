@@ -283,6 +283,23 @@ describe('rebalance sizing reads live SIPs (spec 2026-10-14)', () => {
     await book.close();
   });
 
+  it('the owner-signed goal equity ceiling reaches the rebalance engine (goal-plan spec §9)', async () => {
+    // EQUITY 65%, GOLD 8%, DEBT 27%: over IPS §3.3's 60%, in band under a signed 68%.
+    // Two books, because a run closes the month and a second run would re-read its rows.
+    const run = async (ceiling: string | null) => {
+      const book = await bookOf(650_000, 270_000, 80_000);
+      await persistSipSnapshot(book, live, NOW);
+      if (ceiling !== null) {
+        await book.query(`insert into settings_rails (key, value) values ('goal_equity_ceiling_pct', $1::jsonb)`, [ceiling]);
+      }
+      const actions = proposed(await buildReportInput(book, SEED_DATE, { now: NOW }));
+      await book.close();
+      return actions;
+    };
+    expect(await run(null)).toEqual(['REDIRECT']);
+    expect(await run('68')).toEqual([]);
+  });
+
   it('a suppressed BUY does not also silence the redirect into that class', async () => {
     // GOLD 3% (under its 5% floor) and EQUITY 61% (1 point over 60%, inside SELL_TOLERANCE, so
     // a redirect even with no money): the engine wants a GOLD BUY and a redirect into GOLD.

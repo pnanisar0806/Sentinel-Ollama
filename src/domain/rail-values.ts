@@ -15,7 +15,17 @@ export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
   mf_scheme_cap_pct: 10,
   sector_cap_pct: 20,
   issuer_cap_pct: 15,
+  // Goal-plan spec §9/§11.2: the owner-signed equity share of new money for the rebalance.
+  // 60 is IPS §3.3's ceiling and the revoke value; a raise is a loosening (controls.ts).
+  goal_equity_ceiling_pct: 60,
+  // Brief 2026-10-22: budget reserved for house (B2) and emergency (B3) set-asides. The free
+  // envelope subtracts it, so a raise is a TIGHTENING (controls.ts) and 0 ends it.
+  goal_setaside_monthly_paise: 0,
 };
+
+/** The goal ceiling is a whole percent from IPS §3.3's 60 to 92 (gold keeps its 7.5% band middle). */
+export const validGoalCeilingPct = (v: unknown): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 60 && v <= 92;
 
 /**
  * A rail the owner can change lives in `settings_rails` (PRD 11), with

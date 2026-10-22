@@ -148,31 +148,3 @@ export function AllocationBar({ drift }: {
     </>
   );
 }
-
-/** Goal buckets with funded progress. An unallocated bucket says so; it is never ₹0. */
-export function GoalList({ buckets }: {
-  buckets: { id: string; name: string; balancePaise: Paise | null; fundedRatio: number | null; targetNote: string }[];
-}) {
-  return (
-    <>
-      {buckets.map((b) => {
-        const ratio = b.fundedRatio === null ? null : Math.min(1, b.fundedRatio);
-        return (
-          <div className="goal" key={b.id}>
-            <div className="goal-top">
-              <span className="goal-name">{b.name} <span className="dim">({b.id})</span></span>
-              <span className="tnum">
-                {b.balancePaise === null ? <span className="dim">not allocated yet</span>
-                  : ratio === null ? <Money p={b.balancePaise} compact /> : <>{<Money p={b.balancePaise} compact />} · <Pct v={b.fundedRatio!} /></>}
-              </span>
-            </div>
-            {ratio !== null
-              ? <div className="progress" aria-hidden="true"><div className={`fill ${ratio >= 1 ? 'f-green' : 'f-violet'}`} style={{ width: `${ratio * 100}%` }} /></div>
-              : null}
-            {b.targetNote ? <span className="muted">{b.targetNote}</span> : null}
-          </div>
-        );
-      })}
-    </>
-  );
-}

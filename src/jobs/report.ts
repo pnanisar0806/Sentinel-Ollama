@@ -17,6 +17,7 @@ import { isMainModule } from '../util/main-module.js';
 import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
 import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
 import { formatInr, type Paise } from '../money/paise.js';
+import { loadBudgetMonth } from '../domain/controls.js';
 
 /**
  * FR-51 weekly deep report — `pnpm report [--as-of YYYY-MM-DD]`.
@@ -94,6 +95,14 @@ export async function monthlyAdvice(
   const month = asOf.slice(0, 7);
   if (await monthlyReviewDone(db, 'advice', month)) return '';
   try {
+    // Goal plan §12 Q4: wait for this month's budget, up to the 7th (IST). Held like the
+    // SIP hold below: the month is not recorded, so the next weekly run tries again.
+    const budgetMonth = await loadBudgetMonth(db, generatedAt);
+    if (!budgetMonth.settled) {
+      return `
+
+Advisor (${month}): held — ${budgetMonth.reason}.`;
+    }
     // Unknown SIPs ⇒ unknown envelope: held exactly as the rebalance is held (same signal,
     // same clock), and the month stays open for the next weekly run (owner, 2026-10-15).
     // A known ₹0 envelope is an answer and the advisor runs.

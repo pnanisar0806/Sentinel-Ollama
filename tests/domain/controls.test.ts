@@ -4,9 +4,9 @@ import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { persistSipSnapshot } from '../../src/domain/sips.js';
 import {
-  applyDueRailChanges, BREAKER_STREAK, evaluateBreaker, freeze, isLoosening,
+  applyDueRailChanges, BREAKER_STREAK, confirmBudget, evaluateBreaker, freeze, isLoosening, loadBudgetMonth,
   pendingRailChanges, proposeRailChange, resetBreakerWithPostMortem, RESET_PHRASE,
-  unfreeze, UNFREEZE_PHRASE,
+  sendBudgetReminder, unfreeze, UNFREEZE_PHRASE,
 } from '../../src/domain/controls.js';
 import { getBreakerState, getFreezeState } from '../../src/domain/rails.js';
 import { createOrder, getOrder } from '../../src/domain/orders.js';
@@ -233,12 +233,181 @@ describe('rail changes cool for 48 hours', () => {
     await db.close();
   });
 
+  it('raising the goal equity ceiling is a loosening: refused above 15% drawdown', async () => {
+    expect(isLoosening('goal_equity_ceiling_pct', 60, 68)).toBe(true);
+    await drawdown(16);
+    await expect(proposeRailChange(db, 'goal_equity_ceiling_pct', 68, NOW)).rejects.toThrow(/16%/);
+    await db.close();
+  });
+
+  it('raising the goal set-aside is a tightening (it shrinks the envelope); 0 ends it, for that key only', async () => {
+    expect(isLoosening('goal_setaside_monthly_paise', 0, 5000)).toBe(false);
+    expect(isLoosening('goal_setaside_monthly_paise', 5000, 0)).toBe(true);
+    await drawdown(25); // a tightening needs no drawdown check
+    await proposeRailChange(db, 'goal_setaside_monthly_paise', 5000, NOW);
+    await db.query(`update settings_rails set value = '5000'::jsonb, pending_value = null, pending_since = null
+                     where key = 'goal_setaside_monthly_paise'`);
+    await drawdown(2, '2026-09-24'); // ending it is a loosening: needs fresh evidence
+    await expect(proposeRailChange(db, 'goal_setaside_monthly_paise', 0, NOW)).resolves.toBeDefined();
+    await expect(proposeRailChange(db, 'max_order_paise', 0, NOW)).rejects.toThrow(/positive/);
+    await expect(proposeRailChange(db, 'goal_setaside_monthly_paise', -1, NOW)).rejects.toThrow();
+    await db.close();
+  });
+
+  it('stores the note in the RAIL_CHANGE_PROPOSED audit payload', async () => {
+    await drawdown(2);
+    await proposeRailChange(db, 'goal_equity_ceiling_pct', 68, NOW, 'signed goal plan 2026-10');
+    const [row] = await db.query<{ payload: { note?: string; proposed: number } }>(
+      `select payload from audit_log where action = 'RAIL_CHANGE_PROPOSED' and entity_id = 'goal_equity_ceiling_pct'`);
+    expect(row!.payload).toMatchObject({ proposed: 68, note: 'signed goal plan 2026-10' });
+    await db.close();
+  });
+
+  it('refuses a goal equity ceiling outside whole 60–92, whichever surface proposes it', async () => {
+    await drawdown(2);
+    for (const v of [59, 93, 68.5]) {
+      await expect(proposeRailChange(db, 'goal_equity_ceiling_pct', v, NOW)).rejects.toThrow(/60–92/);
+    }
+    await db.close();
+  });
+
   it('no longer blocks every order while a change cools', async () => {
     // This was COOLING_NOT_ELAPSED in the order gate: any rail edit refused all orders
     // for 48 hours. The edit waits; the portfolio does not.
     await drawdown(2);
     await proposeRailChange(db, 'max_order_paise', 50_00_000, NOW);
     await expect(draft()).resolves.toBeDefined();
+    await db.close();
+  });
+});
+
+describe('the advisor waits for the month\'s budget (until the 7th)', () => {
+  const WAITING = "waiting for this month's budget (until the 7th)";
+  const activated = (at: string, key = 'monthly_budget_paise') => db.query(
+    `insert into audit_log (at, entity, entity_id, action, actor, payload)
+     values ($1, 'rail', $2, 'RAIL_CHANGE_ACTIVATED', 'agent', '{}'::jsonb)`, [at, key]);
+
+  it('days 1–7 (IST) without a confirmation are held', async () => {
+    // 1 Nov 06:00 IST, and 7 Nov 23:59 IST.
+    for (const now of ['2026-11-01T00:30:00Z', '2026-11-07T18:29:00Z']) {
+      expect(await loadBudgetMonth(db, now)).toEqual({ settled: false, reason: WAITING, confirmedOn: null });
+    }
+    await db.close();
+  });
+
+  it('day 8 (IST) runs on the budget in force, no confirmation needed', async () => {
+    expect((await loadBudgetMonth(db, '2026-11-07T18:30:00Z')).settled).toBe(true); // 8 Nov 00:00 IST
+    await db.close();
+  });
+
+  it('a confirmation on the 3rd settles the month; last month\'s does not', async () => {
+    await confirmBudget(db, new Date('2026-10-20T05:00:00Z'));
+    expect((await loadBudgetMonth(db, '2026-11-03T06:00:00Z')).settled).toBe(false);
+    await confirmBudget(db, new Date('2026-11-03T05:00:00Z'));
+    expect(await loadBudgetMonth(db, '2026-11-03T06:00:00Z'))
+      .toEqual({ settled: true, reason: null, confirmedOn: '2026-11-03' });
+    const [row] = await db.query<{ actor: string; payload: { budgetPaise: string } }>(
+      `select actor, payload from audit_log where entity = 'budget' and entity_id = '2026-11' and action = 'BUDGET_CONFIRMED'`);
+    expect(row).toMatchObject({ actor: 'owner', payload: { budgetPaise: '5000000' } });
+    await db.close();
+  });
+
+  it('a confirmation at 2026-10-31T20:00Z is 1 Nov IST and counts for November', async () => {
+    await confirmBudget(db, new Date('2026-10-31T20:00:00Z'));
+    expect(await loadBudgetMonth(db, '2026-11-02T05:00:00Z'))
+      .toEqual({ settled: true, reason: null, confirmedOn: '2026-11-01' });
+    await db.close();
+  });
+
+  it('a budget change activated on the 2nd settles the month; one in October does not', async () => {
+    await activated('2026-10-20T05:00:00Z');
+    expect((await loadBudgetMonth(db, '2026-11-03T06:00:00Z')).settled).toBe(false);
+    await activated('2026-11-02T05:00:00Z');
+    expect(await loadBudgetMonth(db, '2026-11-03T06:00:00Z'))
+      .toEqual({ settled: true, reason: null, confirmedOn: '2026-11-02' });
+    await db.close();
+  });
+
+  it('an activation at 2026-10-31T20:00Z is 1 Nov IST and counts for November', async () => {
+    await activated('2026-10-31T20:00:00Z');
+    expect((await loadBudgetMonth(db, '2026-11-02T05:00:00Z')).settled).toBe(true);
+    await db.close();
+  });
+
+  it('another rail\'s activation does not settle the month', async () => {
+    await activated('2026-11-02T05:00:00Z', 'max_order_paise');
+    expect((await loadBudgetMonth(db, '2026-11-03T06:00:00Z')).settled).toBe(false);
+    await db.close();
+  });
+
+  it('a budget change pending on the 8th holds the advisor, even with a confirmation', async () => {
+    await confirmBudget(db, new Date('2026-11-03T05:00:00Z'));
+    await proposeRailChange(db, 'monthly_budget_paise', 40_00_000, new Date('2026-11-07T06:00:00Z'));
+    expect(await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).toEqual({
+      settled: false, reason: 'a budget change activates 2026-11-09 11:30 IST', confirmedOn: null,
+    });
+    await db.close();
+  });
+
+  it('a pending tactical change holds too', async () => {
+    await proposeRailChange(db, 'tactical_monthly_paise', 40_00_000, new Date('2026-11-07T06:00:00Z'));
+    expect((await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).reason).toMatch(/^a budget change activates /);
+    await db.close();
+  });
+
+  it('a pending change on another rail does not hold', async () => {
+    await proposeRailChange(db, 'max_order_paise', 50_00_000, new Date('2026-11-07T06:00:00Z'));
+    expect((await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).settled).toBe(true);
+    await db.close();
+  });
+});
+
+describe('the budget reminder', () => {
+  const reminders = async () => (await db.query(
+    `select entity_id from audit_log where entity = 'budget' and action = 'REMINDER_SENT'`)).map((r) => r.entity_id);
+  const tg = () => {
+    const sent: string[] = [];
+    return { sent, send: async (m: string) => { sent.push(m); return { sent: true }; } };
+  };
+
+  it('is sent once per month; a second run that day sends nothing', async () => {
+    const t = tg();
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), t)).toBe(true);
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T09:00:00Z'), t)).toBe(false);
+    expect(await sendBudgetReminder(db, new Date('2026-11-02T00:30:00Z'), t)).toBe(false);
+    expect(t.sent).toEqual(["Set this month's budget by the 7th: keep ₹50,000 or change it on Overview."]);
+    expect(await reminders()).toEqual(['2026-11']);
+    await db.close();
+  });
+
+  it('is not sent once the month is settled, or after the 7th', async () => {
+    const t = tg();
+    await confirmBudget(db, new Date('2026-11-01T00:10:00Z'));
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), t)).toBe(false);
+    expect(await sendBudgetReminder(db, new Date('2026-12-08T00:30:00Z'), t)).toBe(false);
+    expect(t.sent).toEqual([]);
+    await db.close();
+  });
+
+  it('is not sent while a budget or tactical change is pending, and writes no marker', async () => {
+    for (const key of ['monthly_budget_paise', 'tactical_monthly_paise']) {
+      const t = tg();
+      await proposeRailChange(db, key, 40_00_000, new Date('2026-10-31T06:00:00Z')); // a tightening: no drawdown check
+      expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), t)).toBe(false);
+      expect(t.sent).toEqual([]);
+      expect(await reminders()).toEqual([]);
+      await db.query(`update settings_rails set pending_value = null, pending_since = null where key = $1`, [key]);
+    }
+    await db.close();
+  });
+
+  it('a failed or dry-run send never throws and leaves no marker, so tomorrow retries', async () => {
+    const boom = { send: async () => { throw new Error('Telegram down'); } };
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), boom)).toBe(false);
+    const dry = { send: async () => ({ sent: false }) };
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), dry)).toBe(false);
+    expect(await sendBudgetReminder(db, new Date('2026-11-01T00:30:00Z'), null)).toBe(false);
+    expect(await reminders()).toEqual([]);
     await db.close();
   });
 });

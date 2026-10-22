@@ -322,3 +322,47 @@ describe('rebalanceRec — owner fixes 2026-09-27', () => {
       .toEqual(['NSE:WEAK-GAIN', 'NSE:STRONG-LOSS', 'NSE:UNSCORED']);
   });
 });
+
+describe('rebalanceRec — the owner-signed goal equity ceiling (goal-plan spec §9, §11.2)', () => {
+  // EQUITY 65%, GOLD 8% (in band), DEBT 27%: over IPS §3.3's 60%, under a signed 68%.
+  const at = (equity: number) => [
+    position({ instrumentId: 'NSE:NIFTYBEES', name: 'Nifty BeES', valuePaise: rupees(equity) }),
+    position({ instrumentId: 'BOND:A', kind: 'BOND', assetClass: 'DEBT', valuePaise: rupees(92_000 - equity) }),
+    position({ instrumentId: 'GOLD:ETF', kind: 'GOLD', assetClass: 'GOLD', valuePaise: rupees(8_000) }),
+  ];
+  const routes = [sipRoute('DEBT', 30_000)];
+
+  it('equity at 65% under a signed 68% ceiling is in band; the default 60% gives the dilute route', () => {
+    const signed = rebalanceRec({ ...stateOf(at(65_000), routes), equityMax: 0.68 }, '2026-10');
+    expect(signed.drift.find((d) => d.assetClass === 'EQUITY')).toMatchObject({ max: 0.68, breach: null });
+    expect(signed.actions).toEqual([]);
+    const normal = rebalanceRec(stateOf(at(65_000), routes), '2026-10');
+    expect(normal.actions.map((a) => [a.kind, a.route])).toEqual([['DIRECT_FLOW', 'sip']]);
+  });
+
+  it('an OVER rationale against a signed ceiling names it and the IPS 60%', () => {
+    const rec = rebalanceRec({ ...stateOf(at(70_000), routes), equityMax: 0.65 }, '2026-10');
+    expect(rec.actions[0]!.rationale)
+      .toMatch(/^EQUITY is 70\.0% against the owner-signed goal ceiling 65\.0% \(IPS §3\.3 is 60%\); /);
+    const normal = rebalanceRec(stateOf(at(70_000), routes), '2026-10');
+    expect(normal.actions[0]!.rationale).toMatch(/^EQUITY is 70\.0% against a 60\.0% ceiling \(IPS §3\.3\); /);
+  });
+
+  it('Review Focus 5: revoking (back to 60) with equity at 61% proposes no TRIM, even with no route', () => {
+    const rec = rebalanceRec({ ...stateOf(at(61_000)), equityMax: 0.60 }, '2026-10');
+    expect(rec.drift.find((d) => d.assetClass === 'EQUITY')!.breach).toBe('OVER');
+    expect(rec.actions.some((a) => a.kind === 'TRIM')).toBe(false);
+    expect(rec.actions.some((a) => a.kind === 'DIRECT_FLOW')).toBe(true);
+  });
+
+  it('the default for every other caller of allocationDrift stays IPS 60%', () => {
+    const nw = netWorth(at(65_000), 0n as Paise);
+    expect(allocationDrift(nw.byAssetClass).find((d) => d.assetClass === 'EQUITY')).toMatchObject({ max: 0.60, breach: 'OVER' });
+  });
+
+  it('refuses an equity ceiling outside 60–92%', () => {
+    const nw = netWorth(at(65_000), 0n as Paise);
+    expect(() => allocationDrift(nw.byAssetClass, undefined, 0.59)).toThrow(/60–92/);
+    expect(() => allocationDrift(nw.byAssetClass, undefined, 0.93)).toThrow(/60–92/);
+  });
+});

@@ -308,6 +308,8 @@ export async function loadMonthSpend(db: Db, nowIso: string, excludeOrderIntentI
 export interface FreeEnvelope {
   envelopePaise: bigint | null; budgetPaise: bigint; tacticalPaise: bigint;
   sipTotalPaise: bigint | null; sipAsOf: string | null;
+  /** `goal_setaside_monthly_paise`: budget reserved for house and emergency. The normal plan never invests it. */
+  setAsidePaise: bigint;
   /** This IST month's spend (Sentinel BUY orders + owner-logged purchases). Always known. */
   spentPaise: bigint;
   /** max(0, envelope − spent): what is still free to invest. Null iff envelopePaise is null. */
@@ -317,17 +319,18 @@ export interface FreeEnvelope {
 }
 
 /**
- * What may be deployed this month: max(0, min(tactical rail, budget − live SIPs)), and what
+ * What may be deployed this month: max(0, min(tactical rail, budget − live SIPs − goal set-aside)), and what
  * remains of it after this month's spend. An unknown SIP total makes the envelope and the
  * remaining amount unknown — never the full budget.
  */
 export async function loadFreeEnvelope(db: Db, nowIso: string, excludeOrderIntentId?: string): Promise<FreeEnvelope> {
   const budgetPaise = await railPaise(db, 'monthly_budget_paise');
   const tacticalPaise = await railPaise(db, 'tactical_monthly_paise');
+  const setAsidePaise = await railPaise(db, 'goal_setaside_monthly_paise');
   const c = await loadSipCommitment(db, nowIso);
   const spentPaise = (await loadMonthSpend(db, nowIso, excludeOrderIntentId)).totalPaise;
-  const env = envelopeOf(budgetPaise, tacticalPaise, c);
-  const base = { budgetPaise, tacticalPaise, sipTotalPaise: c.totalPaise, sipAsOf: c.asOf, spentPaise, ...env };
+  const env = envelopeOf(budgetPaise, tacticalPaise, setAsidePaise, c);
+  const base = { budgetPaise, tacticalPaise, sipTotalPaise: c.totalPaise, sipAsOf: c.asOf, setAsidePaise, spentPaise, ...env };
   if (env.envelopePaise === null) return { ...base, remainingPaise: null };
   const left = env.envelopePaise - spentPaise;
   if (env.envelopePaise > 0n && left <= 0n) {
@@ -337,7 +340,7 @@ export async function loadFreeEnvelope(db: Db, nowIso: string, excludeOrderInten
   return { ...base, remainingPaise: left > 0n ? left : 0n };
 }
 
-function envelopeOf(budgetPaise: bigint, tacticalPaise: bigint, c: SipCommitment): { envelopePaise: bigint | null; reason: string | null } {
+function envelopeOf(budgetPaise: bigint, tacticalPaise: bigint, setAsidePaise: bigint, c: SipCommitment): { envelopePaise: bigint | null; reason: string | null } {
   if (c.totalPaise === null) {
     return { envelopePaise: null, reason: c.asOf === null
       ? 'SIP commitment unknown: INDmoney SIPs have never synced (indmoney-sips)'
@@ -347,7 +350,11 @@ function envelopeOf(budgetPaise: bigint, tacticalPaise: bigint, c: SipCommitment
   if (budgetPaise <= 0n) return { envelopePaise: 0n, reason: 'the monthly budget is set to ₹0' };
   const free = budgetPaise - c.totalPaise;
   if (free <= 0n) return { envelopePaise: 0n, reason: 'SIPs already use the whole budget' };
-  const envelopePaise = free < tacticalPaise ? free : tacticalPaise;
+  const investable = free - setAsidePaise;
+  if (investable <= 0n) {
+    return { envelopePaise: 0n, reason: `the goal set-aside (${formatInr(setAsidePaise as Paise)} for house and emergency) uses the rest of the budget` };
+  }
+  const envelopePaise = investable < tacticalPaise ? investable : tacticalPaise;
   if (envelopePaise <= 0n) return { envelopePaise: 0n, reason: 'the tactical rail allows nothing this month' };
   return { envelopePaise, reason: null };
 }

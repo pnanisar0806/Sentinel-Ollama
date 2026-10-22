@@ -1,5 +1,8 @@
 import type { Db } from '../db/client.js';
 import { DEFAULT_OWNER_RAILS, getBreakerState, getFreezeState, resetBreaker, setFreeze } from './rails.js';
+import { railPaise, validGoalCeilingPct } from './rail-values.js';
+import { istDate, istMonth } from './sips.js';
+import { formatInr, type Paise } from '../money/paise.js';
 import { testCondition, type FalsificationCondition } from './sell-triggers.js';
 import { currentDrawdown } from './drawdown.js';
 
@@ -239,13 +242,15 @@ const RAIL_COOLING_HOURS = 48;
 const LOOSENING_BLOCK_DRAWDOWN_PCT = 15;
 
 /**
- * Every current rail is a ceiling or a cap, so a HIGHER value is a looser rail. Listed
- * explicitly rather than assumed, so a future rail whose direction is the other way
- * must be added here deliberately — an unknown rail is refused, not guessed at.
+ * Every rail but one is a ceiling or a cap, so a HIGHER value is a looser rail. The
+ * exception is listed deliberately: the goal set-aside comes off the free envelope, so a
+ * higher set-aside is TIGHTER. An unknown rail is refused, not guessed at.
  */
-const LOOSER_WHEN_HIGHER = new Set(Object.keys(DEFAULT_OWNER_RAILS));
+const TIGHTER_WHEN_HIGHER = new Set(['goal_setaside_monthly_paise']);
+const LOOSER_WHEN_HIGHER = new Set(Object.keys(DEFAULT_OWNER_RAILS).filter((k) => !TIGHTER_WHEN_HIGHER.has(k)));
 
 export function isLoosening(key: string, current: number, proposed: number): boolean {
+  if (TIGHTER_WHEN_HIGHER.has(key)) return proposed < current;
   if (!LOOSER_WHEN_HIGHER.has(key)) throw new Error(`unknown rail ${key}`);
   return proposed > current;
 }
@@ -276,9 +281,15 @@ async function looseningAllowed(db: Db, now: Date): Promise<string | null> {
  * 48 hours after any rail change. The PRD asks that the edit wait, not the portfolio.
  */
 export async function proposeRailChange(
-  db: Db, key: string, proposed: number, now: Date = new Date(),
+  db: Db, key: string, proposed: number, now: Date = new Date(), note?: string,
 ): Promise<{ activatesAt: string; loosening: boolean }> {
-  if (!Number.isFinite(proposed) || proposed <= 0) throw new Error('a rail value must be a positive number');
+  // The goal set-aside alone may be 0, so it can be ended; every other rail stays positive.
+  const floorOk = key === 'goal_setaside_monthly_paise' ? proposed >= 0 : proposed > 0;
+  if (!Number.isFinite(proposed) || !floorOk) throw new Error('a rail value must be a positive number');
+  // Checked here, not only in the web form: the Telegram /rail command proposes too.
+  if (key === 'goal_equity_ceiling_pct' && !validGoalCeilingPct(proposed)) {
+    throw new Error(`${key} must be a whole percentage within 60–92, not ${proposed}`);
+  }
   const current = await railValue(db, key);
   if (proposed === current) throw new Error(`${key} is already ${current}`);
   const loosening = isLoosening(key, current, proposed);
@@ -296,7 +307,7 @@ export async function proposeRailChange(
   await db.query(
     `insert into audit_log (entity, entity_id, action, actor, payload)
      values ('rail', $1, 'RAIL_CHANGE_PROPOSED', 'owner', $2::jsonb)`,
-    [key, JSON.stringify({ key, current, proposed, loosening, activatesAt })],
+    [key, JSON.stringify({ key, current, proposed, loosening, activatesAt, ...(note !== undefined ? { note } : {}) })],
   );
   return { activatesAt, loosening };
 }
@@ -348,4 +359,87 @@ export async function applyDueRailChanges(
     activated.push(c.key);
   }
   return { activated, refused };
+}
+
+// ── Goal plan §12 Q4: the advisor waits for the month's budget (until the 7th) ──────
+
+const BUDGET_RAILS = ['monthly_budget_paise', 'tactical_monthly_paise'];
+const BUDGET_WAIT_LAST_DAY = 7;
+
+export const istDateTime = (iso: string): string =>
+  `${new Date(Date.parse(iso) + 330 * 60_000).toISOString().slice(0, 16).replace('T', ' ')} IST`;
+
+export interface BudgetMonth { settled: boolean; reason: string | null; confirmedOn: string | null }
+
+/**
+ * Has the owner set this IST month's budget? Order is binding (owner, 2026-10-21): a
+ * pending budget change holds even after the 7th, because the advisor would otherwise
+ * size against a budget that is about to change. After the 7th it runs on the budget in
+ * force. Before then, a confirmation or an activated budget change this month settles it.
+ * Months are compared in SQL in Asia/Kolkata: `at` is a Date under PGlite and a string
+ * under postgres-js.
+ */
+export async function loadBudgetMonth(db: Db, nowIso: string): Promise<BudgetMonth> {
+  const pending = (await pendingRailChanges(db)).find((c) => BUDGET_RAILS.includes(c.key));
+  if (pending) {
+    return { settled: false, reason: `a budget change activates ${istDateTime(pending.activatesAt)}`, confirmedOn: null };
+  }
+  if (Number(istDate(nowIso).slice(8)) > BUDGET_WAIT_LAST_DAY) return { settled: true, reason: null, confirmedOn: null };
+  const [row] = await db.query<{ confirmed_on: string }>(
+    `select to_char(at at time zone 'Asia/Kolkata', 'YYYY-MM-DD') as confirmed_on from audit_log
+      where (entity = 'budget' and entity_id = $1 and action = 'BUDGET_CONFIRMED')
+         or (entity = 'rail' and entity_id = 'monthly_budget_paise' and action = 'RAIL_CHANGE_ACTIVATED'
+             and to_char(at at time zone 'Asia/Kolkata', 'YYYY-MM') = $1)
+      order by at limit 1`,
+    [istMonth(nowIso)],
+  );
+  if (row) return { settled: true, reason: null, confirmedOn: row.confirmed_on };
+  return { settled: false, reason: "waiting for this month's budget (until the 7th)", confirmedOn: null };
+}
+
+/** The one-click "keep ₹X this month", audited against the IST month of `now`. */
+export async function confirmBudget(db: Db, now: Date): Promise<void> {
+  const budgetPaise = await railPaise(db, 'monthly_budget_paise');
+  await db.query(
+    `insert into audit_log (at, entity, entity_id, action, actor, payload)
+     values ($1, 'budget', $2, 'BUDGET_CONFIRMED', 'owner', $3::jsonb)`,
+    [now.toISOString(), istMonth(now.toISOString()), JSON.stringify({ budgetPaise: String(budgetPaise) })],
+  );
+}
+
+/**
+ * Once a month, days 1–7, while the budget is unsettled. Never throws: a Telegram outage
+ * must not fail the daily job. The marker is written only after a real send, so a failed
+ * or dry-run day retries tomorrow. `telegram` is null when it is not configured.
+ */
+export async function sendBudgetReminder(
+  db: Db, now: Date, telegram: { send(markdown: string): Promise<{ sent: boolean }> } | null,
+): Promise<boolean> {
+  const nowIso = now.toISOString();
+  const month = istMonth(nowIso);
+  try {
+    if (Number(istDate(nowIso).slice(8)) > BUDGET_WAIT_LAST_DAY) return false;
+    // A pending budget change is the owner already setting it: no reminder, no marker.
+    if ((await pendingRailChanges(db)).some((c) => BUDGET_RAILS.includes(c.key))) return false;
+    if ((await loadBudgetMonth(db, nowIso)).settled) return false;
+    const marked = await db.query(
+      `select 1 from audit_log where entity = 'budget' and action = 'REMINDER_SENT' and entity_id = $1`, [month]);
+    if (marked.length > 0) return false;
+    if (telegram === null) {
+      console.error('Telegram not configured: budget reminder not sent');
+      return false;
+    }
+    const budget = formatInr((await railPaise(db, 'monthly_budget_paise')) as Paise);
+    const { sent } = await telegram.send(`Set this month's budget by the 7th: keep ${budget} or change it on Overview.`);
+    if (!sent) return false;
+    await db.query(
+      `insert into audit_log (entity, entity_id, action, actor, payload)
+       values ('budget', $1, 'REMINDER_SENT', 'agent', $2::jsonb)`,
+      [month, JSON.stringify({ at: nowIso })],
+    );
+    return true;
+  } catch (error) {
+    console.error(`budget reminder failed: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
 }

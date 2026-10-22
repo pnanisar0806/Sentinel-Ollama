@@ -24,8 +24,18 @@ MEMORY.md; the code map lives in index.md.
         Invesco ₹3,001 = ₹30,254 → free ₹19,746. Gaps fixed 2026-10-15: the system now
         reads ₹19,746 free (departed HDFC counted) and ₹24 remaining once the gold ETF is logged. Proposals run in the WEEKLY report (Sundays); unknown SIPs hold
         rebalance + advisor without consuming the month, retry next weekly run.
-  - [ ] **Piece 2 (goal plan) next** — needs the PRD amendment; ask the owner the five
-        spec §2.5 inputs at its start.
+  - [ ] **Piece 2 (goal plan)** — branch `feat/goal-plan`, Tasks 1–7 committed locally, NOT pushed.
+        Spec `2026-10-21-goal-plan-design.md`. Release: whole-branch review → squash → owner pushes.
+    - [x] Goal tracker on `/buckets`, verdict lines on Overview, goal plan beside the normal
+          plan on `/advisor` (raise budget, sign/revoke equity ceiling), "Keep ₹X this month".
+    - [ ] **Owner true-up:** RSU quantity is the manual-seed row; a sale logged to B2/B3 double
+          counts until the quantity is updated.
+    - [x] Fix wave after final review: I-1 (house/emergency guidance only), T7-1/2/3, T2, T5-1,
+          ceiling relabel, RSU latest-snapshot-per-source.
+    - [x] **Owner 2026-10-22: house/emergency get a budget raise** via the new
+          `goal_setaside_monthly_paise` rail (envelope unchanged); cosmetic fixes done.
+    - [x] Owner 2026-10-22: the 92% risk route stays when nothing closes the gap, with full risk disclosure.
+    - [x] Owner 2026-10-22: revoking the goal ceiling **warns** (equity share shown; a trim may follow, needs approval).
 - [x] **Envelope gap: a SIP stopped after this month's instalment still cost this month** —
       FIXED 2026-10-15 (departed SIPs count; plan `2026-10-15-sip-gaps.md`).
 - [x] **Envelope gap: purchases made outside Sentinel are not counted** — FIXED 2026-10-15

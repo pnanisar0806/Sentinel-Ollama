@@ -693,7 +693,8 @@ FI income floor ₹3L/mo, stretch ₹5L/mo.
 
 Every sizing / order-gate / portfolio-rail / rebalance / advisor / web path reads
 `loadFreeEnvelope` — **never `tactical_monthly_paise` directly**. Envelope =
-`max(0, min(tactical, budget − live SIPs))`. Unknown (no snapshot, snapshot older than
+`max(0, min(tactical, budget − live SIPs − goal set-aside))` (set-aside =
+`goal_setaside_monthly_paise`, default 0, on `FreeEnvelope.setAsidePaise`; 2026-10-22). Unknown (no snapshot, snapshot older than
 `SIP_MAX_AGE_DAYS` = 7, any non-MONTHLY SIP, unparseable clock) ⇒ `envelopePaise: null`
 with a named `reason` ⇒ every BUY withheld. Never the full budget as a fallback.
 
@@ -728,6 +729,28 @@ pre-existing `flowCloses` compares drift to dilution capacity without the ×max 
 it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not fixed.
 
 ---
+
+### Goal plan — `src/domain/goal-plan.ts` (2026-10-21, branch `feat/goal-plan`)
+
+- `loadGoalTracker(db, nowIso, signedCeilingPct?)` → `GoalTracker { asOf, monthlyBudgetPaise, cards, fiPots }`;
+  `GoalCard.balancePaise` null = unknown (stale/missing NOW price), never ₹0. `loadGoalPlan(db, nowIso)` →
+  `{ tracker, plan: GoalPlan { money, totalExtraMonthlyPaise, proposedBudgetPaise, risk, signedCeilingPct } }`.
+  Both **throw** on a stored ceiling outside 60–92; web getters (`getGoals`, `getAdvisor().goalPlan`)
+  catch → null + reason.
+- **Firewall rewritten, not removed:** only `web/` imports goal-plan.ts; no `src/` module may
+  (`tests/architecture/no-catch-up.test.ts`). The plan acts only through owner-signed 48-hour rail
+  changes: `monthly_budget_paise` (+ `tactical_monthly_paise` when it binds), and
+  `goal_equity_ceiling_pct` (60–92, default 60). The engine applies it as the rebalance's
+  **portfolio** equity OVER threshold (not new money only); raising it never triggers a sale.
+- **House and emergency are signable via the goal set-aside (owner 2026-10-22, replaces I-1):**
+  signing raises `monthly_budget_paise` AND `goal_setaside_monthly_paise` by X (set-aside proposed
+  first), so the envelope is unchanged. `signable` = not a future route. `proposedBudgetPaise` =
+  budget + every signable extra; `proposedSetAsidePaise` = set-aside + house + emergency extras.
+  A higher set-aside is a TIGHTENING (`isLoosening` exception); 0 is allowed for that key only.
+  FI projects on budget − set-aside. The owner still moves the money and logs it on /log.
+- **Advisor budget hold:** the monthly advisor waits until the month's budget is confirmed
+  (`confirmBudget`, the "Keep ₹X" button) or changed, or the 7th IST passes; a pending budget
+  change holds even after the 7th (`loadBudgetMonth`).
 
 ## Gotchas learned the hard way (each cost a fix round)
 
@@ -1110,6 +1133,9 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
   an exemption list. Owner true-up below.
 
 ## Owner true-up items (need real statements — do not guess)
+
+**RSU quantity for the house card (2026-10-21):** read from the latest `US:NOW` holding row, a
+manual seed. A sale logged to B2/B3 double counts until that quantity is updated. Open.
 
 **Gold holding changed (owner, 2026-08-25): RESOLVED same day.** "GoldCase" IS the
 `IND:INDS29570` line (~₹65k) INDmoney reports as "Zerodha Gold ETF" — owner-confirmed
@@ -3174,3 +3200,18 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   do not loosen the architecture test ahead of the goal-plan module.
 - **Funds first:** no individual stocks unless exceptional (spec §3).
 - **₹2.5L of the Sammaan ₹3,24,300 is a family trip** (exact after 2026-12-31); not modelled.
+
+## Piece 2 owner inputs (2026-10-21, owner accepted the suggested defaults)
+1. Expected nominal returns: equity 12% ±3 (existing), **debt 7% ±2, gold 8% ±2**; inflation 6%.
+2. Crash depth for risk disclosure: **equity −50%, debt 0%, gold 0%** (back-solved from IPS §3.1's
+   60% equity ≈ −25…−30% portfolio).
+3. Goal attribution: all investable assets (EPF, MF, ETF, stocks, bonds, RSU) count toward **B1 FI**;
+   B2/B3/B4 count only `bucket_flows` (house ₹0, emergency ₹0 until logged, education ₹0 until 2028).
+   Batch A's "earmark" log use will move money between goals.
+4. Target dates: **FI 2050** (age 55), **house 2033** (₹65L down payment + costs, today's money),
+   **education 2046**, **emergency Dec 2026**.
+5. Emergency fund: **₹0 in B3** until the owner logs an IDFC deposit.
+- **House funding (owner, 2026-10-21):** house (B2) is funded mainly from RSU vests (+ bonuses, logged
+  as they come); the ₹50k monthly budget and its yearly raises go to FI. The goal tracker counts
+  **projected future RSU vests (after withholding) toward the house**; house money sits in
+  debt/arbitrage (IPS: no equity within 7 years of purchase). Not a firm commitment by the owner.

@@ -6,9 +6,11 @@ import { dirname, join, normalize, relative, resolve } from 'node:path';
 /**
  * Architecture test: the `funded_status` firewall.
  *
- * PRD hard constraint (CLAUDE.md): `funded_status` is unreadable by any sizing or
- * risk function. No catch-up behaviour — being behind the FI target must never make
- * the agent take more risk to catch up.
+ * The rule (goal-plan spec 2026-10-21 §7): no catch-up in the normal plan; the goal plan
+ * is a separately shown, owner-signed proposal. `funded_status` stays unreadable by any
+ * sizing or risk function, so being behind a goal can never make the normal plan take
+ * more risk. Only `src/domain/goal-plan.ts` reads goal status, and nothing in the normal
+ * plan may reach it.
  *
  * The version of this file that shipped on the branch enforced NOTHING. It had no
  * filesystem access, no module-graph walk and no allowlist evaluation: `sizeRisk`,
@@ -88,6 +90,9 @@ const ALLOWED = new Set([
   // list and must never be: that is where the firewall actually has to hold.
   'src/jobs/report.ts',
   'src/domain/maturities.ts', // maturity routing for digest; reports bucket allocation, never sizes
+  // Goal-plan spec §7: the one new reader of goal status. It proposes, never sizes; the
+  // describe block "the goal plan is unreachable from the normal plan" holds it apart.
+  'src/domain/goal-plan.ts',
 ]);
 
 /** A module whose name says it decides how much to buy, or how much risk to take. */
@@ -170,5 +175,38 @@ describe('no catch-up: the firewall would catch a real breach', () => {
     const wouldBeAllowed = new Set([...ALLOWED, 'src/domain/risk-sizing.ts']);
     expect([...wouldBeAllowed].filter((f) => SIZING_OR_RISK.test(f)))
       .toEqual(['src/domain/risk-sizing.ts']);
+  });
+});
+
+describe('the goal plan is unreachable from the normal plan', () => {
+  const GOAL_PLAN = 'src/domain/goal-plan.ts';
+  /** Spec §7: the normal plan's entry points. */
+  const NORMAL_PLAN = [
+    'src/domain/sizing.ts', 'src/domain/sizing-input.ts', 'src/domain/alloc-engine.ts',
+    'src/domain/rails.ts', 'src/notify/report.ts', 'src/advisor/recommend.ts',
+  ];
+
+  it('nothing in src/ reaches goal-plan.ts — only web/ calls it', () => {
+    expect(graph.has(GOAL_PLAN)).toBe(true);
+    expect([...reachersOf(graph, GOAL_PLAN)]).toEqual([]);
+  });
+
+  it.each(NORMAL_PLAN)('%s exists in the graph and does not reach the goal plan', (f) => {
+    expect(graph.has(f)).toBe(true);
+    expect([...reachersOf(graph, GOAL_PLAN)]).not.toContain(f);
+  });
+
+  it('flags the weekly report importing the goal plan directly', () => {
+    const g = new Map(graph);
+    g.set('src/notify/report.ts', [...graph.get('src/notify/report.ts')!, GOAL_PLAN]);
+    expect([...reachersOf(g, GOAL_PLAN)]).toContain('src/notify/report.ts');
+  });
+
+  it('flags a two-hop path through a new module', () => {
+    const g = new Map(graph);
+    g.set('src/domain/goal-bridge.ts', [GOAL_PLAN]);
+    g.set('src/domain/sizing.ts', [...graph.get('src/domain/sizing.ts')!, 'src/domain/goal-bridge.ts']);
+    expect([...reachersOf(g, GOAL_PLAN)]).toEqual(
+      expect.arrayContaining(['src/domain/goal-bridge.ts', 'src/domain/sizing.ts']));
   });
 });

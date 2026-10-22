@@ -310,6 +310,27 @@ describe('loadFreeEnvelope', () => {
     await persistSipSnapshot(db, live, '2026-09-30T00:00:00Z');
     expect(await loadFreeEnvelope(db, NOW)).toMatchObject({ envelopePaise: null, reason: expect.stringMatching(/2026-09-30/) });
   });
+
+  // Brief 2026-10-22: the goal set-aside is reserved for house and emergency; the normal plan never invests it.
+  it('the goal set-aside comes off the budget: 50k − 30k SIPs − 10k set-aside, tactical 50k ⇒ 10k', async () => {
+    await persistSipSnapshot(db, [{ ...live[0]!, amountPaise: 3_000_000n }], NOW);
+    await setRail('monthly_budget_paise', 5_000_000);
+    await setRail('tactical_monthly_paise', 5_000_000);
+    await setRail('goal_setaside_monthly_paise', 1_000_000);
+    expect(await loadFreeEnvelope(db, NOW)).toMatchObject({ envelopePaise: 1_000_000n, setAsidePaise: 1_000_000n, reason: null });
+  });
+
+  it('a set-aside at or over budget − SIPs: zero, and the reason names the set-aside', async () => {
+    await persistSipSnapshot(db, [{ ...live[0]!, amountPaise: 3_000_000n }], NOW);
+    await setRail('monthly_budget_paise', 5_000_000);
+    await setRail('goal_setaside_monthly_paise', 2_000_000);
+    expect(await loadFreeEnvelope(db, NOW)).toMatchObject({ envelopePaise: 0n, reason: expect.stringMatching(/goal set-aside/) });
+  });
+
+  it('the set-aside defaults to 0', async () => {
+    await persistSipSnapshot(db, live, NOW);
+    expect((await loadFreeEnvelope(db, NOW)).setAsidePaise).toBe(0n);
+  });
 });
 
 /**

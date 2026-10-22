@@ -1,5 +1,5 @@
 import { addP, formatInr, type Paise } from '../money/paise.js';
-import { allocationDrift, type DriftRow } from './allocation.js';
+import { allocationDrift, IPS_BANDS, type DriftRow } from './allocation.js';
 import type { AssetClass, NetWorth, Position } from './networth.js';
 
 /**
@@ -65,6 +65,11 @@ export interface AllocationState {
   netWorth: NetWorth;
   positions: Position[];
   routes?: FundingRoute[];
+  /**
+   * The owner-signed goal equity ceiling as a ratio (goal-plan spec §9, §11.2), read from the
+   * `goal_equity_ceiling_pct` rail — never from goal status. Absent = IPS §3.3's 0.60.
+   */
+  equityMax?: number;
 }
 
 interface RebalanceRec {
@@ -155,6 +160,12 @@ export function addTarget(positions: readonly Position[], assetClass: AssetClass
 
 const pct = (n: number): string => `${(n * 100).toFixed(1)}%`;
 
+/** "against a 60.0% ceiling (IPS §3.3)", or the owner-signed goal ceiling when it is above IPS. */
+const ceilingText = (row: DriftRow): string =>
+  row.assetClass === 'EQUITY' && row.max > IPS_BANDS.EQUITY.max
+    ? `against the owner-signed goal ceiling ${pct(row.max)} (IPS §${ALLOCATION_CLAUSE} is ${IPS_BANDS.EQUITY.max * 100}%)`
+    : `against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE})`;
+
 function capacityFor(routes: readonly FundingRoute[], assetClass: AssetClass): Paise {
   const usable = routes.filter((r) => r.assetClass === assetClass && r.loadFree);
   return usable.length === 0
@@ -204,7 +215,7 @@ function trimActions(
             ? `unrealised loss ${formatInr((0n - gain) as Paise)} — harvestable against gains elsewhere`
             : `unrealised gain ${formatInr(gain as Paise)} — realising it is a taxable event`,
       proceedsTo,
-      rationale: `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}), `
+      rationale: `${row.assetClass} is ${pct(row.actual)} ${ceilingText(row)}, `
         + `more than new money can close within ${FLOW_HORIZON_MONTHS} months; the proceeds go into ${proceedsTo.assetClass}`
         + `${proceedsTo.instrumentId ? ` (${proceedsTo.instrumentId})` : ''}, not idle cash`,
     });
@@ -230,7 +241,7 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
   }
 
   const routes = state.routes ?? [];
-  const drift = allocationDrift(state.netWorth.byAssetClass);
+  const drift = allocationDrift(state.netWorth.byAssetClass, undefined, state.equityMax);
   const breaches = drift.filter((d) => d.breach !== null);
   const annual = monthYear.slice(5, 7) === '04';
   const taxNotes: string[] = [TAX_POLICY_NOTE];
@@ -295,7 +306,7 @@ export function rebalanceRec(state: AllocationState, monthYear: string): Rebalan
         route: target?.kind ?? 'fresh-surplus',
         taxNote: NO_REALISATION_NOTE,
         rationale:
-          `${row.assetClass} is ${pct(row.actual)} against a ${pct(row.max)} ceiling (IPS §${ALLOCATION_CLAUSE}); ` +
+          `${row.assetClass} is ${pct(row.actual)} ${ceilingText(row)}; ` +
           (withinTolerance
             ? `an overshoot under ${Math.round(SELL_TOLERANCE * 100)} points is closed by sending new money into ${toClass}, not by selling`
             : `sending new money into ${toClass} closes the gap within ${FLOW_HORIZON_MONTHS} months without a sale`) +

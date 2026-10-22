@@ -1,7 +1,9 @@
+import Link from 'next/link';
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getInvestmentControls, getOverview, getSips } from '../lib/data';
+import { getGoals, getInvestmentControls, getOverview, getSips } from '../lib/data';
+import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
-import { AllocationBar, Badge, Card, ClassChip, DataTable, GoalList, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
+import { AllocationBar, Badge, Card, ClassChip, DataTable, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +11,7 @@ export default async function OverviewPage() {
   const { input, blocked } = await getOverview();
   const sips = await getSips();
   const controls = await getInvestmentControls();
+  const goals = await getGoals();
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
@@ -68,6 +71,9 @@ export default async function OverviewPage() {
             <div className="stat-grid">
               <Stat label="Budget" value={<Money p={sips.budgetPaise as Paise} />} accent="sky" />
               <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + recorded payments" accent="violet" />
+              {sips.setAsidePaise > 0n
+                ? <Stat label="Set aside for goals" value={<>{formatInr(sips.setAsidePaise as Paise)}/month</>} sub="house + emergency · log it on /log" accent="amber" />
+                : null}
               <Stat
                 label="Spent this month"
                 value={<Money p={sips.spentPaise as Paise} />}
@@ -80,9 +86,9 @@ export default async function OverviewPage() {
                 sub={sips.reason ?? (
                   // Name the binding term: once the budget is raised past SIPs + rail, the rail caps it.
                   sips.sipTotalPaise !== null && sips.envelopePaise === sips.tacticalPaise
-                    && sips.budgetPaise - sips.sipTotalPaise > sips.tacticalPaise
-                    ? `tactical rail − spent (budget − SIPs is ${formatInr((sips.budgetPaise - sips.sipTotalPaise) as Paise)})`
-                    : 'budget − SIPs − spent')}
+                    && sips.budgetPaise - sips.sipTotalPaise - sips.setAsidePaise > sips.tacticalPaise
+                    ? `tactical rail − spent (budget − SIPs${sips.setAsidePaise > 0n ? ' − set-aside' : ''} is ${formatInr((sips.budgetPaise - sips.sipTotalPaise - sips.setAsidePaise) as Paise)})`
+                    : sips.setAsidePaise > 0n ? 'budget − SIPs − set-aside − spent' : 'budget − SIPs − spent')}
                 accent={/* green only while money is left; ₹0 (already deployed) and unknown are amber */
                   sips.remainingPaise !== null && sips.remainingPaise > 0n ? 'green' : 'amber'}
               />
@@ -130,8 +136,18 @@ export default async function OverviewPage() {
         </div>
 
         <div className="span-4">
-          <Card title="Goals">
-            <GoalList buckets={input.buckets} />
+          <Card title="Goals" aside={<Link href="/buckets">tracker</Link>} tone={goals.tracker === null ? 'bad' : undefined}>
+            {goals.tracker === null
+              ? <Notice tone="red">Goal tracker unavailable: {goals.reason}</Notice>
+              : goals.tracker.cards.map((c) => (
+                <div className="goal" key={c.id}>
+                  <div className="goal-top">
+                    <span className="goal-name">{c.name}</span>
+                    <Badge tone={VERDICT[c.verdict].tone}>{VERDICT[c.verdict].label}</Badge>
+                  </div>
+                  <span className="muted">{verdictLine(c)}</span>
+                </div>
+              ))}
           </Card>
         </div>
 

@@ -63,7 +63,12 @@ export interface DriftRow {
 export function allocationDrift(
   byAssetClass: Map<AssetClass, Paise>,
   total?: Paise,
+  /** The owner-signed goal ceiling (goal-plan spec §9) — only `rebalanceRec` passes one. */
+  equityMax: number = IPS_BANDS.EQUITY.max,
 ): DriftRow[] {
+  if (!(equityMax >= IPS_BANDS.EQUITY.max && equityMax <= 0.92)) {
+    throw new Error(`allocationDrift: equity ceiling ${equityMax} is outside 60–92%`);
+  }
   const summed = addP(...byAssetClass.values());
   if (total !== undefined && total !== summed) {
     throw new Error(
@@ -75,7 +80,8 @@ export function allocationDrift(
   return ALL_CLASSES.map((assetClass) => {
     const value = byAssetClass.get(assetClass) ?? (0n as Paise);
     const actual = pctOf(value, whole);
-    const { min, max } = IPS_BANDS[assetClass];
+    const { min } = IPS_BANDS[assetClass];
+    const max = assetClass === 'EQUITY' ? equityMax : IPS_BANDS[assetClass].max;
     const breach: DriftRow['breach'] = actual > max ? 'OVER' : actual < min ? 'UNDER' : null;
     if (breach === null) {
       return { assetClass, actual, min, max, breach, driftPaise: 0n as Paise };

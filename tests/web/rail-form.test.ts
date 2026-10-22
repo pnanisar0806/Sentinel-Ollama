@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRailInput, formatRailValue, validRailValue } from '../../web/lib/rail-form.js';
+import { parseRailInput, formatRailValue, RAIL_LABELS, railChangeMessage, validRailValue } from '../../web/lib/rail-form.js';
 
 describe('owner rail inputs', () => {
   it('validates the API boundary without numeric coercion', () => {
@@ -10,6 +10,12 @@ describe('owner rail inputs', () => {
     }
     expect(validRailValue('cash_ceiling_pct', 101)).toBe(false);
     expect(validRailValue('freeze_state', 1)).toBe(false);
+  });
+  it('the goal set-aside accepts 0 (ending it) and positive integer paise; no other rail accepts 0', () => {
+    for (const v of [0, 1_000_000]) expect(validRailValue('goal_setaside_monthly_paise', v)).toBe(true);
+    for (const v of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) expect(validRailValue('goal_setaside_monthly_paise', v)).toBe(false);
+    expect(parseRailInput('goal_setaside_monthly_paise', '0')).toBe(0);
+    expect(RAIL_LABELS['goal_setaside_monthly_paise']).toBe('Goal set-aside (house + emergency) per month');
   });
   it('converts rupees exactly to the existing integer paise transport', () => {
     expect(parseRailInput('monthly_budget_paise', '50000')).toBe(5000000);
@@ -29,5 +35,21 @@ describe('owner rail inputs', () => {
       expect(() => parseRailInput('sector_cap_pct', value)).toThrow();
     }
     expect(() => parseRailInput('freeze_state', '1')).toThrow();
+  });
+  it('the goal equity ceiling takes whole percentages from 60 to 92 only', () => {
+    for (const v of [60, 68, 92]) expect(validRailValue('goal_equity_ceiling_pct', v)).toBe(true);
+    for (const v of [59, 93, 68.5, 100]) expect(validRailValue('goal_equity_ceiling_pct', v)).toBe(false);
+    expect(parseRailInput('goal_equity_ceiling_pct', '68')).toBe(68);
+    for (const v of ['59', '93', '68.5']) expect(() => parseRailInput('goal_equity_ceiling_pct', v)).toThrow(/60 to 92/);
+  });
+});
+
+describe('railChangeMessage (T7-3): rupees and IST, never raw paise or UTC', () => {
+  it('formats a money rail in rupees and passes the IST time through', () => {
+    expect(railChangeMessage('monthly_budget_paise', 7_000_000, '2026-10-23 10:00 IST', false))
+      .toBe('Monthly investment budget → ₹70,000 takes effect 2026-10-23 10:00 IST');
+    expect(railChangeMessage('goal_equity_ceiling_pct', 68, '2026-10-23 10:00 IST', true))
+      .toBe('Goal equity ceiling → 68% takes effect 2026-10-23 10:00 IST (a loosening: drawdown is checked again then)');
+    expect(RAIL_LABELS['goal_equity_ceiling_pct']!.length).toBeGreaterThan('Goal equity ceiling'.length); // the form keeps the long text
   });
 });

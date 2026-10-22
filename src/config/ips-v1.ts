@@ -13,7 +13,7 @@ This is the binding document. Every recommendation must cite the IPS clause(s) i
 Long-term, tax-aware, evidence-based investing for a specific household's goals. The owner is an investor, not a trader. Activity is a cost. The default action is no action.
 
 ## 3.2 Objective function
-Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constraint. Funded-status vs the FI band is a REPORTING metric reviewed annually; it must never increase risk-taking after underperformance ("catch-up" behavior is prohibited by construction).
+Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constraint. Funded-status vs the FI band is a REPORTING metric reviewed annually; the normal plan never reads it and it must never increase risk-taking after underperformance on its own ("catch-up" behavior is prohibited by construction). A separate goal plan may read goal gaps and propose more money, or a higher equity share of new money, shown beside the normal plan with a risk disclosure; it takes effect only through an owner-signed rail change and never sells.
 
 ## 3.3 Strategic asset allocation (portfolio-level, across B1 primarily)
 - Equity ceiling ~60% of total investable assets (calibrated so a 2008-grade equity crash ≈ −25 to −30% portfolio drawdown).

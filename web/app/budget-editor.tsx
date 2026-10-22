@@ -3,7 +3,7 @@
 import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { InvestmentControls } from '../lib/data';
-import { formatRailValue, parseRailInput, railInputValue, RAIL_LABELS } from '../lib/rail-form';
+import { formatRailValue, parseRailInput, railInputValue, railShortLabel, RAIL_LABELS } from '../lib/rail-form';
 import { fmtDateTime } from '../lib/format';
 
 export default function BudgetEditor({ controls, budgetOnly = false }: {
@@ -38,7 +38,7 @@ export default function BudgetEditor({ controls, budgetOnly = false }: {
       });
       const result = await response.json() as { error?: string };
       setMessage({ ok: response.ok, text: response.ok
-        ? `${RAIL_LABELS[key]} change scheduled. The current limit stays in effect until the 48-hour wait and activation checks complete.`
+        ? `${railShortLabel(key)} change scheduled. The current limit stays in effect until the 48-hour wait and activation checks complete.`
         : result.error ?? 'Could not schedule this change.' });
       if (response.ok) { setValue(''); router.refresh(); }
     } catch {
@@ -46,8 +46,41 @@ export default function BudgetEditor({ controls, budgetOnly = false }: {
     } finally { setBusy(false); }
   }
 
+  async function confirm() {
+    if (busy) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch('/api/controls', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'confirm_budget' }),
+      });
+      const result = await response.json() as { message?: string; error?: string };
+      setMessage({ ok: response.ok, text: result.message ?? result.error ?? `failed (${response.status})` });
+      if (response.ok) router.refresh();
+    } catch {
+      setMessage({ ok: false, text: 'Could not confirm the budget. Refresh to check before trying again.' });
+    } finally { setBusy(false); }
+  }
+
+  const month = controls.budgetMonth;
+  const budget = controls.values.monthly_budget_paise;
+  // A pending budget change holds the advisor whatever is confirmed, so the button would mislead.
+  const budgetPending = controls.pending.some((c) => c.key === 'monthly_budget_paise' || c.key === 'tactical_monthly_paise');
+
   return (
     <div className="investment-editor">
+      {budgetOnly && <div className="btn-row" style={{ alignItems: 'center' }}>
+        {month.settled
+          ? <span className="dim">{month.confirmedOn ? `This month's budget is settled (${month.confirmedOn}).` : "This month's budget is settled: the advisor runs on the budget in force."}</span>
+          : budgetPending || budget === undefined
+            ? <span className="dim">Advisor waiting: {month.reason}.</span>
+            : <>
+              <button className="btn btn-primary" type="button" disabled={busy} onClick={confirm}>
+                Keep {formatRailValue('monthly_budget_paise', budget)} this month
+              </button>
+              <span className="dim">No change, so no 48-hour wait: the advisor runs at the next weekly report. Otherwise it waits until the 7th.</span>
+            </>}
+      </div>}
       <p className="dim">Every edit waits 48 hours. Increases are refused above 15% drawdown, both now and at activation.</p>
       {budgetOnly && <p className="dim">
         The budget includes SIPs. What you may invest beyond them is the smaller of budget − SIPs and the

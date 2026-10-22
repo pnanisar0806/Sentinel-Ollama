@@ -66,3 +66,44 @@ export function LineActions({ id, line }: { id: number; line: number }) {
     </span>
   );
 }
+
+/**
+ * A goal-plan signature: one or more 48-hour rail changes, posted in order. They are not
+ * atomic: every result is shown verbatim, and the first refusal (e.g. a loosening above 15%
+ * drawdown) stops the rest. The caller orders the set-aside first, so a stop is on the safe side.
+ */
+const NOT_ATOMIC = 'Each change waits 48 hours on its own; they are separate changes, not one.';
+export function ProposeRails({ label, proposals }: { label: string; proposals: { key: string; value: number; note: string }[] }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const run = async () => {
+    setBusy(true); setMsg(null);
+    const done: string[] = [];
+    for (const p of proposals) {
+      const r = await fetch('/api/controls', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'propose_rail', ...p }),
+      }).then(async (res) => {
+        const json = await res.json() as { message?: string; error?: string };
+        return { ok: res.ok, text: json.message ?? json.error ?? `failed (${res.status})` };
+      }).catch((e) => ({ ok: false, text: String(e) }));
+      if (!r.ok) {
+        setMsg({ ok: false, text: done.length ? `${done.join(' · ')} · then refused: ${r.text} · ${NOT_ATOMIC}` : r.text });
+        setBusy(false);
+        if (done.length) router.refresh();
+        return;
+      }
+      done.push(r.text);
+    }
+    setMsg({ ok: true, text: proposals.length > 1 ? `${done.join(' · ')} · ${NOT_ATOMIC}` : done.join(' · ') });
+    setBusy(false);
+    router.refresh();
+  };
+  return (
+    <div className="form" style={{ gap: 6 }}>
+      <div className="btn-row"><button className="btn btn-primary" type="button" disabled={busy} onClick={run}>{busy ? 'Scheduling…' : label}</button></div>
+      {msg ? <span role="status" className={msg.ok ? 'result-ok' : 'result-err'}>{msg.text}</span> : null}
+    </div>
+  );
+}

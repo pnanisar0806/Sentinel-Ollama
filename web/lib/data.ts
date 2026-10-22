@@ -34,6 +34,8 @@ import { humanize, sentence } from './plain';
 import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
+import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
+import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
 import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 
 let dbPromise: Promise<Db> | null = null;
@@ -99,6 +101,14 @@ export async function getBuckets(): Promise<BucketsData> {
   const input = await getDigest();
   const d = await db();
   return { input, buckets: await bucketStatuses(d), milestones: await milestoneStatuses(d, input.businessDate) };
+}
+
+const why = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** The goal tracker (spec 2026-10-21 §4). A load error (e.g. a stored ceiling outside 60–92) is a reason, never a crashed page. */
+export async function getGoals(): Promise<{ tracker: GoalTracker | null; reason: string | null }> {
+  try { return { tracker: await loadGoalTracker(await db(), new Date().toISOString()), reason: null }; }
+  catch (e) { return { tracker: null, reason: why(e) }; }
 }
 
 export interface RsuData {
@@ -736,6 +746,9 @@ export interface AdvisorData {
   news: { id: number; on: string; name: string; type: string; headline: string; polarity: string | null; materiality: string | null; summary: string | null; url: string | null }[];
   calibration: Awaited<ReturnType<typeof calibrateByOrigin>>;
   names: Map<string, string>;
+  /** The goal plan beside the normal plan (spec §5). Null with a reason when it cannot load. */
+  goalPlan: { tracker: GoalTracker; plan: GoalPlan } | null;
+  goalPlanReason: string | null;
 }
 
 /** /advisor: the model's advice, the watchlist revision, material news, commentary, track record. */
@@ -754,7 +767,11 @@ export async function getAdvisor(): Promise<AdvisorData> {
        left join lateral (select polarity, materiality, summary from event_sentiment x where x.event_id = e.id order by x.classified_at desc, x.id desc limit 1) s on true
       where e.published_at >= now() - interval '30 days'
       order by case s.materiality when 'HIGH' then 0 when 'MEDIUM' then 1 else 2 end, e.published_at desc limit 40`);
+  let goalPlan: AdvisorData['goalPlan'] = null;
+  let goalPlanReason: string | null = null;
+  try { goalPlan = await loadGoalPlan(d, new Date().toISOString()); } catch (e) { goalPlanReason = why(e); }
   return {
+    goalPlan, goalPlanReason,
     advice: await loadProposals(d, 'ADVISE', 12),
     revision: revision ? { ...revision, decided } : null,
     commentary: (await loadProposals(d, 'COMMENTARY', 1))[0] ?? null,
@@ -775,6 +792,8 @@ export async function getInstrumentKinds(): Promise<Map<string, string>> {
 export interface SipsData {
   asOf: string | null; stale: boolean;
   budgetPaise: bigint; tacticalPaise: bigint; sipTotalPaise: bigint | null; envelopePaise: bigint | null; reason: string | null;
+  /** `goal_setaside_monthly_paise`: reserved for house and emergency, never invested by the normal plan. */
+  setAsidePaise: bigint;
   /** This IST month's Sentinel BUY orders + owner-logged purchases. Always known. */
   spentPaise: bigint;
   /** max(0, envelope − spent). Null iff envelopePaise is null. */
@@ -826,11 +845,11 @@ export async function getSips(): Promise<SipsData> {
     stepUp: null, stepUpInferred: false, nextOn: null, nextAmountPaise: null,
   }));
   return { asOf: c.asOf, stale: c.stale, budgetPaise: e.budgetPaise, tacticalPaise: e.tacticalPaise, sipTotalPaise: c.totalPaise,
-    envelopePaise: e.envelopePaise, reason: e.reason, spentPaise: e.spentPaise, remainingPaise: e.remainingPaise,
+    envelopePaise: e.envelopePaise, reason: e.reason, setAsidePaise: e.setAsidePaise, spentPaise: e.spentPaise, remainingPaise: e.remainingPaise,
     rows: [...rows, ...departed, ...paid], nextStepUp: nextStepUpTotal };
 }
 
-export interface InvestmentControls { values: Record<string, number>; pending: PendingRailChange[] }
+export interface InvestmentControls { values: Record<string, number>; pending: PendingRailChange[]; budgetMonth: BudgetMonth }
 
 /** Current owner rails (settings_rails, else the seeded default) and changes waiting out their 48 hours. */
 export async function getInvestmentControls(): Promise<InvestmentControls> {
@@ -839,5 +858,5 @@ export async function getInvestmentControls(): Promise<InvestmentControls> {
     'select key, value from settings_rails where key = any($1::text[])', [Object.keys(DEFAULT_OWNER_RAILS)]);
   const values = Object.fromEntries(Object.entries(DEFAULT_OWNER_RAILS).map(([key, value]) => [key, Number(value)]));
   for (const row of rows) values[row.key] = Number(row.value);
-  return { values, pending: await pendingRailChanges(d) };
+  return { values, pending: await pendingRailChanges(d), budgetMonth: await loadBudgetMonth(d, new Date().toISOString()) };
 }

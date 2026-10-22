@@ -6,7 +6,7 @@ import { expireOrders, resurfaceDeferredOrder, recordAdvisoryReminder, getPendin
 import { isMainModule } from '../util/main-module.js';
 import { draftAnnouncement, draftPendingOrders } from '../domain/order-drafting.js';
 import { isRevisionDay, proposeRevision } from '../advisor/watchlist.js';
-import { applyDueRailChanges, evaluateBreaker } from '../domain/controls.js';
+import { applyDueRailChanges, evaluateBreaker, sendBudgetReminder } from '../domain/controls.js';
 import { Telegram } from '../notify/telegram.js';
 
 /** This job processes scheduled tasks; it needs DATABASE_URL only. */
@@ -129,13 +129,19 @@ if (isMainModule(import.meta.url)) {
   const announcement = draftAnnouncement(drafts);
   const botToken = process.env['TELEGRAM_BOT_TOKEN'];
   const chatId = process.env['TELEGRAM_OWNER_CHAT_ID'];
-  if (announcement !== null && botToken && chatId) {
-    await new Telegram({ botToken, ownerChatId: chatId, dryRun: process.env['DRY_RUN'] === '1' })
-      .send(announcement);
+  const telegram = botToken && chatId
+    ? new Telegram({ botToken, ownerChatId: chatId, dryRun: process.env['DRY_RUN'] === '1' })
+    : null;
+  if (announcement !== null && telegram !== null) {
+    await telegram.send(announcement);
   } else if (announcement !== null) {
     // The requests exist either way and are visible on /approvals; only the push is lost.
     console.error('Telegram not configured: approval requests drafted but not announced');
   }
+
+  // Goal plan §12 Q4: on IST days 1–7, once a month, remind the owner to set the budget
+  // the advisor is waiting for. Never throws.
+  if (await sendBudgetReminder(db, new Date(), telegram)) console.log('budget reminder sent');
 
   // Phase 2.5 Task 9: the quarterly watchlist revision, on the first weekday on or after
   // the 20th of Feb/May/Aug/Nov (IST). A proposal for the owner to sign line by line on
