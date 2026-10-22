@@ -249,8 +249,8 @@ describe('rail changes cool for 48 hours', () => {
                      where key = 'goal_setaside_monthly_paise'`);
     await drawdown(2, '2026-09-24'); // ending it is a loosening: needs fresh evidence
     await expect(proposeRailChange(db, 'goal_setaside_monthly_paise', 0, NOW)).resolves.toBeDefined();
-    await expect(proposeRailChange(db, 'max_order_paise', 0, NOW)).rejects.toThrow(/positive/);
-    await expect(proposeRailChange(db, 'goal_setaside_monthly_paise', -1, NOW)).rejects.toThrow();
+    await expect(proposeRailChange(db, 'max_order_paise', 0, NOW)).rejects.toThrow('a rail value must be a positive number');
+    await expect(proposeRailChange(db, 'goal_setaside_monthly_paise', -1, NOW)).rejects.toThrow('the goal set-aside must be zero or more');
     await db.close();
   });
 
@@ -351,7 +351,15 @@ describe('the advisor waits for the month\'s budget (until the 7th)', () => {
 
   it('a pending tactical change holds too', async () => {
     await proposeRailChange(db, 'tactical_monthly_paise', 40_00_000, new Date('2026-11-07T06:00:00Z'));
-    expect((await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).reason).toMatch(/^a budget change activates /);
+    expect((await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).reason).toMatch(/^a tactical cap change activates /);
+    await db.close();
+  });
+
+  it('a pending goal set-aside change holds too, and the reason names it (it moves the envelope)', async () => {
+    await proposeRailChange(db, 'goal_setaside_monthly_paise', 20_00_000, new Date('2026-11-07T06:00:00Z'));
+    expect(await loadBudgetMonth(db, '2026-11-08T05:00:00Z')).toEqual({
+      settled: false, reason: 'a goal set-aside change activates 2026-11-09 11:30 IST', confirmedOn: null,
+    });
     await db.close();
   });
 

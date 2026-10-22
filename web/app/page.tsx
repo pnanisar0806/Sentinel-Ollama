@@ -72,7 +72,7 @@ export default async function OverviewPage() {
               <Stat label="Budget" value={<Money p={sips.budgetPaise as Paise} />} accent="sky" />
               <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + recorded payments" accent="violet" />
               {sips.setAsidePaise > 0n
-                ? <Stat label="Set aside for goals" value={<>{formatInr(sips.setAsidePaise as Paise)}/month</>} sub="house + emergency · log it on /log" accent="amber" />
+                ? <Stat label="Set aside for goals" value={<><Money p={sips.setAsidePaise as Paise} />/month</>} sub="house + emergency · log it on /log" accent="amber" />
                 : null}
               <Stat
                 label="Spent this month"

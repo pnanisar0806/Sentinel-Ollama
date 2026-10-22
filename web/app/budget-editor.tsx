@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { InvestmentControls } from '../lib/data';
 import { formatRailValue, parseRailInput, railInputValue, railShortLabel, RAIL_LABELS } from '../lib/rail-form';
 import { fmtDateTime } from '../lib/format';
+import { pendingBudgetRail } from '../../src/domain/rail-values.js';
 
 export default function BudgetEditor({ controls, budgetOnly = false }: {
   controls: InvestmentControls;
@@ -64,8 +65,9 @@ export default function BudgetEditor({ controls, budgetOnly = false }: {
 
   const month = controls.budgetMonth;
   const budget = controls.values.monthly_budget_paise;
-  // A pending budget change holds the advisor whatever is confirmed, so the button would mislead.
-  const budgetPending = controls.pending.some((c) => c.key === 'monthly_budget_paise' || c.key === 'tactical_monthly_paise');
+  // A pending budget, tactical or set-aside change holds the advisor whatever is confirmed, so the
+  // button would mislead; month.reason names which change it is.
+  const budgetPending = pendingBudgetRail(controls.pending) !== undefined;
 
   return (
     <div className="investment-editor">

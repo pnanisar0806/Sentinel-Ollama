@@ -1,6 +1,6 @@
 import type { Db } from '../db/client.js';
 import { DEFAULT_OWNER_RAILS, getBreakerState, getFreezeState, resetBreaker, setFreeze } from './rails.js';
-import { railPaise, validGoalCeilingPct } from './rail-values.js';
+import { BUDGET_RAIL_NAMES, pendingBudgetRail, railPaise, validGoalCeilingPct } from './rail-values.js';
 import { istDate, istMonth } from './sips.js';
 import { formatInr, type Paise } from '../money/paise.js';
 import { testCondition, type FalsificationCondition } from './sell-triggers.js';
@@ -284,8 +284,10 @@ export async function proposeRailChange(
   db: Db, key: string, proposed: number, now: Date = new Date(), note?: string,
 ): Promise<{ activatesAt: string; loosening: boolean }> {
   // The goal set-aside alone may be 0, so it can be ended; every other rail stays positive.
-  const floorOk = key === 'goal_setaside_monthly_paise' ? proposed >= 0 : proposed > 0;
-  if (!Number.isFinite(proposed) || !floorOk) throw new Error('a rail value must be a positive number');
+  const setAside = key === 'goal_setaside_monthly_paise';
+  if (!Number.isFinite(proposed) || !(setAside ? proposed >= 0 : proposed > 0)) {
+    throw new Error(setAside ? 'the goal set-aside must be zero or more' : 'a rail value must be a positive number');
+  }
   // Checked here, not only in the web form: the Telegram /rail command proposes too.
   if (key === 'goal_equity_ceiling_pct' && !validGoalCeilingPct(proposed)) {
     throw new Error(`${key} must be a whole percentage within 60–92, not ${proposed}`);
@@ -363,7 +365,6 @@ export async function applyDueRailChanges(
 
 // ── Goal plan §12 Q4: the advisor waits for the month's budget (until the 7th) ──────
 
-const BUDGET_RAILS = ['monthly_budget_paise', 'tactical_monthly_paise'];
 const BUDGET_WAIT_LAST_DAY = 7;
 
 export const istDateTime = (iso: string): string =>
@@ -380,9 +381,9 @@ export interface BudgetMonth { settled: boolean; reason: string | null; confirme
  * under postgres-js.
  */
 export async function loadBudgetMonth(db: Db, nowIso: string): Promise<BudgetMonth> {
-  const pending = (await pendingRailChanges(db)).find((c) => BUDGET_RAILS.includes(c.key));
+  const pending = pendingBudgetRail(await pendingRailChanges(db));
   if (pending) {
-    return { settled: false, reason: `a budget change activates ${istDateTime(pending.activatesAt)}`, confirmedOn: null };
+    return { settled: false, reason: `a ${BUDGET_RAIL_NAMES[pending.key]} change activates ${istDateTime(pending.activatesAt)}`, confirmedOn: null };
   }
   if (Number(istDate(nowIso).slice(8)) > BUDGET_WAIT_LAST_DAY) return { settled: true, reason: null, confirmedOn: null };
   const [row] = await db.query<{ confirmed_on: string }>(
@@ -420,7 +421,7 @@ export async function sendBudgetReminder(
   try {
     if (Number(istDate(nowIso).slice(8)) > BUDGET_WAIT_LAST_DAY) return false;
     // A pending budget change is the owner already setting it: no reminder, no marker.
-    if ((await pendingRailChanges(db)).some((c) => BUDGET_RAILS.includes(c.key))) return false;
+    if (pendingBudgetRail(await pendingRailChanges(db))) return false;
     if ((await loadBudgetMonth(db, nowIso)).settled) return false;
     const marked = await db.query(
       `select 1 from audit_log where entity = 'budget' and action = 'REMINDER_SENT' and entity_id = $1`, [month]);

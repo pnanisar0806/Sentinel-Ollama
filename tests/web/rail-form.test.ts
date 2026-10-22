@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseRailInput, formatRailValue, RAIL_LABELS, railChangeMessage, validRailValue } from '../../web/lib/rail-form.js';
+import { invalidRailMessage, parseRailInput, formatRailValue, RAIL_LABELS, railChangeMessage, validRailValue } from '../../web/lib/rail-form.js';
 
 describe('owner rail inputs', () => {
   it('validates the API boundary without numeric coercion', () => {
@@ -16,6 +16,14 @@ describe('owner rail inputs', () => {
     for (const v of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) expect(validRailValue('goal_setaside_monthly_paise', v)).toBe(false);
     expect(parseRailInput('goal_setaside_monthly_paise', '0')).toBe(0);
     expect(RAIL_LABELS['goal_setaside_monthly_paise']).toBe('Goal set-aside (house + emergency) per month');
+  });
+  it('error wording is key-aware: the set-aside says zero or more, never positive', () => {
+    const huge = String(Number.MAX_SAFE_INTEGER);
+    expect(() => parseRailInput('goal_setaside_monthly_paise', huge)).toThrow('Enter an amount of zero or more within the supported range.');
+    expect(() => parseRailInput('monthly_budget_paise', '0')).toThrow('Enter a positive amount within the supported range.');
+    expect(invalidRailMessage('goal_setaside_monthly_paise')).toBe('Invalid investment limit: use integer paise of zero or more.');
+    expect(invalidRailMessage('monthly_budget_paise'))
+      .toBe('Invalid investment limit: use positive integer paise for money or a percentage up to 100.');
   });
   it('converts rupees exactly to the existing integer paise transport', () => {
     expect(parseRailInput('monthly_budget_paise', '50000')).toBe(5000000);

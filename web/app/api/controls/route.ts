@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
-import { railChangeMessage, validRailValue } from '@/lib/rail-form';
+import { invalidRailMessage, railChangeMessage, validRailValue } from '@/lib/rail-form';
 import {
   confirmBudget, freeze, istDateTime, proposeRailChange, resetBreakerWithPostMortem, unfreeze,
 } from '../../../../src/domain/controls';
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
       case 'propose_rail': {
         if (typeof body.key !== 'string' || !validRailValue(body.key, body.value)) {
-          return NextResponse.json({ error: 'Invalid investment limit: use positive integer paise for money or a percentage up to 100.' }, { status: 400 });
+          return NextResponse.json({ error: invalidRailMessage(String(body.key)) }, { status: 400 });
         }
         if (body.note !== undefined && (typeof body.note !== 'string' || body.note.length > 2_000)) {
           return NextResponse.json({ error: 'A note must be text of at most 2,000 characters.' }, { status: 400 });

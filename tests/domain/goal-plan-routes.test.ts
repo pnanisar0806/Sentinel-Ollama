@@ -102,8 +102,19 @@ describe('goal plan: money routes', () => {
     ]);
   });
 
-  it('house is all debt, education all equity from 2028', () => {
-    expect(route('HOUSE')!.legs).toEqual([{ assetClass: 'DEBT', instrumentId: 'MF:LIQUID', paise: rupees(23_457) }]);
+  it('owner 2026-10-22: house is one DEBT leg into Edelweiss Arbitrage, unlinked when not held, never LIQUIDBEES', () => {
+    const label = 'Edelweiss Arbitrage Fund (Direct Growth)';
+    // POSITIONS holds another debt fund (MF:LIQUID) — the house leg must not pick it, nor the LIQUIDBEES default.
+    expect(route('HOUSE')!.legs).toEqual([{ assetClass: 'DEBT', instrumentId: null, label, paise: rupees(23_457) }]);
+    const none = buildGoalPlan(tracker(), [], 60).money.find((r) => r.goal === 'HOUSE')!;
+    expect(none.legs).toEqual([{ assetClass: 'DEBT', instrumentId: null, label, paise: rupees(23_457) }]);
+    expect(none.legs.map((l) => l.instrumentId)).not.toContain('NSE:LIQUIDBEES');
+    const held = [...POSITIONS, pos('MF:EDEL-ARB', 'Edelweiss Arbitrage Fund - Direct Growth', 'MF', 'DEBT', 50)];
+    const linked = buildGoalPlan(tracker(), held, 60).money.find((r) => r.goal === 'HOUSE')!;
+    expect(linked.legs).toEqual([{ assetClass: 'DEBT', instrumentId: 'MF:EDEL-ARB', label, paise: rupees(23_457) }]);
+  });
+
+  it('education all equity from 2028', () => {
     const ed = route('EDUCATION')!;
     expect(ed.startsOn).toBe(`${ASSUMPTIONS.childArrivalYear}-01`);
     expect(ed.legs).toEqual([{ assetClass: 'EQUITY', instrumentId: 'NSE:NIFTYBEES', paise: rupees(9_999) }]);

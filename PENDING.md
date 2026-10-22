@@ -36,6 +36,8 @@ MEMORY.md; the code map lives in index.md.
           `goal_setaside_monthly_paise` rail (envelope unchanged); cosmetic fixes done.
     - [x] Owner 2026-10-22: the 92% risk route stays when nothing closes the gap, with full risk disclosure.
     - [x] Owner 2026-10-22: revoking the goal ceiling **warns** (equity share shown; a trim may follow, needs approval).
+    - [x] 2026-10-22 follow-up (branch `fix/house-default`): house → Edelweiss Arbitrage (Direct Growth),
+          set-aside pending blocks the budget editor + advisor month, key-aware rail errors, `<Money>` stat.
 - [x] **Envelope gap: a SIP stopped after this month's instalment still cost this month** —
       FIXED 2026-10-15 (departed SIPs count; plan `2026-10-15-sip-gaps.md`).
 - [x] **Envelope gap: purchases made outside Sentinel are not counted** — FIXED 2026-10-15

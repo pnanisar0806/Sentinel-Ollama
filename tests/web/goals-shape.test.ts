@@ -4,6 +4,7 @@ import { BUCKETS } from '../../src/domain/buckets.js';
 import { rupees } from '../../src/money/paise.js';
 import { db, getAdvisor, getGoals } from '../../web/lib/data.js';
 import { balanceText, budgetRaise, finishBand, pendingBlocks, setAsideLine, verdictLine } from '../../web/lib/goals.js';
+import { BUDGET_RAIL_NAMES } from '../../src/domain/rail-values.js';
 import type { GoalCard } from '../../src/domain/goal-plan.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 
@@ -125,6 +126,12 @@ describe('pendingBlocks (fix round 1): a pending change hides the buttons that w
   it('a pending tactical change alone also blocks the raise', () => {
     expect(pendingBlocks([{ key: 'tactical_monthly_paise', current: 1, proposed: 2_000_000, activatesAt: at }]).budget)
       .toBe('A tactical cap change to ₹20,000 activates 2026-10-23 10:00 IST. Raise again after it activates.');
+  });
+  it('every BUDGET_RAIL_NAMES key blocks the raise, named — the key set the budget editor and advisor wait share', () => {
+    for (const [key, name] of Object.entries(BUDGET_RAIL_NAMES)) {
+      expect(pendingBlocks([{ key, current: 0, proposed: 2_000_000, activatesAt: at }]).budget).toMatch(new RegExp(`^A ${name} change `));
+    }
+    expect(Object.keys(BUDGET_RAIL_NAMES)).toEqual(['monthly_budget_paise', 'tactical_monthly_paise', 'goal_setaside_monthly_paise']);
   });
   it('a pending ceiling change blocks sign and revoke; the budget stays raisable', () => {
     const b = pendingBlocks([{ key: 'goal_equity_ceiling_pct', current: 60, proposed: 68, activatesAt: at }]);

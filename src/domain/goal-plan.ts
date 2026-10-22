@@ -323,6 +323,8 @@ export interface GoalPlan {
 
 const ALL_EQUITY: Mix = { equityBps: 10_000, debtBps: 0, goldBps: 0 };
 const EMERGENCY_ACCOUNT = 'IDFC First savings account';
+/** Owner decision 2026-10-22: house money goes to this fund, never the LIQUIDBEES debt default. */
+export const HOUSE_FUND = 'Edelweiss Arbitrage Fund (Direct Growth)';
 
 /** Legs in mix proportion, floored to the rupee; the remainder goes to the largest leg. */
 function legsFor(extra: bigint, mix: Mix, positions: readonly Position[]): MoneyRoute['legs'] {
@@ -338,9 +340,8 @@ export function buildGoalPlan(t: GoalTracker, positions: Position[], signedCeili
   const A = ASSUMPTIONS;
   const nowIdx = monthIndex(istMonth(t.asOf));
   const educationStart = `${A.childArrivalYear}-01`;
-  const goalMix: Record<Exclude<GoalId, 'EMERGENCY'>, Mix> = {
-    FI: newMoneyMix(signedCeilingPct), HOUSE: ALL_DEBT, EDUCATION: ALL_EQUITY,
-  };
+  const goalMix: Record<'FI' | 'EDUCATION', Mix> = { FI: newMoneyMix(signedCeilingPct), EDUCATION: ALL_EQUITY };
+  const houseId = positions.find((p) => /edelweiss arbitrage/i.test(p.name))?.instrumentId ?? null;
 
   const money: MoneyRoute[] = [];
   for (const c of t.cards) {
@@ -352,6 +353,8 @@ export function buildGoalPlan(t: GoalTracker, positions: Position[], signedCeili
       // The emergency fund is a savings account, not an investment: no addTarget, no instrument.
       legs: c.id === 'EMERGENCY'
         ? [{ assetClass: 'CASH', instrumentId: null, label: EMERGENCY_ACCOUNT, paise: c.shortMonthlyPaise }]
+        : c.id === 'HOUSE'
+        ? [{ assetClass: 'DEBT', instrumentId: houseId, label: HOUSE_FUND, paise: c.shortMonthlyPaise }]
         : legsFor(c.shortMonthlyPaise, goalMix[c.id], positions),
     });
   }

@@ -4,6 +4,7 @@ import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import type { GoalCard, MoneyRoute, RiskRoute } from '../../src/domain/goal-plan.js';
 import type { Tone } from './ui';
 import { istDateTime, type PendingRailChange } from '../../src/domain/controls.js';
+import { BUDGET_RAIL_NAMES, pendingBudgetRail } from '../../src/domain/rail-values.js';
 
 export const EDUCATION_START = ASSUMPTIONS.childArrivalYear;
 
@@ -97,14 +98,10 @@ export function disclosureLines(r: RiskRoute): string[] {
  * upserts the pending value and restarts its 48 hours). Null = the action is exposed.
  */
 export function pendingBlocks(pending: readonly PendingRailChange[]): { budget: string | null; ceiling: string | null } {
-  const find = (k: string) => pending.find((c) => c.key === k);
-  const budget = find('monthly_budget_paise');
-  const tactical = find('tactical_monthly_paise');
-  const setAside = find('goal_setaside_monthly_paise');
-  const ceiling = find('goal_equity_ceiling_pct');
-  const b = budget ?? tactical ?? setAside;
+  const b = pendingBudgetRail(pending);
+  const ceiling = pending.find((c) => c.key === 'goal_equity_ceiling_pct');
   return {
-    budget: b ? `A ${b === budget ? 'budget' : b === tactical ? 'tactical cap' : 'goal set-aside'} change to ${inr(BigInt(b.proposed))} activates ${istDateTime(b.activatesAt)}. Raise again after it activates.` : null,
+    budget: b ? `A ${BUDGET_RAIL_NAMES[b.key]} change to ${inr(BigInt(b.proposed))} activates ${istDateTime(b.activatesAt)}. Raise again after it activates.` : null,
     ceiling: ceiling ? `Equity ceiling change to ${ceiling.proposed}% activates ${istDateTime(ceiling.activatesAt)}.` : null,
   };
 }

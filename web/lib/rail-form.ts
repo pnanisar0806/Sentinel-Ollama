@@ -30,6 +30,11 @@ export function validRailValue(key: string, value: unknown): value is number {
     && (key.endsWith('_paise') ? Number.isSafeInteger(value) : value <= 100);
 }
 
+/** The API's 400 text for a bad `propose_rail` value; the set-aside alone may be 0. */
+export const invalidRailMessage = (key: string): string => (key === SET_ASIDE
+  ? 'Invalid investment limit: use integer paise of zero or more.'
+  : 'Invalid investment limit: use positive integer paise for money or a percentage up to 100.');
+
 export function parseRailInput(key: string, input: string): number {
   if (!Object.hasOwn(RAIL_LABELS, key)) throw new Error('Unknown investment limit.');
   const value = input.trim();
@@ -42,7 +47,8 @@ export function parseRailInput(key: string, input: string): number {
     const [whole, fraction = ''] = money.split('.');
     const amount = BigInt(whole!) * 100n + BigInt(fraction.padEnd(2, '0'));
     if ((key === SET_ASIDE ? amount < 0n : amount <= 0n) || amount > BigInt(Number.MAX_SAFE_INTEGER)) {
-      throw new Error('Enter a positive amount within the supported range.');
+      throw new Error(key === SET_ASIDE ? 'Enter an amount of zero or more within the supported range.'
+        : 'Enter a positive amount within the supported range.');
     }
     // The existing rail API stores numbers; only exact integer paise cross that boundary.
     return Number(amount);

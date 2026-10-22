@@ -23,6 +23,18 @@ export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
   goal_setaside_monthly_paise: 0,
 };
 
+/**
+ * Rails whose pending change holds the month's advisor run (`loadBudgetMonth`), the budget
+ * editor's "keep" button and the goal plan's raise buttons (`pendingBlocks`), with the name
+ * each notice uses. The set-aside belongs here: the free envelope subtracts it. Key order is
+ * precedence when several are pending. One list, so those surfaces cannot drift.
+ */
+export const BUDGET_RAIL_NAMES: Record<string, string> = {
+  monthly_budget_paise: 'budget', tactical_monthly_paise: 'tactical cap', goal_setaside_monthly_paise: 'goal set-aside',
+};
+export const pendingBudgetRail = <T extends { key: string }>(pending: readonly T[]): T | undefined =>
+  Object.keys(BUDGET_RAIL_NAMES).map((k) => pending.find((c) => c.key === k)).find((c) => c !== undefined);
+
 /** The goal ceiling is a whole percent from IPS §3.3's 60 to 92 (gold keeps its 7.5% band middle). */
 export const validGoalCeilingPct = (v: unknown): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= 60 && v <= 92;
