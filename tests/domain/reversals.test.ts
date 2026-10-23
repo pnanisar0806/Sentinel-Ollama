@@ -7,6 +7,8 @@ import { recordSipPayment } from '../../src/domain/owner-sips.js';
 import { loadMonthSpend } from '../../src/domain/sips.js';
 import { loadBucketBalances } from '../../src/domain/bucket-balances.js';
 import { isReversed, reverseEntry } from '../../src/domain/reversals.js';
+import { loadLiveSales } from '../../src/domain/owner-sales.js';
+import { readFileSync } from 'node:fs';
 
 /** Spec §3.4: a mistaken owner entry is corrected by a reversal row; the original stays. */
 let db: Db;
@@ -158,6 +160,46 @@ describe('reverseEntry', () => {
     await reverseEntry(db, { entity: 'bucket_flow', entityId: id, reason: 'wrong goal' }, '2026-10-20T20:00:00Z');
     // 20:00Z on the 20th is the 21st in India.
     expect((await loadOwnerTimeline(db))[0]).toMatchObject({ reversed: { on: '2026-10-21', reason: 'wrong goal' } });
+  });
+});
+
+describe('legacy string payloads (production double-encoding, browser QA 2026-10-23)', () => {
+  // postgres-js stored JSON.stringify(...)::jsonb as a jsonb STRING on Supabase; PGlite parses it
+  // into an object, so tests never saw it. These rows are append-only and stay that way forever.
+  const legacyAudit = async (entity: string, payload: object) => (await db.query<{ id: string }>(
+    `insert into audit_log (entity, entity_id, action, actor, payload) values ($1, 'x', 'LOGGED', 'owner', to_jsonb($2::text)) returning id::text`,
+    [entity, JSON.stringify(payload)]))[0]!.id;
+
+  it('the fixture really is a jsonb string', async () => {
+    const id = await legacyAudit('owner_purchase', { rowId: '1' });
+    const [r] = await db.query<{ t: string }>(`select jsonb_typeof(payload) t from audit_log where id = $1`, [id]);
+    expect(r!.t).toBe('string');
+  });
+
+  it('a purchase whose audit payload is a string can be reversed', async () => {
+    const [p] = await db.query<{ id: string }>(
+      `insert into owner_purchases (bought_on, description, amount_paise, as_of, source) values ('2026-10-15', 'x', 1000000, $1, 'owner-web') returning id::text`, [NOW]);
+    await legacyAudit('owner_purchase', { rowId: p!.id, source: 'owner-web' });
+    await reverseEntry(db, { entity: 'owner_purchase', entityId: p!.id, reason: 'test' }, NOW);
+    expect((await loadMonthSpend(db, NOW)).ownerPaise).toBe(0n);
+  });
+
+  it('a sale whose audit payload is a string can be reversed, and then stops reducing the seed', async () => {
+    const [s] = await db.query<{ id: string }>(
+      `insert into owner_sales (sold_on, instrument_id, units, proceeds_paise, as_of, source) values ('2026-10-15', 'US:NOW', 10, 100000, $1, 'owner-web') returning id::text`, [NOW]);
+    const auditId = await legacyAudit('owner_sale', { rowId: s!.id, rowIds: [], source: 'owner-web' });
+    expect(await loadLiveSales(db)).toHaveLength(1);
+    await reverseEntry(db, { entity: 'owner_sale', entityId: auditId, reason: 'test' }, NOW);
+    expect(await loadLiveSales(db)).toHaveLength(0);
+  });
+
+  it('owner log writers store objects, never strings: no JSON.stringify bound to ::jsonb', () => {
+    const files = ['src/domain/owner-log.ts', 'src/domain/reversals.ts', 'src/domain/owner-sips.ts'];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      const hits = [...src.matchAll(/::jsonb[^;]*?JSON\.stringify\(/gs)];
+      expect(hits.map((h) => `${f}: ${h[0].slice(0, 60)}`)).toEqual([]);
+    }
   });
 });
 

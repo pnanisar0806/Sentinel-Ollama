@@ -7,7 +7,9 @@ MEMORY.md; the code map lives in index.md.
 ## Next up
 - [x] **Log batch A (2,5,6,13) SHIPPED 2026-10-23** — squashed onto `main`; migration 0036 applied to prod
       2026-10-23 (recorded in `schema_migrations`). Owner to push; then browser-test /log with refused inputs only. Spec
-      `2026-10-22-log-batch-a-design.md`. Tell owner: §3.3 FI→SP/B3 is covered by idle bank cash.
+      `2026-10-22-log-batch-a-design.md`. **Browser QA 2026-10-23 found two prod bugs (reversals refused;
+      synced oversell unchecked) — fixed on `fix/log-batch-a-prod`. After deploy: reverse test sale
+      (999999 Alphabet, ₹1,000) on /log, then finish the refused-input QA.** Tell owner: §3.3 FI→SP/B3 is covered by idle bank cash.
 - [ ] **WORK ORDER (owner, 2026-10-16):** finish SIP piece 1 (branch `fix/monthly-investing-controls`:
       owner SIP payments + rupee budget editor; migration 0034 → prod, push, record HDFC ₹3,001
       2026-10-12 via `recordSipPayment` source `owner-chat`) → **piece 2** (goal tracker + goal plan;

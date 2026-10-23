@@ -365,13 +365,57 @@ describe('a sale (spec §3.1, §7.7)', () => {
     expect(await nowValue()).toBe(seedNow.valuePaise);
   });
 
-  it('a synced holding is not adjusted and not oversell-checked: the feed is the truth', async () => {
+  /** One feed snapshot; each quantity is one account's row; an empty list is a snapshot without the stock. */
+  const syncedRpower = (date: string, ...qty: number[]) => synced('NSE:RPOWER', date, ...qty);
+  /** A stock only a feed knows (no seed row). */
+  const feedOnly = async (date: string, ...qty: number[]) => {
+    await db.query(`insert into instruments (id, kind, name, currency) values ('NSE:FEEDCO', 'EQUITY', 'Feed Co', 'INR') on conflict do nothing`);
+    await synced('NSE:FEEDCO', date, ...qty);
+  };
+  const synced = async (id: string, date: string, ...qty: number[]) => {
     const [snap] = await db.query<{ id: string }>(
-      `insert into snapshots (business_date, source, taken_at) values ('2026-09-01', 'composite', '2026-09-01T00:00:00Z') returning id`);
-    await db.query(`insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
-      values ($1, 'NSE:RPOWER', 5, 2222200, 'zerodha', '2026-09-01T00:00:00Z', 'composite')`, [snap!.id]);
-    await sale({ instrumentId: 'NSE:RPOWER', units: 1000, destination: null });
+      `insert into snapshots (business_date, source, taken_at) values ($1, 'composite', $1::date) returning id`, [date]);
+    for (const [i, q] of qty.entries()) {
+      await db.query(`insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
+        values ($1, $5, $2, 2222200, $3, $4::date, 'composite')`, [snap!.id, q, `acct${i}`, date, id]);
+    }
+  };
+
+  it('a synced holding is not adjusted: the feed is the truth', async () => {
+    await syncedRpower('2026-09-01', 5);
+    await sale({ instrumentId: 'NSE:RPOWER', units: 5, destination: null });
     expect((await loadPositions(db)).find((p) => p.instrumentId === 'NSE:RPOWER')?.valuePaise).toBe(2_222_200n);
+  });
+
+  it('a synced holding is oversell-checked against the feed (browser QA 2026-10-23: 999999 GOOGL was accepted)', async () => {
+    await syncedRpower('2026-09-01', 5);
+    await expect(sale({ instrumentId: 'NSE:RPOWER', units: 1000, destination: null })).rejects.toThrow(/holds 5 units; cannot sell 1000/);
+    expect(await db.query(`select 1 from owner_sales`)).toHaveLength(0);
+  });
+
+  it('a sale logged after the feed already shows it sold is still accepted: the check reads the last snapshot before the sale', async () => {
+    await feedOnly('2026-09-20', 5);
+    await feedOnly('2026-09-26');
+    await sale({ instrumentId: 'NSE:FEEDCO', units: 5, destination: null, on: '2026-09-25' });
+    expect(await db.query(`select 1 from owner_sales`)).toHaveLength(1);
+  });
+
+  it('a partial sale on a day whose evening sync already shows the rest is accepted', async () => {
+    await syncedRpower('2026-09-24', 10);
+    await syncedRpower('2026-09-25', 4);
+    await sale({ instrumentId: 'NSE:RPOWER', units: 6, destination: null, on: '2026-09-25' });
+    expect(await db.query(`select 1 from owner_sales`)).toHaveLength(1);
+  });
+
+  it('two accounts in one snapshot add up', async () => {
+    await syncedRpower('2026-09-20', 3, 2);
+    await sale({ instrumentId: 'NSE:RPOWER', units: 5, destination: null });
+    await expect(sale({ instrumentId: 'NSE:RPOWER', units: 6, destination: null })).rejects.toThrow(/holds 5 units/);
+  });
+
+  it('a stock no seed or feed ever reported holds 0: any units are refused', async () => {
+    await db.query(`insert into instruments (id, kind, name, currency) values ('NSE:FEEDCO', 'EQUITY', 'Feed Co', 'INR')`);
+    await expect(sale({ instrumentId: 'NSE:FEEDCO', units: 1, destination: null })).rejects.toThrow(/holds 0 units; cannot sell 1/);
   });
 
   it('refuses a bond, missing units on an RSU or stock, bad units, a future date and an SP sale without a label', async () => {

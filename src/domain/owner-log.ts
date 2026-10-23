@@ -4,7 +4,7 @@ import { istDate } from './sips.js';
 import { GROUPS, type ReversalEntity } from './reversals.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
 import { loadPositions } from './networth.js';
-import { fromMicro, heldAfterSales, loadLiveSales } from './owner-sales.js';
+import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -34,7 +34,7 @@ function assertDate(on: string, now: string): void {
 async function audit(db: Db, entity: string, entityId: string, action: string, payload: object): Promise<void> {
   await db.query(
     `insert into audit_log (entity, entity_id, action, actor, payload) values ($1, $2, $3, 'owner', $4::jsonb)`,
-    [entity, entityId, action, JSON.stringify(payload)],
+    [entity, entityId, action, payload],
   );
 }
 
@@ -244,9 +244,26 @@ export async function logSale(
            from holdings h join latest l on l.id = h.snapshot_id
           where l.source = 'manual-seed' and h.source = 'manual-seed' and h.instrument_id = $1
           limit 1`, [s.instrumentId]);
-      if (h && !h.synced) {
-        const { held } = heldAfterSales(await loadLiveSales(tx), { instrumentId: s.instrumentId, quantity: h.quantity, since: h.since });
+      const refuse = (held: bigint) => {
         if (micro > held) throw new Error(`${inst.name} holds ${fromMicro(held)} unit${held === 1_000_000n ? '' : 's'}; cannot sell ${units}`);
+      };
+      if (h && !h.synced) {
+        refuse(heldAfterSales(await loadLiveSales(tx), { instrumentId: s.instrumentId, quantity: h.quantity, since: h.since }).held);
+      } else {
+        // A synced holding: the most units a feed snapshot reported (summed over accounts), from
+        // the last snapshot strictly before the sale onward. The evening sync on the sale day
+        // already shows the reduced quantity, so the anchor must be the day before. With no
+        // snapshot before the sale, every snapshot counts. Never reported anywhere: holds 0.
+        // ponytail: other logged sales are not netted out; a duplicate sale log passes.
+        const [f] = await tx.query<{ q: string | null }>(
+          `select max(t.q)::text q from (
+             select sum(h.quantity) q from holdings h join snapshots sn on sn.id = h.snapshot_id
+              where h.instrument_id = $1 and sn.source <> 'manual-seed'
+                and sn.business_date >= coalesce((select max(s2.business_date) from snapshots s2 join holdings h2 on h2.snapshot_id = s2.id
+                                                   where h2.instrument_id = $1 and s2.source <> 'manual-seed' and s2.business_date < $2::date), '-infinity'::date)
+              group by sn.id) t`,
+          [s.instrumentId, s.on]);
+        refuse(f?.q == null ? 0n : toMicro(f.q));
       }
     }
     const [row] = await tx.query<{ id: string }>(

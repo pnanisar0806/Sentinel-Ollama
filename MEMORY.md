@@ -506,8 +506,9 @@ pooler DATABASE_URL over .env's pglite). It surfaced what 417 green PGlite tests
 3. **Every audit payload stored to Supabase was double-encoded.** `JSON.stringify(x)` fed
    to `$n::jsonb` makes postgres-js store a jsonb SCALAR STRING (`jsonb_typeof='string'`),
    so `payload->>'…'` reads NULL — the whole production audit trail was SQL-opaque.
-   PGlite parses either form, which is why tests passed. Fixed at ALL 8 write sites
-   (rsu, ips, types/writeSnapshot, staleness, owner-ingest, seed ×2, indmoney-login):
+   PGlite parses either form, which is why tests passed. Fixed at the 8 write sites then
+   known (rsu, ips, types/writeSnapshot, staleness, owner-ingest, seed ×2, indmoney-login) —
+   **not all: ~25 more still stringify (2026-10-23 audit; see the log batch A prod fix below)**:
    pass the OBJECT. Verified against the live pooler inside rolled-back transactions;
    existing rows are immutable (append-only) and stay opaque forever — content intact,
    just not queryable. **Never feed JSON.stringify to a ::jsonb placeholder.**
@@ -774,6 +775,17 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
   since batch A (audit `rowId`/`rowIds`); notes and reversals are not reversible. The web shows
   Reverse only when `canReverse` (web/lib/log.ts).
 - **Deferred minor:** the sale oversell check assumes one manual-seed row per instrument.
+- **Prod fix 2026-10-23 (browser QA):** every /log reversal was refused on prod — owner-log,
+  reversals and owner-sips stringified their audit payloads (see Gotcha 3 above). Now objects;
+  SQL readers go through `auditPayload(alias)` (`owner-sales.ts`), which unwraps legacy string
+  rows. A synced holding is now oversell-checked: units ≤ the max per-snapshot sum over accounts
+  from the last feed snapshot strictly *before* the sale (the evening sync on the sale day already
+  shows the reduced quantity); never reported anywhere = holds 0. Test row: owner_sales id 1
+  (999999 IND:GOOGL, audit 728) — reverse it on /log once deployed.
+- **Deferred to the fix wave (cross-cutting):** ~25 other `JSON.stringify(...)` → `::jsonb` sites
+  (controls.ts ×11, bond-redemptions ×2, proposals, replay, cadence, rails, report-runs,
+  watchlist-signoff, cleanup, order-drafting). Nothing reads them by key in SQL today, so nothing
+  breaks; the guard test (`reversals.test.ts`) only covers the three owner-log writers.
 - **Deferred minor (pre-existing):** `sizing-input` sums the latest rows from every source, including
   seed rows `loadPositions` has replaced with live data; an instrument in both seed and a live feed
   could have its units counted twice when a sale is sized. US:NOW is not affected.

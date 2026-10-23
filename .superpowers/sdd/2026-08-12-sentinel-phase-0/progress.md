@@ -881,3 +881,4 @@ SIP gaps (2026-10-15): departed SIPs + owner purchases + remaining; 3 tasks + fi
 Goal set-aside (2026-10-22): goal_setaside_monthly_paise rail, house/emergency signable, cosmetic a/b/c; 1327 tests; mutation-checked; report .superpowers/sdd/2026-10-22-goal-setaside/report.md
 House default (2026-10-22): HOUSE → Edelweiss Arbitrage (Direct Growth) leg, set-aside pending holds month + editor, key-aware rail errors, <Money> stat; 1331 tests; mutation-checked
 Log batch A (2026-10-22/23): sale, spend, earmark, reversal on /log; 5 tasks + final fix wave (I-1), reviews clean; 1386 tests; 0036 applied to prod 2026-10-23; squashed onto main
+Log batch A prod fix (2026-10-23): browser QA found reversals refused on prod (stringified audit payloads) + synced oversell unchecked; objects + auditPayload() normaliser + feed oversell guard; reviewer 1 red (<= anchor) fixed, mutation-checked; 1395 tests

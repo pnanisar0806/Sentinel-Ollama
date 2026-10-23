@@ -20,6 +20,14 @@ export function fromMicro(m: bigint): string {
   return `${sign}${a / 1_000_000n}${frac ? `.${frac}` : ''}`;
 }
 
+/**
+ * An audit payload as an object. Owner-log rows written before 2026-10-23 passed
+ * JSON.stringify(...) to `::jsonb`, which postgres-js stores on Supabase as a jsonb STRING
+ * (PGlite parses it, so tests never saw it). Those rows are append-only and stay strings.
+ */
+export const auditPayload = (alias: string): string =>
+  `(case when jsonb_typeof(${alias}.payload) = 'string' then (${alias}.payload #>> '{}')::jsonb else ${alias}.payload end)`;
+
 export interface LiveSale { instrumentId: string; soldOn: string; microUnits: bigint }
 
 /**
@@ -33,7 +41,7 @@ export async function loadLiveSales(db: Db, until: string | null = null): Promis
     `select s.instrument_id, s.sold_on::text sold_on, (s.units * 1000000)::bigint::text micro from owner_sales s
       where s.units is not null and ($1::date is null or s.sold_on <= $1::date)
         and not exists (select 1 from audit_log a join log_reversals x on x.entity = 'owner_sale' and x.entity_id = a.id::text
-                         where a.entity = 'owner_sale' and a.payload->>'rowId' = s.id::text)`,
+                         where a.entity = 'owner_sale' and ${auditPayload('a')}->>'rowId' = s.id::text)`,
     [until]);
   return rows.map((r) => ({ instrumentId: r.instrument_id, soldOn: r.sold_on, microUnits: BigInt(r.micro) }));
 }

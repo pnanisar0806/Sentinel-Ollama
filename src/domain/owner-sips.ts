@@ -34,6 +34,6 @@ export async function recordSipPayment(db: Db, input: PaymentInput, now = new Da
        values ($1,$2,$3,$4,$5,$6,$7) returning id::text`,
       [instrumentId, paidOn, paidOn.slice(0, 7), amountPaise.toString(), note, now, source.trim()]);
     await tx.query(`insert into audit_log (entity,entity_id,action,actor,payload) values ('owner_sip_payment',$1,'RECORDED','owner',$2::jsonb)`,
-      [row!.id, JSON.stringify({ rowId: row!.id, instrumentId, paidOn, amountPaise: amountPaise.toString(), note, asOf: now, source: source.trim() })]);
+      [row!.id, { rowId: row!.id, instrumentId, paidOn, amountPaise: amountPaise.toString(), note, asOf: now, source: source.trim() }]);
   });
 }

@@ -1,4 +1,5 @@
 import type { Db } from '../db/client.js';
+import { auditPayload } from './owner-sales.js';
 import { formatInr, type Paise } from '../money/paise.js';
 
 /**
@@ -36,8 +37,8 @@ export async function reverseEntry(
     if (await isReversed(tx, entity, entityId)) throw new Error('this entry is already reversed');
     const [a] = await tx.query<{ payload: unknown }>(
       group
-        ? `select payload from audit_log where actor = 'owner' and entity = $1 and id::text = $2 and jsonb_typeof(payload->'rowIds') = 'array'`
-        : `select payload from audit_log where actor = 'owner' and entity = $1 and payload->>'rowId' = $2`,
+        ? `select payload from audit_log where actor = 'owner' and entity = $1 and id::text = $2 and jsonb_typeof(${auditPayload('audit_log')}->'rowIds') = 'array'`
+        : `select payload from audit_log where actor = 'owner' and entity = $1 and ${auditPayload('audit_log')}->>'rowId' = $2`,
       [entity, entityId]);
     if (!a) throw new Error(`not a reversible owner entry: ${entity} ${entityId}`);
     const p = (typeof a.payload === 'string' ? JSON.parse(a.payload) : a.payload) as { rowId?: unknown; rowIds?: unknown };
@@ -83,7 +84,7 @@ export async function reverseEntry(
         [e, id, reason, now]);
     }
     await tx.query(`insert into audit_log (entity, entity_id, action, actor, payload) values ('reversal', $1, 'REVERSED', 'owner', $2::jsonb)`,
-      [`${entity}:${entityId}`, JSON.stringify({ entity, entityId, reason, rowIds })]);
+      [`${entity}:${entityId}`, { entity, entityId, reason, rowIds }]);
   });
 }
 
