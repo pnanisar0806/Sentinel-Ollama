@@ -1,7 +1,7 @@
 /**
  * Live SIP commitment (spec 2026-10-14 §1.4–1.6) and this month's spend and remaining
  * (SIP gaps Task 2). Reads only `sip_snapshots`, `sips`, `settings_rails`, `order_intents`,
- * `order_transitions`, `owner_purchases` and `owner_sip_payments`. Must
+ * `order_transitions`, `owner_purchases`, `owner_sip_payments` and `log_reversals`. Must
  * never import buckets.ts or funded-status.ts: the free envelope feeds sizing, and sizing is
  * behind the no-catch-up firewall.
  */
@@ -140,11 +140,12 @@ export async function sipInstrumentKey(db: Db, instrumentId: string): Promise<st
   return row?.key ?? instrumentId;
 }
 
-/** Owner-recorded SIP payments (`owner_sip_payments`) for the IST month of `now`. */
+/** Owner-recorded SIP payments (`owner_sip_payments`) for the IST month of `now`, skipping reversed ones. */
 export async function loadOwnerSipPayments(db: Db, now: string): Promise<OwnerSipPayment[]> {
   const rows = await db.query<{ instrument_id: string; fund_name: string; paid_on: string; amount_paise: string; note: string; as_of: string | Date; source: string }>(
     `select p.instrument_id, i.name fund_name, p.paid_on::text, p.amount_paise::text, p.note, p.as_of, p.source
-       from owner_sip_payments p join instruments i on i.id = p.instrument_id where p.month = $1 order by p.id`, [istMonth(now)]);
+       from owner_sip_payments p join instruments i on i.id = p.instrument_id where p.month = $1
+        and not exists (select 1 from log_reversals r where r.entity = 'owner_sip_payment' and r.entity_id = p.id::text) order by p.id`, [istMonth(now)]);
   return rows.map((r) => ({ instrumentId: r.instrument_id, fundName: r.fund_name, paidOn: r.paid_on,
     amountPaise: BigInt(r.amount_paise), note: r.note, asOf: new Date(r.as_of).toISOString(), source: r.source }));
 }
@@ -295,8 +296,9 @@ export async function loadMonthSpend(db: Db, nowIso: string, excludeOrderIntentI
     [from, to, RELEASED_STATUSES, excludeOrderIntentId ?? null],
   );
   const [p] = await db.query<{ total: string }>(
-    `select coalesce(sum(amount_paise), 0)::text as total from owner_purchases
-      where bought_on >= $1::date and bought_on < ($1::date + interval '1 month')`,
+    `select coalesce(sum(amount_paise), 0)::text as total from owner_purchases p
+      where bought_on >= $1::date and bought_on < ($1::date + interval '1 month')
+        and not exists (select 1 from log_reversals r where r.entity = 'owner_purchase' and r.entity_id = p.id::text)`,
     [`${month}-01`],
   );
   // `sum` of a numeric column is a decimal string; money is whole paise.

@@ -5,6 +5,9 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **Log batch A (2,5,6,13) SHIPPED 2026-10-23** — squashed onto `main`; migration 0036 applied to prod
+      2026-10-23 (recorded in `schema_migrations`). Owner to push; then browser-test /log with refused inputs only. Spec
+      `2026-10-22-log-batch-a-design.md`. Tell owner: §3.3 FI→SP/B3 is covered by idle bank cash.
 - [ ] **WORK ORDER (owner, 2026-10-16):** finish SIP piece 1 (branch `fix/monthly-investing-controls`:
       owner SIP payments + rupee budget editor; migration 0034 → prod, push, record HDFC ₹3,001
       2026-10-12 via `recordSipPayment` source `owner-chat`) → **piece 2** (goal tracker + goal plan;
@@ -28,8 +31,8 @@ MEMORY.md; the code map lives in index.md.
         Spec `2026-10-21-goal-plan-design.md`. Release: whole-branch review → squash → owner pushes.
     - [x] Goal tracker on `/buckets`, verdict lines on Overview, goal plan beside the normal
           plan on `/advisor` (raise budget, sign/revoke equity ceiling), "Keep ₹X this month".
-    - [ ] **Owner true-up:** RSU quantity is the manual-seed row; a sale logged to B2/B3 double
-          counts until the quantity is updated.
+    - [x] ~~**Owner true-up:** RSU quantity is the manual-seed row; a sale logged to B2/B3 double
+          counts until the quantity is updated.~~ Closed by log batch A: a logged sale reduces it.
     - [x] Fix wave after final review: I-1 (house/emergency guidance only), T7-1/2/3, T2, T5-1,
           ceiling relabel, RSU latest-snapshot-per-source.
     - [x] **Owner 2026-10-22: house/emergency get a budget raise** via the new

@@ -1,4 +1,5 @@
 import { loadRedemptions } from './bond-redemptions.js';
+import { heldAfterSales, loadLiveSales } from './owner-sales.js';
 import type { Db } from '../db/client.js';
 import { addP, subP, formatInr, type Paise } from '../money/paise.js';
 import type { Account } from '../seed/seed-data.js';
@@ -71,6 +72,9 @@ interface HoldingRow {
   as_of: string | Date;
   source: string;
   canonical_id: string | null;
+  quantity: string;
+  /** IST date of `as_of`: logged sales from this date on come off a manual-seed row. */
+  as_of_ist: string;
 }
 
 const toPaise = (v: string | number | bigint): Paise => BigInt(v) as Paise;
@@ -127,7 +131,8 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
      select h.instrument_id, i.kind, i.name, h.account, h.value_paise,
             coalesce(h.avg_cost_paise, oc.cost_paise) as avg_cost_paise,
             coalesce(cn.curated_name, i.name) as name,
-            i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source, i.canonical_id
+            i.currency, i.issuer, i.sector, i.is_employer, h.as_of, h.source, i.canonical_id,
+            h.quantity::text as quantity, (h.as_of at time zone 'Asia/Kolkata')::date::text as as_of_ist
      from holdings h
      join latest l on l.id = h.snapshot_id
      join instruments i on i.id = h.instrument_id
@@ -269,7 +274,20 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
     }
   }
 
-  return entries.map((e) => e.pos);
+  // Logged sales (spec §3.1): a surviving manual-seed row has no feed to drop the units
+  // sold, so they come off here and the value shrinks pro rata, floored to the paisa.
+  // Sold out is not held. A synced row is left to the next sync.
+  const sales = await loadLiveSales(db, businessDate ?? null);
+  const held: Position[] = [];
+  for (const e of entries) {
+    if (e.row.source === 'manual-seed' && sales.length) {
+      const h = heldAfterSales(sales, { instrumentId: e.row.instrument_id, quantity: e.row.quantity, since: e.row.as_of_ist });
+      if (h.held <= 0n) continue;
+      if (h.held !== h.qty) e.pos.valuePaise = ((e.pos.valuePaise * h.held) / h.qty) as Paise;
+    }
+    held.push(e.pos);
+  }
+  return held;
 }
 
 export interface NetWorth {

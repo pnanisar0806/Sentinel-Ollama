@@ -7,6 +7,8 @@ import { persistSchedules } from '../../src/domain/loans.js';
 import { buildDigestInput, composeDigest } from '../../src/notify/digest.js';
 import { bucketStatuses } from '../../src/domain/buckets.js';
 import { formatInr } from '../../src/money/paise.js';
+import { logSale } from '../../src/domain/owner-log.js';
+import { loadPositions } from '../../src/domain/networth.js';
 
 const SEED_DATE = '2026-08-12';
 let db: Db;
@@ -137,5 +139,25 @@ describe('the digest states real money', () => {
     // ...and a source that IS fresh must not be listed as stale.
     expect(input.staleness.filter((s) => !s.stale).map((s) => s.source)).toContain('manual-seed');
     expect(block).not.toMatch(/STALE: manual-seed/);
+  });
+});
+
+/**
+ * Final review I-1: the live revaluation of US:NOW re-read the raw manual-seed quantity
+ * (78) and overwrote the sale adjustment `loadPositions` had already applied, so a
+ * partial RSU sale came back in net worth, allocation and the employer concentration.
+ */
+describe('live US:NOW revaluation counts the units left after a logged sale', () => {
+  it('values the employer position at live price × 68 after a 10-of-78 sale', async () => {
+    await logSale(db, { on: SEED_DATE, instrumentId: 'US:NOW', units: 10, proceedsPaise: 1n, destination: null, note: '' }, `${SEED_DATE}T10:00:00Z`);
+    const live = { nowPriceCents: 100_000n, usdInr: 85, asOf: `${SEED_DATE}T12:00:00Z` };
+    const withSale = await buildDigestInput(db, `${SEED_DATE}T12:00:00Z`, live);
+    const expected = (100_000n * 68n * 85_000_000n) / 1_000_000n; // $1,000 × 68 at ₹85
+    const fidelity = new Map(withSale.byAccount).get('fidelity');
+    expect(fidelity).toBe(expected);
+    // Net worth reflects 68: the rest of the book is the same as the no-RSU book.
+    const others = (await loadPositions(db)).filter((p) => p.instrumentId !== 'US:NOW').reduce((s, p) => s + p.valuePaise, 0n);
+    expect(withSale.assetsPaise).toBe(others + expected);
+    expect(withSale.netPaise).toBe(others + expected - withSale.liabilitiesPaise);
   });
 });

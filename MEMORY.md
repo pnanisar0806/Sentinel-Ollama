@@ -757,6 +757,27 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
   budget, tactical or goal set-aside change holds even after the 7th (`loadBudgetMonth`); the key set
   is `BUDGET_RAIL_NAMES` in `rail-values.ts`, shared with `pendingBlocks` and the budget editor.
 
+### Log batch A contracts (2026-10-22)
+- **Bucket balances:** `src/domain/bucket-balances.ts` is the one reader (`loadBucketBalances`,
+  `loadSpLabels`, `idleBankCash`); it skips reversed flows. Sizing and the cash ceiling hold back
+  B3 **and SP** from bank cash via `idleBankCash` (CASH positions − B3 − SP; null if no CASH).
+- **SP "Planned spending":** a bucket, not a goal card; per-label pots (`bucket_flows.label`, SP
+  only). A label closes at ₹0. A spend from SP picks an open label (web picker); money into SP
+  takes an open or new label.
+- **Earmark cash rule:** an earmark into SP or B3 from a non-cash source (FI, B2, B4) needs idle
+  bank cash; SP↔B3 needs the source only. FI corpus is caller-supplied (`/api/log` sums
+  `loadGoalTracker().fiPots`; null → refused). Only money already in a goal can leave it.
+- **Reversals** (`src/domain/reversals.ts`): a `log_reversals` row, never an edit. Groups
+  (earmark, spend, owner_sale) key on their audit row id and reverse together; singles key on
+  their table id. Refused if any final balance (per bucket, per SP label) would go below zero,
+  naming the outflow to reverse first. Owner rows (`source` `owner-*`) only; only entries logged
+  since batch A (audit `rowId`/`rowIds`); notes and reversals are not reversible. The web shows
+  Reverse only when `canReverse` (web/lib/log.ts).
+- **Deferred minor:** the sale oversell check assumes one manual-seed row per instrument.
+- **Deferred minor (pre-existing):** `sizing-input` sums the latest rows from every source, including
+  seed rows `loadPositions` has replaced with live data; an instrument in both seed and a live feed
+  could have its units counted twice when a sale is sized. US:NOW is not affected.
+
 ## Gotchas learned the hard way (each cost a fix round)
 
 - **`mf_sips` `step_up_by` carries no unit** (`1000` meant ₹1,000, `10` means 10%).
@@ -1140,7 +1161,8 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
 ## Owner true-up items (need real statements — do not guess)
 
 **RSU quantity for the house card (2026-10-21):** read from the latest `US:NOW` holding row, a
-manual seed. A sale logged to B2/B3 double counts until that quantity is updated. Open.
+manual seed. ~~A sale logged to B2/B3 double counts until that quantity is updated.~~ Closed by
+log batch A (2026-10-22): a logged sale reduces a manual-seed quantity.
 
 **Gold holding changed (owner, 2026-08-25): RESOLVED same day.** "GoldCase" IS the
 `IND:INDS29570` line (~₹65k) INDmoney reports as "Zerodha Gold ETF" — owner-confirmed

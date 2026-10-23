@@ -1,6 +1,10 @@
 import type { Db } from '../db/client.js';
 import { formatInr, type Paise } from '../money/paise.js';
 import { istDate } from './sips.js';
+import { GROUPS, type ReversalEntity } from './reversals.js';
+import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
+import { loadPositions } from './networth.js';
+import { fromMicro, heldAfterSales, loadLiveSales } from './owner-sales.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -16,8 +20,14 @@ export type GoalMoveKind = 'sip' | 'maturity' | 'vest' | 'withdrawal';
 // a purchase made that morning is not "in the future".
 const today = (now: string): string => istDate(now);
 
+/** YYYY-MM-DD and a real calendar day: 2026-02-30 and 2026-13-45 are refused. */
+function assertRealDate(on: string): void {
+  const d = new Date(`${on}T00:00:00Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== on) throw new Error(`not a date: ${on}`);
+}
+
 function assertDate(on: string, now: string): void {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(on)) throw new Error(`not a date: ${on}`);
+  assertRealDate(on);
   if (on > today(now)) throw new Error(`${on} is in the future`);
 }
 
@@ -40,13 +50,218 @@ export async function logGoalMove(
   if (!bucket) throw new Error(`no goal ${m.bucketId}`);
   const signed = m.kind === 'withdrawal' ? -m.amountPaise : m.amountPaise;
   await db.withTransaction(async (tx) => {
-    await tx.query(
+    await lockBuckets(tx, [m.bucketId]);
+    const [row] = await tx.query<{ id: string }>(
       `insert into bucket_flows (bucket_id, occurred_on, amount_paise, kind, note, as_of, source)
-       values ($1, $2, $3, $4, $5, $6, 'owner-web')`,
+       values ($1, $2, $3, $4, $5, $6, 'owner-web') returning id::text`,
       [m.bucketId, m.occurredOn, signed.toString(), m.kind, m.note.trim(), now],
     );
     await audit(tx, 'bucket_flow', m.bucketId, 'LOGGED', {
       on: m.occurredOn, amountPaise: signed.toString(), kind: m.kind, note: m.note.trim(), bucket: bucket.name,
+      rowId: row!.id, source: 'owner-web',
+    });
+  });
+}
+
+/** The row lock `reverseEntry` takes, so a write and a reversal touching one bucket serialise. */
+async function lockBuckets(tx: Db, ids: string[]): Promise<void> {
+  await tx.query(`select id from buckets where id = any($1::text[]) for update`, [ids]);
+}
+
+type Pot = 'B2' | 'B3' | 'B4' | 'SP';
+export type EarmarkEnd = 'FI' | Pot;
+const EARMARK_ENDS: readonly string[] = ['FI', 'B2', 'B3', 'B4', 'SP'];
+const SPEND_SOURCES: readonly string[] = ['B2', 'B3', 'B4', 'SP', 'BANK'];
+/** Pots held as bank cash; a move between two of them needs only the source balance. */
+const CASH_POTS: readonly string[] = ['B3', 'SP'];
+
+function spLabel(label: string | undefined): string {
+  const l = (label ?? '').trim();
+  if (l === '') throw new Error('Planned spending needs a label');
+  if (l.length > 80) throw new Error('a label is limited to 80 characters');
+  return l;
+}
+
+/**
+ * A bucket source's name and live balance (reversed flows skipped; RSU value never counts,
+ * spec §7.6); for SP, the open label's. Call under `lockBuckets`.
+ */
+async function available(tx: Db, id: Pot, label: string | null): Promise<{ name: string; where: string; paise: bigint }> {
+  const [b] = await tx.query<{ name: string }>(`select name from buckets where id = $1`, [id]);
+  if (!b) throw new Error(`no bucket ${id}`);
+  if (id !== 'SP') return { name: b.name, where: b.name, paise: (await loadBucketBalances(tx)).get(id) ?? 0n };
+  const pot = (await loadSpLabels(tx)).find((p) => p.label === label);
+  if (!pot) throw new Error(`no open ${b.name} pot "${label}"`);
+  return { name: b.name, where: `${b.name}: ${label}`, paise: pot.balancePaise };
+}
+
+function cover(where: string, have: bigint, amount: bigint, verb: string): void {
+  if (have < amount) throw new Error(`${where} holds ${formatInr(have as Paise)}; cannot ${verb} ${formatInr(amount as Paise)}`);
+}
+
+async function writeFlow(
+  tx: Db, f: { bucket: Pot; on: string; amount: bigint; kind: 'earmark' | 'spend' | 'sale'; label: string | null; note: string }, now: string,
+): Promise<string> {
+  const [row] = await tx.query<{ id: string }>(
+    `insert into bucket_flows (bucket_id, occurred_on, amount_paise, kind, note, label, as_of, source)
+     values ($1, $2, $3, $4, $5, $6, $7, 'owner-web') returning id::text`,
+    [f.bucket, f.on, f.amount.toString(), f.kind, f.note, f.label, now]);
+  return row!.id;
+}
+
+/**
+ * Set money aside (spec §3.3, §7.3, §7.6): −X on a bucket source, +X on a bucket
+ * destination. FI is not a bucket, so its side writes no row; its corpus moves by
+ * construction. `fiCorpusPaise` is the caller's FI corpus (web: `loadGoalTracker`) — src/
+ * may not read goal status. The audit row's id is the reversal key.
+ */
+export async function logEarmark(
+  db: Db,
+  e: { on: string; from: EarmarkEnd; to: EarmarkEnd; amountPaise: bigint; label?: string | undefined; expectedOn?: string | undefined; note: string; fiCorpusPaise?: bigint | null | undefined },
+  now = new Date().toISOString(),
+): Promise<void> {
+  if (e.amountPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(e.on, now);
+  if (!EARMARK_ENDS.includes(e.from) || !EARMARK_ENDS.includes(e.to)) throw new Error(`cannot earmark from ${e.from} to ${e.to}`);
+  if (e.from === e.to) throw new Error('an earmark moves money between two different places');
+  const label = e.from === 'SP' || e.to === 'SP' ? spLabel(e.label) : null;
+  const expectedOn = e.expectedOn?.trim() || null;
+  if (expectedOn !== null) assertRealDate(expectedOn);
+  const note = e.note.trim();
+  await db.withTransaction(async (tx) => {
+    const pots = [e.from, e.to].filter((b): b is Pot => b !== 'FI');
+    await lockBuckets(tx, pots);
+    let fromName = 'FI';
+    if (e.from === 'FI') {
+      if (e.fiCorpusPaise == null) throw new Error('FI corpus is unknown; cannot earmark from FI');
+      cover('FI', e.fiCorpusPaise, e.amountPaise, 'earmark');
+    } else {
+      const a = await available(tx, e.from, e.from === 'SP' ? label : null);
+      cover(a.where, a.paise, e.amountPaise, 'earmark');
+      fromName = a.name;
+    }
+    // Money landing in a cash pot (B3, SP) must be in the bank: FI, B2 and B4 may sit in
+    // invested assets, and sizing and the cash ceiling hold B3 + SP back from bank cash.
+    if (CASH_POTS.includes(e.to) && !CASH_POTS.includes(e.from)) {
+      const idle = idleBankCash(await loadPositions(tx), await loadBucketBalances(tx));
+      if (idle === null) throw new Error('bank balance is unknown; cannot earmark into a cash pot');
+      cover('Idle bank cash', idle, e.amountPaise, 'earmark');
+    }
+    const toName = e.to === 'FI'
+      ? 'FI' : (await tx.query<{ name: string }>(`select name from buckets where id = $1`, [e.to]))[0]!.name;
+    const rowIds: string[] = [];
+    for (const [bucket, amount] of [[e.from, -e.amountPaise], [e.to, e.amountPaise]] as const) {
+      if (bucket === 'FI') continue;
+      rowIds.push(await writeFlow(tx, { bucket, on: e.on, amount, kind: 'earmark', label: bucket === 'SP' ? label : null, note }, now));
+    }
+    await audit(tx, 'earmark', `${e.from}>${e.to}`, 'LOGGED', {
+      source: 'owner-web', rowIds, on: e.on, from: e.from, to: e.to, amountPaise: e.amountPaise.toString(),
+      label, expectedOn, note, fromName, toName,
+    });
+  });
+}
+
+/**
+ * Money spent (spec §3.2): −X (kind 'spend') on a bucket, or on an SP label. A BANK spend
+ * writes no flow — the balance sync already sees it — only the audit row.
+ */
+export async function logSpend(
+  db: Db,
+  s: { on: string; amountPaise: bigint; purpose: string; from: Pot | 'BANK'; label?: string | undefined; note: string },
+  now = new Date().toISOString(),
+): Promise<void> {
+  if (s.amountPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(s.on, now);
+  if (!SPEND_SOURCES.includes(s.from)) throw new Error(`cannot spend from ${s.from}`);
+  const purpose = s.purpose.trim();
+  if (purpose === '') throw new Error('a spend needs a purpose');
+  if (purpose.length > 120) throw new Error('a purpose is limited to 120 characters');
+  const label = s.from === 'SP' ? spLabel(s.label) : null;
+  const note = s.note.trim();
+  await db.withTransaction(async (tx) => {
+    const rowIds: string[] = [];
+    let fromName = 'my bank';
+    if (s.from !== 'BANK') {
+      await lockBuckets(tx, [s.from]);
+      const a = await available(tx, s.from, label);
+      cover(a.where, a.paise, s.amountPaise, 'spend');
+      fromName = a.name;
+      // The flow's note is the purpose: a refused reversal names it ("reverse the ₹1.2L Hotels … first").
+      rowIds.push(await writeFlow(tx, { bucket: s.from, on: s.on, amount: -s.amountPaise, kind: 'spend', label, note: purpose }, now));
+    }
+    await audit(tx, 'spend', s.from, 'LOGGED', {
+      source: 'owner-web', rowIds, on: s.on, from: s.from, amountPaise: s.amountPaise.toString(), purpose, label, note, fromName,
+    });
+  });
+}
+
+/**
+ * A sale or redemption the owner made (spec §3.1): an `owner_sales` row and, with a
+ * destination, a +proceeds flow (kind 'sale') into that pot, under one audit row keyed for
+ * reversal. Proceeds into B3 or SP need no idle-cash check: logged once the money reaches
+ * the bank (§7.7), they are new cash. A surviving manual-seed holding (no feed, e.g. US:NOW)
+ * may not be oversold; a synced one is not checked, its feed is the truth. Never touches
+ * the envelope or sizing: proceeds are not budget.
+ */
+export async function logSale(
+  db: Db,
+  s: { on: string; instrumentId: string; units: number | null; proceedsPaise: bigint; destination: Pot | null; label?: string | undefined; note: string },
+  now = new Date().toISOString(),
+): Promise<void> {
+  if (s.proceedsPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(s.on, now);
+  const [inst] = await db.query<{ kind: string; name: string }>(`select kind, name from instruments where id = $1`, [s.instrumentId]);
+  if (!inst) throw new Error(`no holding ${s.instrumentId}`);
+  if (inst.kind === 'BOND') throw new Error('a bond redemption is logged on its own form: use the bond redemption form');
+  let micro: bigint | null = null;
+  if (s.units === null) {
+    if (inst.kind !== 'MF') throw new Error('units sold are required for anything but a mutual fund');
+  } else {
+    if (!Number.isFinite(s.units) || s.units <= 0) throw new Error('units sold must be positive');
+    const m = Math.round(s.units * 1e6);
+    if (Math.abs(m - s.units * 1e6) > 1e-3) throw new Error('units sold are limited to 6 decimal places');
+    micro = BigInt(m);
+  }
+  if (s.destination !== null && !(['B2', 'B3', 'B4', 'SP'] as const).includes(s.destination)) throw new Error(`cannot put a sale into ${s.destination}`);
+  const label = s.destination === 'SP' ? spLabel(s.label) : null;
+  const note = s.note.trim();
+  const units = micro === null ? null : fromMicro(micro);
+  await db.withTransaction(async (tx) => {
+    if (s.destination) await lockBuckets(tx, [s.destination]);
+    // Oversell: read the seed row itself, not `loadPositions`, which drops a sold-out
+    // holding — a guard keyed on it would switch off at 0 held. The row is the instrument's
+    // in the latest manual-seed snapshot (latest snapshot per source, as `loadPositions`);
+    // any other source's latest snapshot reporting the instrument makes it synced: no check.
+    if (micro !== null) {
+      const [h] = await tx.query<{ quantity: string; since: string; synced: boolean }>(
+        `with latest as (
+           select distinct on (sn.source) sn.id, sn.source from snapshots sn
+            order by sn.source, sn.business_date desc, sn.taken_at desc
+         )
+         select h.quantity::text quantity, (h.as_of at time zone 'Asia/Kolkata')::date::text since,
+                exists (select 1 from holdings o join latest lo on lo.id = o.snapshot_id
+                         where o.instrument_id = $1 and o.source <> 'manual-seed') synced
+           from holdings h join latest l on l.id = h.snapshot_id
+          where l.source = 'manual-seed' and h.source = 'manual-seed' and h.instrument_id = $1
+          limit 1`, [s.instrumentId]);
+      if (h && !h.synced) {
+        const { held } = heldAfterSales(await loadLiveSales(tx), { instrumentId: s.instrumentId, quantity: h.quantity, since: h.since });
+        if (micro > held) throw new Error(`${inst.name} holds ${fromMicro(held)} unit${held === 1_000_000n ? '' : 's'}; cannot sell ${units}`);
+      }
+    }
+    const [row] = await tx.query<{ id: string }>(
+      `insert into owner_sales (sold_on, instrument_id, units, proceeds_paise, destination, note, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, $7, 'owner-web') returning id::text`,
+      [s.on, s.instrumentId, units, s.proceedsPaise.toString(), s.destination, note, now]);
+    const rowIds: string[] = [];
+    let destinationName: string | null = null;
+    if (s.destination) {
+      destinationName = (await tx.query<{ name: string }>(`select name from buckets where id = $1`, [s.destination]))[0]!.name;
+      rowIds.push(await writeFlow(tx, { bucket: s.destination, on: s.on, amount: s.proceedsPaise, kind: 'sale', label, note: `Sold ${inst.name}` }, now));
+    }
+    await audit(tx, 'owner_sale', s.instrumentId, 'LOGGED', {
+      source: 'owner-web', rowId: row!.id, rowIds, on: s.on, instrumentId: s.instrumentId, name: inst.name, units,
+      proceedsPaise: s.proceedsPaise.toString(), destination: s.destination, destinationName, label, note,
     });
   });
 }
@@ -74,7 +289,7 @@ export async function logPurchase(
     );
     await audit(tx, 'owner_purchase', row!.id, 'LOGGED', {
       on: p.boughtOn, amountPaise: p.amountPaise.toString(), description,
-      instrumentId: p.instrumentId ?? null, units: p.units ?? null, note,
+      instrumentId: p.instrumentId ?? null, units: p.units ?? null, note, rowId: row!.id, source: 'owner-web',
     });
   });
 }
@@ -99,7 +314,13 @@ export async function logNote(db: Db, n: { on: string; text: string }, now = new
   await audit(db, 'owner_note', n.on, 'NOTE', { on: n.on, text });
 }
 
-export interface TimelineEntry { key: string; on: string; at: string; kind: string; summary: string }
+export interface TimelineEntry {
+  key: string; on: string; at: string; kind: string; summary: string;
+  /** The `reverseEntry` key; null for entries written before batch A (no `rowId`) or not by the owner's hand. */
+  reversible: { entity: ReversalEntity; entityId: string } | null;
+  /** IST date and reason of the reversal, when reversed. */
+  reversed: { on: string; reason: string } | null;
+}
 
 type Payload = Record<string, unknown>;
 
@@ -112,6 +333,19 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       const abs = (amount < 0n ? -amount : amount).toString();
       return { kind: 'Goal', summary: `${verb} ${money(abs)} ${amount < 0n ? 'from' : 'into'} ${entityId}${p['note'] ? ` — ${String(p['note'])}` : ''}` };
     }
+    case 'earmark/LOGGED': {
+      const end = (side: 'from' | 'to') => `${String(p[`${side}Name`] ?? p[side])}${p[side] === 'SP' && p['label'] ? `: ${String(p['label'])}` : ''}`;
+      return { kind: 'Earmark', summary: `Earmarked ${money(p['amountPaise'])} from ${end('from')} to ${end('to')}` };
+    }
+    case 'spend/LOGGED': {
+      const pot = p['label'] && p['label'] !== p['purpose'] ? `: ${String(p['label'])}` : '';
+      return { kind: 'Spend', summary: `Spent ${money(p['amountPaise'])} on ${String(p['purpose'] ?? '')} (from ${String(p['fromName'] ?? p['from'])}${pot})` };
+    }
+    case 'owner_sale/LOGGED': {
+      const to = p['destination'] ? `${String(p['destinationName'] ?? p['destination'])}${p['label'] ? `: ${String(p['label'])}` : ''}` : 'bank';
+      return { kind: 'Sale', summary: `Sold ${p['units'] ? `${String(p['units'])} ` : ''}${String(p['name'] ?? entityId)} for ${money(p['proceedsPaise'])} → ${to}` };
+    }
+    case 'owner_sip_payment/RECORDED': return { kind: 'SIP', summary: `Paid a ${money(p['amountPaise'])} SIP instalment` };
     case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
     case 'owner_note/NOTE': return { kind: 'Note', summary: String(p['text'] ?? '') };
@@ -126,14 +360,23 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
 export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEntry[]> {
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
-      where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase')
+      where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale')
       order by at desc, id desc limit $1`,
     [limit],
   );
+  // ponytail: reads every reversal; filter by the page's keys if the table ever grows large.
+  const reversals = new Map((await db.query<{ entity: string; entity_id: string; reason: string; as_of: string | Date }>(
+    `select entity, entity_id, reason, as_of from log_reversals`))
+    .map((x) => [`${x.entity}|${x.entity_id}`, { on: istDate(new Date(x.as_of).toISOString()), reason: x.reason }]));
   return rows.map((r) => {
     const p = (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload ?? {}) as Payload;
     const at = new Date(r.at).toISOString();
-    const on = typeof p['on'] === 'string' ? p['on'] : typeof p['receivedOn'] === 'string' ? p['receivedOn'] : at.slice(0, 10);
-    return { key: r.id, on, at, ...describe(r.entity, r.entity_id, r.action, p) };
+    const on = ['on', 'receivedOn', 'paidOn'].map((k) => p[k]).find((v): v is string => typeof v === 'string') ?? at.slice(0, 10);
+    const entity = r.entity as ReversalEntity;
+    const entityId = GROUPS.has(entity) ? (Array.isArray(p['rowIds']) ? r.id : null) : typeof p['rowId'] === 'string' ? p['rowId'] : null;
+    const reversible = entityId !== null && typeof p['source'] === 'string' && p['source'].startsWith('owner-') ? { entity, entityId } : null;
+    const reversed = reversible ? reversals.get(`${entity}|${entityId}`) ?? null : null;
+    return { key: r.id, on, at, ...describe(r.entity, r.entity_id, r.action, p), reversible, reversed };
   }).sort((a, b) => (a.on === b.on ? b.at.localeCompare(a.at) : b.on.localeCompare(a.on)));
 }

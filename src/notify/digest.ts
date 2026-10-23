@@ -6,6 +6,7 @@ import { fundedStatus } from '../domain/funded-status.js';
 import { escapeMarkdown } from './telegram.js';
 import { currentIps } from '../domain/ips.js';
 import { loadPositions, netWorth, outstandingLiabilities } from '../domain/networth.js';
+import { heldAfterSales, loadLiveSales, toMicro } from '../domain/owner-sales.js';
 import { PROJECTED_SOURCE, projectVests, type VestEvent } from '../domain/rsu.js';
 import { assessStaleness, type StalenessRow } from '../sources/staleness.js';
 import { fetchLiveRsuInputs } from '../sources/rsu-live.js';
@@ -96,8 +97,9 @@ export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInp
   // Revalue US:NOW (employer stock) with live price if available
   // Fidelity has no auto-sync, so seed holding goes stale — revalue daily using live price
   if (liveInputs) {
-    const employerHolding = await db.query<{ quantity: string | number; value_paise: string | number }>(
-      `select h.quantity, h.value_paise
+    const employerHolding = await db.query<{ quantity: string; source: string; as_of_ist: string }>(
+      `select h.quantity::text as quantity, h.source,
+              (h.as_of at time zone 'Asia/Kolkata')::date::text as as_of_ist
        from holdings h
        join snapshots s on s.id = h.snapshot_id
        join instruments i on i.id = h.instrument_id
@@ -106,9 +108,14 @@ export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInp
        limit 1`,
     );
     if (employerHolding.length > 0) {
-      const qty = Number(employerHolding[0]!.quantity);
+      const h = employerHolding[0]!;
+      // A manual-seed row less the owner's logged sales since it (spec §3.1), as
+      // `loadPositions` already did — the raw seed quantity would undo a partial sale.
+      const micro = h.source === 'manual-seed'
+        ? heldAfterSales(await loadLiveSales(db), { instrumentId: 'US:NOW', quantity: h.quantity, since: h.as_of_ist }).held
+        : toMicro(h.quantity);
       const newValuePaise = usdToInr(
-        cents((Number(liveInputs.nowPriceCents) * qty).toString()),
+        cents((liveInputs.nowPriceCents * micro) / 1_000_000n),
         BigInt(Math.round(liveInputs.usdInr * 1_000_000)),
       );
       positions = positions.map((p) =>

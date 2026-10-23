@@ -7,6 +7,7 @@ import type { Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
 import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
 import { loadFreeEnvelope } from './sips.js';
+import { loadBucketBalances } from './bucket-balances.js';
 
 export { DEFAULT_OWNER_RAILS, railPaise };
 
@@ -407,7 +408,10 @@ export async function checkPortfolioRails(
  * would exempt 6L of genuinely idle cash for a fund that does not exist yet. As of
  * 2026-09-19 B3 is unfunded, so this subtracts nothing.
  *
- * `bucket_flows` is queried directly rather than through `buckets.ts`. That module
+ * Planned spending (SP) is excused the same way: it is bank cash about to be spent
+ * (log batch A spec §7.1).
+ *
+ * Balances come from `bucket-balances.ts` rather than `buckets.ts`. That module
  * re-exports the reporting-only FI-progress metric, and a sizing or risk function may not
  * reach it, transitively or otherwise. The Task 10 architecture test enforces that, and
  * it refuses the identifier in a comment too -- which is how this note got reworded.
@@ -433,16 +437,20 @@ async function checkCashCeiling(
     if (p.assetClass === 'CASH') cash += p.valuePaise;
   }
 
-  const [b3Row] = await db.query<{ balance: string | number | null }>(
-    `select sum(amount_paise) as balance from bucket_flows where bucket_id = 'B3'`,
-  );
-  const b3 = b3Row?.balance == null ? 0n : BigInt(b3Row.balance);
-  const idle = cash > b3 ? cash - b3 : 0n;
+  const balances = await loadBucketBalances(db);
+  const b3 = balances.get('B3') ?? 0n;
+  const sp = balances.get('SP') ?? 0n;
+  const held = b3 + sp;
+  const idle = cash > held ? cash - held : 0n;
 
   const actualPct = (Number(idle) / Number(totalAssets)) * 100;
   if (actualPct <= capPct) return null;
 
-  const excused = b3 > 0n ? ` after excluding the B3 emergency fund (${formatInr(paise(b3))})` : '';
+  const parts = [
+    ...(b3 > 0n ? [`the B3 emergency fund (${formatInr(paise(b3))})`] : []),
+    ...(sp > 0n ? [`planned spending (${formatInr(paise(sp))})`] : []),
+  ];
+  const excused = parts.length ? ` after excluding ${parts.join(' and ')}` : '';
   return {
     code: 'CASH_CEILING',
     detail: `Cash ceiling: ${actualPct.toFixed(1)}% of assets in idle cash${excused} (cap ${capPct}%)`,

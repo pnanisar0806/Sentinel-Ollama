@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
-import { completeMilestone, logGoalMove, logNote, logPurchase, type GoalMoveKind } from '../../../../src/domain/owner-log';
+import {
+  completeMilestone, logEarmark, logGoalMove, logNote, logPurchase, logSale, logSpend, type EarmarkEnd, type GoalMoveKind,
+} from '../../../../src/domain/owner-log';
+import { reverseEntry, type ReversalEntity } from '../../../../src/domain/reversals';
+import { loadGoalTracker } from '../../../../src/domain/goal-plan';
+import type { Db } from '../../../../src/db/client';
 import { recordRedemption, stateRedemptionAmount } from '../../../../src/domain/bond-redemptions';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +20,32 @@ type Body =
   | { action: 'milestone'; id: string; on: string }
   | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string }
   | { action: 'note'; on: string; text: string }
-  | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string };
+  | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string }
+  | { action: 'sale'; on: string; instrumentId: string; units?: string; rupees: string; destination?: string; label?: string; note?: string }
+  | { action: 'spend'; on: string; rupees: string; purpose: string; from: 'B2' | 'B3' | 'B4' | 'SP' | 'BANK'; label?: string; note?: string }
+  | { action: 'earmark'; on: string; rupees: string; from: EarmarkEnd; to: EarmarkEnd; label?: string; expectedOn?: string; note?: string }
+  | { action: 'reverse'; entity: ReversalEntity; entityId: string; reason: string };
+
+/** Optional exact decimal units; '' is none. The column's own error is not readable. */
+function units(text: string | undefined): string | null {
+  const u = (text ?? '').trim();
+  if (u === '') return null;
+  if (!(/^\d+(\.\d+)?$/.test(u) && /[1-9]/.test(u))) throw new Error(`"${u}" is not a positive number of units`);
+  return u;
+}
+
+/**
+ * The FI corpus for an earmark from FI: the goal tracker's FI pots (only web/ may read
+ * goal status). Null when the tracker or its pots are unknown; the domain then refuses.
+ */
+async function fiCorpus(d: Db): Promise<bigint | null> {
+  try {
+    const p = (await loadGoalTracker(d, new Date().toISOString())).fiPots;
+    return p === null ? null : p.equity + p.debt + p.gold + p.cash;
+  } catch {
+    return null;
+  }
+}
 
 function paise(rupees: string): bigint {
   const m = /^\s*(\d{1,12})(?:\.(\d{1,2}))?\s*$/.exec(rupees.replace(/,/g, ''));
@@ -43,17 +73,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return NextResponse.json({ ok: true, message: fresh ? 'Redemption recorded.' : 'Already redeemed; the amount was added.' });
       }
       case 'purchase': {
-        // Units are optional exact decimal text; the column is numeric > 0, but its error is not readable.
-        const units = (body.units ?? '').trim();
-        if (units !== '' && !(/^\d+(\.\d+)?$/.test(units) && /[1-9]/.test(units))) {
-          return NextResponse.json({ error: `"${units}" is not a positive number of units` }, { status: 400 });
-        }
         await logPurchase(d, {
           boughtOn: body.on, description: body.description ?? '', amountPaise: paise(body.rupees ?? ''),
-          instrumentId: body.instrumentId || null, units: units || null, note: body.note ?? '',
+          instrumentId: body.instrumentId || null, units: units(body.units), note: body.note ?? '',
         });
         return NextResponse.json({ ok: true, message: 'Purchase recorded against that month’s budget. Holdings and allocation update separately through the daily holdings sync.' });
       }
+      case 'sale': {
+        const u = units(body.units);
+        const destination = (body.destination || null) as 'B2' | 'B3' | 'B4' | 'SP' | null;
+        await logSale(d, {
+          on: body.on, instrumentId: body.instrumentId ?? '', units: u === null ? null : Number(u), proceedsPaise: paise(body.rupees ?? ''),
+          destination, label: body.label, note: body.note ?? '',
+        });
+        return NextResponse.json({ ok: true, message: destination
+          ? 'Sale recorded and the money added to that pot. The bank balance and holdings catch up at the next sync.'
+          : 'Sale recorded. The bank balance and holdings catch up at the next sync.' });
+      }
+      case 'spend':
+        await logSpend(d, { on: body.on, amountPaise: paise(body.rupees ?? ''), purpose: body.purpose ?? '', from: body.from, label: body.label, note: body.note ?? '' });
+        return NextResponse.json({ ok: true, message: body.from === 'BANK' ? 'Spend noted on the timeline.' : 'Spend recorded; that pot is smaller by it.' });
+      case 'earmark':
+        await logEarmark(d, {
+          on: body.on, from: body.from, to: body.to, amountPaise: paise(body.rupees ?? ''), label: body.label, expectedOn: body.expectedOn,
+          note: body.note ?? '', fiCorpusPaise: body.from === 'FI' ? await fiCorpus(d) : null,
+        });
+        return NextResponse.json({ ok: true, message: 'Earmark recorded.' });
+      case 'reverse':
+        await reverseEntry(d, { entity: body.entity, entityId: body.entityId ?? '', reason: body.reason ?? '' }, new Date().toISOString());
+        return NextResponse.json({ ok: true, message: 'Reversed. The original stays on the timeline, struck through.' });
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });
         return NextResponse.json({ ok: true, message: 'Noted.' });

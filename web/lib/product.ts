@@ -23,7 +23,7 @@ export const AREAS: Area[] = [
     name: 'Advisor (Phase 2.5)',
     stage: 'live',
     what: 'Monthly buy / sell / hold / wait decision by the model among deterministically sized candidates, with news, owner sign-off, quarterly watchlist revision, commentary and track record.',
-    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20', 'Goal plan beside the normal plan: extra money per goal with its funds, "raise budget" as a 48-hour rail change (tactical cap too when it binds)', 'FI more-risk route with the full crash disclosure, sent as the rail change’s note; signing proposes the rebalance’s portfolio equity ceiling (a raise never triggers a sale), revocable with a trim warning', 'House and emergency routes are set-aside guidance only: nothing to sign', 'Monthly advice waits for the budget to be confirmed or changed, until the 7th'],
+    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20', 'Goal plan beside the normal plan: extra money per goal with its funds, "raise budget" as a 48-hour rail change (tactical cap too when it binds)', 'FI more-risk route with the full crash disclosure, sent as the rail change’s note; signing proposes the rebalance’s portfolio equity ceiling (a raise never triggers a sale), revocable with a trim warning', 'House and emergency routes are signable: one rail change raises the budget and the goal set-aside together, and the normal plan never invests the set-aside', 'Monthly advice waits for the budget to be confirmed or changed, until the 7th'],
     missing: ['The model reads filing headlines, not the PDFs', 'US holdings have no news source', 'Past rails and cash are not versioned, so replay does not re-size'],
   },
 
@@ -32,8 +32,8 @@ export const AREAS: Area[] = [
     name: 'Log what I did',
     stage: 'live',
     what: 'The owner tells Sentinel what they did outside it, in the app instead of a chat.',
-    works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'A purchase made outside Sentinel (counts against that month’s remaining to invest)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry'],
-    missing: ['RSU vest confirmation (Telegram only today)', 'A sale or fund switch made outside Sentinel is a note, not a structured record', 'A mistyped purchase cannot be corrected (append-only; no reversal entry yet)'],
+    works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'Earmark money between FI, the goals and Planned spending (per-label pots, e.g. a trip); into the emergency fund or Planned spending it needs idle bank cash', 'Money spent from a pot, a goal or the bank', 'A sale or redemption (units required except for a fund), optionally into a pot; a sold manual-seed RSU share stops counting toward the house', 'A purchase made outside Sentinel (counts against that month’s remaining to invest)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry; Reverse with a reason on entries logged since batch A, struck through, never edited', 'Planned spending line on the Overview goals card'],
+    missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'Reinvesting sale proceeds is the batch B "lump sum received" use', 'No capital-gains tax on a logged sale'],
   },
   {
     slug: 'overview',
@@ -65,7 +65,7 @@ export const AREAS: Area[] = [
     stage: 'live',
     what: 'Am I on track? FI, house, emergency and education in today’s money at the current budget.',
     works: ['Per goal: target and date, money attributed today with its parts, projection at the date, verdict, ₹/month short, finish-year band, assumptions', 'House counts vested, held ServiceNow shares at the latest close; a stale or missing price is unknown, never ₹0', 'M1 / M2 milestone state'],
-    missing: ['Future RSU vests and bonuses are not projected; each counts once it lands', 'A sale logged to the house or emergency fund double counts until the RSU quantity is updated', 'raised_on timestamps for open milestones (owner true-up)'],
+    missing: ['Future RSU vests and bonuses are not projected; each counts once it lands', 'raised_on timestamps for open milestones (owner true-up)'],
   },
   {
     slug: 'rails',

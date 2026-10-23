@@ -1,6 +1,7 @@
 import { rupees, type Paise } from '../money/paise.js';
 import { computeFICorpusBand, fundedRatio } from './funded-status.js';
 import type { Db } from '../db/client.js';
+import { loadBucketBalances } from './bucket-balances.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import type { HoldingSeed } from '../seed/seed-data.js';
 import type { LoanSeed } from '../seed/seed-data.js';
@@ -179,21 +180,15 @@ const MILESTONES: Record<'M1' | 'M2', Milestone> = {
 
 /**
  * Compute current bucket balances from bucket_flows and return status for each active bucket.
- * Balances are the sum of signed amount_paise per bucket.
+ * Balances are the sum of signed, non-reversed amount_paise per bucket (bucket-balances.ts).
  */
 export async function bucketStatuses(db: Db): Promise<BucketStatus[]> {
-  const flowRows = await db.query<{ bucket_id: BucketId; amount_paise: string }>(
-    'select bucket_id, sum(amount_paise) as amount_paise from bucket_flows group by bucket_id',
-  );
-  const balanceMap = new Map<BucketId, Paise>();
-  for (const row of flowRows) {
-    balanceMap.set(row.bucket_id, BigInt(row.amount_paise) as Paise);
-  }
+  const balanceMap = await loadBucketBalances(db);
 
   return Object.values(BUCKETS)
     .filter((b) => b.active)
     .map((bucket) => {
-      const balance = balanceMap.get(bucket.id) ?? null;
+      const balance = (balanceMap.get(bucket.id) ?? null) as Paise | null;
       const { met: _met, targetPaise } = bucketStatus(bucket, balance ?? (0n as Paise));
       let fundedRatio: number | null = null;
       // No balance means no ratio. Reporting 0.0% funded is a claim we cannot make.

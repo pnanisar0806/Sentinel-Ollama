@@ -11,7 +11,9 @@ import { ASSUMPTIONS } from '../config/assumptions.js';
 import { formatInr, rupees, type Paise } from '../money/paise.js';
 import { loadPositions, type Position } from './networth.js';
 import { addTarget } from './alloc-engine.js';
-import { BUCKETS, bucketStatuses } from './buckets.js';
+import { BUCKETS } from './buckets.js';
+import { loadBucketBalances } from './bucket-balances.js';
+import { heldAfterSales, loadLiveSales } from './owner-sales.js';
 import { computeFICorpusBand } from './funded-status.js';
 import { railPaise, validGoalCeilingPct } from './rail-values.js';
 import { istDate, istMonth } from './sips.js';
@@ -100,23 +102,30 @@ function fiProjected(start: Pots, budget: bigint, mix: Mix, months: number, rate
 async function rsuValue(db: Db, today: string): Promise<{ part: GoalCard['balanceParts'][number] | null; reason: string | null }> {
   // Only each source's latest snapshot counts, as in `loadPositions`: a newer snapshot that
   // drops the RSU means it is no longer held, not that an older quantity still stands.
-  const [h] = await db.query<{ instrument_id: string; quantity: string }>(
+  const [h] = await db.query<{ instrument_id: string; quantity: string; source: string; as_of_ist: string }>(
     `with latest as (
        select distinct on (s.source) s.id, s.business_date, s.taken_at
          from snapshots s where s.business_date <= $1::date
         order by s.source, s.business_date desc, s.taken_at desc
      )
-     select h.instrument_id, h.quantity::text as quantity
+     select h.instrument_id, h.quantity::text as quantity, h.source,
+            (h.as_of at time zone 'Asia/Kolkata')::date::text as as_of_ist
        from holdings h join instruments i on i.id = h.instrument_id join latest s on s.id = h.snapshot_id
       where i.kind = 'RSU'
       order by s.business_date desc, s.taken_at desc limit 1`, [today]);
   if (!h) return { part: null, reason: null };
+  // A manual-seed row less the owner's logged sales since it (spec §3.1), as `loadPositions`.
+  let micro: bigint | null = null;
+  if (h.source === 'manual-seed') {
+    micro = heldAfterSales(await loadLiveSales(db, today), { instrumentId: h.instrument_id, quantity: h.quantity, since: h.as_of_ist }).held;
+    if (micro <= 0n) return { part: null, reason: null };
+  }
   const [p] = await db.query<{ trade_date: string; close_paise: string; value: string }>(
     `select trade_date::text as trade_date, close_paise::text as close_paise,
-            floor($2::numeric * close_paise)::text as value
+            floor(coalesce($3::numeric / 1000000, $2::numeric) * close_paise)::text as value
        from prices_eod where instrument_id = $1 order by trade_date desc limit 1`,
-    [h.instrument_id, h.quantity]);
-  const qty = String(Number(h.quantity));
+    [h.instrument_id, h.quantity, micro?.toString() ?? null]);
+  const qty = micro === null ? String(Number(h.quantity)) : String(Number(micro) / 1e6);
   if (!p) return { part: { label: `${qty} ServiceNow shares: no price`, paise: null }, reason: 'No ServiceNow price' };
   const age = Math.round((Date.parse(today) - Date.parse(p.trade_date)) / 86_400_000);
   const label = `${qty} ServiceNow shares @ ${formatInr(BigInt(p.close_paise) as Paise)} (close ${p.trade_date})`;
@@ -155,8 +164,8 @@ export async function loadGoalTracker(db: Db, nowIso: string, signedCeilingPct?:
   const blendBps = Math.floor((central.equityBps * fiMix.equityBps + central.debtBps * fiMix.debtBps + central.goldBps * fiMix.goldBps) / 10_000);
   const ratesLine = `Real returns: equity ${pct(central.equityBps)}, debt ${pct(central.debtBps)}, gold ${pct(central.goldBps)}, cash ${pct(central.cashBps)}`;
 
-  const flows = new Map((await bucketStatuses(db)).map((b) => [b.id, (b.balancePaise ?? 0n) as bigint]));
-  const flow = (id: 'B2' | 'B3' | 'B4') => flows.get(id) ?? 0n;
+  const flows = await loadBucketBalances(db);
+  const flow = (id: 'B2' | 'B3' | 'B4' | 'SP') => flows.get(id) ?? 0n;
   const monthlyBudgetPaise = await railPaise(db, 'monthly_budget_paise');
   const goalSetAsidePaise = await railPaise(db, 'goal_setaside_monthly_paise');
   // FI gets the budget less the house/emergency set-aside, which goes to B2/B3, not the new-money mix.
@@ -177,7 +186,8 @@ export async function loadGoalTracker(db: Db, nowIso: string, signedCeilingPct?:
     for (const p of positions) gross[p.assetClass.toLowerCase() as keyof Pots] += p.valuePaise;
     // Bucket money sits in bank accounts until invested: out of cash first, then debt, equity, gold;
     // anything still owed is surfaced in `reason`, never dropped.
-    let owed = flow('B2') + flow('B3') + flow('B4');
+    // Planned spending (SP) is bank cash about to be spent: not FI money either (spec §3.3).
+    let owed = flow('B2') + flow('B3') + flow('B4') + flow('SP');
     const pots = { ...gross };
     for (const k of ['cash', 'debt', 'equity', 'gold'] as const) {
       const take = owed < pots[k] ? owed : pots[k];
@@ -192,13 +202,13 @@ export async function loadGoalTracker(db: Db, nowIso: string, signedCeilingPct?:
       balancePaise: potsTotal(pots),
       balanceParts: [
         { label: 'Holdings excluding the ServiceNow RSU', paise: potsTotal(gross) },
-        { label: 'Less house, emergency and education money', paise: potsTotal(pots) - potsTotal(gross) },
+        { label: 'Less house, emergency, education and planned-spending money', paise: potsTotal(pots) - potsTotal(gross) },
       ],
       projectedPaise: projected,
       verdict: projected >= fiTarget ? 'ON_TRACK' : 'SHORT',
       shortMonthlyPaise: levelMonthlyToClose(fiTarget - projected, months, blendBps),
       finishYear: finishYears(nowIdx, (s) => fiFirstMonth(pots, fiBudget, EPF_MONTHLY, mix, realRates(s), fiTarget, maxMonths)),
-      reason: owed > 0n ? `House, emergency and education money exceeds the holdings by ${formatInr(owed as Paise)}` : null,
+      reason: owed > 0n ? `House, emergency, education and planned-spending money exceeds the holdings by ${formatInr(owed as Paise)}` : null,
     });
   }
   fiCard.assumptions = [

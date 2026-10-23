@@ -4,7 +4,7 @@ import { openDb } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { istDate, loadFreeEnvelope, persistSipSnapshot } from '../../src/domain/sips.js';
-import { logPurchase } from '../../src/domain/owner-log.js';
+import { logPurchase, logSale } from '../../src/domain/owner-log.js';
 import { loadSizingInput } from '../../src/domain/sizing-input.js';
 
 /**
@@ -154,6 +154,18 @@ describe('loadSizingInput offers at most what remains this month (SIP gaps Task 
     const spentOut = await loadSizingInput(db, AS_OF);
     expect(spentOut.tacticalBudgetPaise).toBe(0n);
     expect(spentOut.envelopeReason).toMatch(/already deployed/);
+    await db.close();
+  });
+});
+
+describe('loadSizingInput counts manual-seed units after logged sales (final review I-1 sibling)', () => {
+  it('US:NOW has 68 units to sell after a 10-of-78 sale, not the raw seed 78', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seed(db, { asOf: '2026-08-12' });
+    await logSale(db, { on: '2026-08-12', instrumentId: 'US:NOW', units: 10, proceedsPaise: 1n, destination: null, note: '' }, '2026-08-12T10:00:00Z');
+    const input = await loadSizingInput(db, AS_OF);
+    expect(input.holdings.find((h) => h.instrumentId === 'US:NOW')?.units).toBe('68');
     await db.close();
   });
 });

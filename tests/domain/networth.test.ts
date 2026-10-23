@@ -6,6 +6,7 @@ import { persistSchedules, runCascade, type LoanInput } from '../../src/domain/l
 import { SEED_HOLDINGS, SEED_LOANS } from '../../src/seed/seed-data.js';
 import { classify, loadPositions, netWorth, outstandingLiabilities } from '../../src/domain/networth.js';
 import { addP, type Paise } from '../../src/money/paise.js';
+import { logSale } from '../../src/domain/owner-log.js';
 
 /** The business date the suite seeds at. Every derived expectation hangs off this. */
 const SEED_DATE = '2026-08-12';
@@ -191,5 +192,18 @@ describe('loadPositions snapshot selection', () => {
 
     const positions = await loadPositions(db, '2026-07-15');
     expect(positions.map((p) => p.valuePaise)).toEqual([111_11n]);
+  });
+});
+
+describe('loadPositions and logged sales (spec §3.1)', () => {
+  const NOW_SEED = SEED_HOLDINGS.find((h) => h.instrumentId === 'US:NOW')!;
+  const nowValue = async (businessDate?: string) =>
+    (await loadPositions(db, businessDate)).find((p) => p.instrumentId === 'US:NOW')?.valuePaise;
+
+  it('a manual-seed holding shrinks pro rata, floored to the paisa, by sales on or after its as_of date only', async () => {
+    await logSale(db, { on: '2026-09-02', instrumentId: 'US:NOW', units: 0.5, proceedsPaise: 1n, destination: null, note: '' }, '2026-09-27T10:00:00Z');
+    // 77.5/78 of ₹10,72,974: floor(107297400 × 77500000 / 78000000).
+    expect(await nowValue()).toBe((NOW_SEED.valuePaise * 77_500_000n) / 78_000_000n);
+    expect(await nowValue('2026-09-01')).toBe(NOW_SEED.valuePaise);        // the sale is after that business date
   });
 });

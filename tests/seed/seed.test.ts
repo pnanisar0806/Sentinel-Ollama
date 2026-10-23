@@ -18,7 +18,8 @@ describe('seed job', () => {
     expect(await count('instruments')).toBeGreaterThan(15);
     expect(await count('holdings')).toBeGreaterThan(15);
     expect(await count('loans')).toBe(3);
-    expect(await count('buckets')).toBe(4);
+    // B1-B4 from the seed, SP (Planned spending) from migration 0036.
+    expect((await db.query<{ id: string }>('select id from buckets order by id')).map((b) => b.id)).toEqual(['B1', 'B2', 'B3', 'B4', 'SP']);
     expect(await count('milestones')).toBe(2);
     expect(await count('rsu_grants')).toBe(6);
   });

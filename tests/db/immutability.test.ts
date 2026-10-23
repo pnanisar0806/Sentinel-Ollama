@@ -46,6 +46,12 @@ describe('append-only tables refuse every mutation path', () => {
     await expect(db.query(`truncate owner_purchases cascade`)).rejects.toThrow(/append-only/);
   });
 
+  it.each(['owner_sales', 'log_reversals'])('the /log batch A table %s refuses UPDATE, DELETE and TRUNCATE', async (t) => {
+    await expect(db.query(`update ${t} set source = source`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`delete from ${t}`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`truncate ${t} cascade`)).rejects.toThrow(/append-only/);
+  });
+
   it('covers every table the PRD calls an audit surface', () => {
     // Guards against a table being added to the schema and quietly left unprotected.
     expect(new Set(APPEND_ONLY.map((t) => t.table))).toEqual(

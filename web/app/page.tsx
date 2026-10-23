@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getGoals, getInvestmentControls, getOverview, getSips } from '../lib/data';
+import { getGoals, getInvestmentControls, getOverview, getPlannedSpending, getSips } from '../lib/data';
+import { plannedSpendingLine } from '../lib/log';
 import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
 import { AllocationBar, Badge, Card, ClassChip, DataTable, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
@@ -12,6 +13,7 @@ export default async function OverviewPage() {
   const sips = await getSips();
   const controls = await getInvestmentControls();
   const goals = await getGoals();
+  const planned = plannedSpendingLine(await getPlannedSpending());
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
@@ -148,6 +150,7 @@ export default async function OverviewPage() {
                   <span className="muted">{verdictLine(c)}</span>
                 </div>
               ))}
+            {planned ? <p className="muted" style={{ margin: '0.7rem 0 0' }}>{planned} · <Link href="/log">log</Link></p> : null}
           </Card>
         </div>
 

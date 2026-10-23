@@ -3,24 +3,23 @@ import { loadPositions } from './networth.js';
 import { railPaise } from './rails.js';
 import { loadFreeEnvelope } from './sips.js';
 import { BANDS } from './engine.js';
+import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
 import type { SizingInput } from './sizing.js';
+import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
 
 /**
  * Reads what `sizeCandidates` needs from the database (Phase 2.5 Task 4). Read-only.
  *
  * Cash available is bank cash (the CASH asset class) minus the emergency fund's funded
- * balance — B3 is never spent on a trade. Open BUY requests reserve their amount until
- * they are done, abandoned, rejected or expired.
+ * balance and Planned spending (SP) — neither is ever spent on a trade. Open BUY
+ * requests reserve their amount until they are done, abandoned, rejected or expired.
  */
 const OPEN = ['PENDING_APPROVAL', 'MODIFIED', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'];
 
 export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput> {
   const positions = await loadPositions(db);
   const portfolio = positions.reduce((s, p) => s + p.valuePaise, 0n);
-  const cashPositions = positions.filter((p) => p.assetClass === 'CASH');
-  const [b3] = await db.query<{ n: string | null }>(`select sum(amount_paise)::text as n from bucket_flows where bucket_id = 'B3'`);
-  const emergency = BigInt(b3?.n ?? '0');
-  const cash = cashPositions.length === 0 ? null : cashPositions.reduce((s, p) => s + p.valuePaise, 0n) - emergency;
+  const cash = idleBankCash(positions, await loadBucketBalances(db));
 
   const [reserved] = await db.query<{ n: string | null }>(
     `select sum(o.quantity)::bigint::text as n from order_intents o
@@ -29,12 +28,22 @@ export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput
     [OPEN],
   );
 
-  const units = await db.query<{ instrument_id: string; units: string }>(
-    `select h.instrument_id, sum(h.quantity)::text as units from holdings h
-      where h.snapshot_id in (select distinct on (source) id from snapshots order by source, business_date desc, id desc)
-      group by h.instrument_id`,
+  const units = await db.query<{ instrument_id: string; quantity: string; source: string; as_of_ist: string }>(
+    `select h.instrument_id, h.quantity::text as quantity, h.source,
+            (h.as_of at time zone 'Asia/Kolkata')::date::text as as_of_ist from holdings h
+      where h.quantity is not null
+        and h.snapshot_id in (select distinct on (source) id from snapshots order by source, business_date desc, id desc)`,
   );
-  const unitsOf = new Map(units.map((u) => [u.instrument_id, u.units]));
+  // A manual-seed row less the owner's logged sales since it (spec §3.1), as `loadPositions`.
+  const sales = await loadLiveSales(db);
+  const micro = new Map<string, bigint>();
+  for (const u of units) {
+    const held = u.source === 'manual-seed'
+      ? heldAfterSales(sales, { instrumentId: u.instrument_id, quantity: u.quantity, since: u.as_of_ist }).held
+      : toMicro(u.quantity);
+    micro.set(u.instrument_id, (micro.get(u.instrument_id) ?? 0n) + held);
+  }
+  const unitsOf = new Map([...micro].map(([id, m]) => [id, fromMicro(m)]));
 
   const quotes = await db.query<{ instrument_id: string; close_paise: string; trade_date: string }>(
     `select distinct on (instrument_id) instrument_id, close_paise::text, trade_date::text

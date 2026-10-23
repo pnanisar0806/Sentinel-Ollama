@@ -34,6 +34,7 @@ import { humanize, sentence } from './plain';
 import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
+import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
 import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
@@ -705,27 +706,54 @@ export interface LogData {
   bonds: { id: string; name: string }[];
   /** Holdings a purchase made outside Sentinel can be linked to (optional on the form). */
   holdings: { id: string; name: string }[];
+  /** What a sale can be logged against: held positions (sold-out seed rows already dropped), never bonds or cash. */
+  sellable: { id: string; name: string; kind: string }[];
+  /** Earmark and spend pots with their live balance; null = nothing live logged there. */
+  pots: { id: string; name: string; balancePaise: bigint | null }[];
+  /** Open Planned-spending labels. */
+  spLabels: { label: string; balancePaise: bigint }[];
+  /** Bank cash not already set aside in B3 or SP; null when no bank balance is known. */
+  idleBankCashPaise: bigint | null;
 }
 
-/** What /log needs: the owner's own timeline and the choices each form offers. */
+const SELLABLE_KINDS = ['EQUITY', 'ETF', 'MF', 'GOLD', 'RSU'];
+const POTS = ['B2', 'B3', 'B4', 'SP'];
+
+/**
+ * What /log needs: the owner's own timeline and the choices each form offers. Reads the
+ * database only (no live RSU fetch): the pickers need no valuation.
+ */
 export async function getLog(): Promise<LogData> {
   const d = await db();
-  const input = await getDigest();
-  const positions = await loadPositions(d, input.businessDate);
+  const today = new Date().toISOString().slice(0, 10);
+  const positions = await loadPositions(d, today);
+  const balances = await loadBucketBalances(d);
   const bonds = new Map<string, string>();
   // loadPositions already drops a redeemed bond, so what is left is still outstanding.
   const holdings = new Map<string, string>();
+  const sellable = new Map<string, { id: string; name: string; kind: string }>();
   for (const p of positions) {
     if (p.kind === 'BOND') bonds.set(p.instrumentId, p.name);
     if (['EQUITY', 'ETF', 'MF', 'GOLD'].includes(p.kind)) holdings.set(p.instrumentId, p.name);
+    if (SELLABLE_KINDS.includes(p.kind)) sellable.set(p.instrumentId, { id: p.instrumentId, name: p.name, kind: p.kind });
   }
+  const names = await d.query<{ id: string; name: string }>(`select id, name from buckets where id = any($1::text[]) order by id`, [POTS]);
   return {
     timeline: await loadOwnerTimeline(d),
-    buckets: input.buckets.map((b) => ({ id: b.id, name: b.name })),
-    openMilestones: input.milestones.filter((m) => m.completedOn === null).map((m) => ({ id: m.id, name: m.name })),
+    buckets: (await bucketStatuses(d)).map((b) => ({ id: b.id, name: b.name })),
+    openMilestones: (await milestoneStatuses(d, today)).filter((m) => m.completedOn === null).map((m) => ({ id: m.id, name: m.name })),
     bonds: [...bonds].map(([id, name]) => ({ id, name })),
     holdings: [...holdings].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+    sellable: [...sellable.values()].sort((a, b) => a.name.localeCompare(b.name)),
+    pots: names.map((b) => ({ id: b.id, name: b.name, balancePaise: balances.get(b.id) ?? null })),
+    spLabels: await loadSpLabels(d),
+    idleBankCashPaise: idleBankCash(positions, balances),
   };
+}
+
+/** Open Planned-spending labels for the Overview's one line. */
+export async function getPlannedSpending(): Promise<{ label: string; balancePaise: bigint }[]> {
+  return loadSpLabels(await db());
 }
 
 /**

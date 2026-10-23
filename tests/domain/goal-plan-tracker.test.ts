@@ -3,6 +3,8 @@ import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { loadGoalTracker, type GoalCard, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadPositions } from '../../src/domain/networth.js';
+import { logSale } from '../../src/domain/owner-log.js';
+import { reverseEntry } from '../../src/domain/reversals.js';
 import { levelMonthlyToClose, newMoneyMix, potsTotal, realRates } from '../../src/domain/goal-math.js';
 import { BUCKETS } from '../../src/domain/buckets.js';
 import { formatInr, rupees, type Paise } from '../../src/money/paise.js';
@@ -84,6 +86,21 @@ describe('goal tracker: FI', () => {
     expect(['ON_TRACK', 'SHORT']).toContain(card(t, 'FI').verdict);
   });
 
+  it('FI corpus subtracts Planned spending (SP) like B2-B4, and skips reversed flows', async () => {
+    const SP_FLOW = rupees(120_000);
+    await db.query(
+      `insert into bucket_flows (bucket_id, occurred_on, amount_paise, kind, label, as_of, source)
+       values ('SP', '2026-10-01', $1, 'earmark', 'Himachal trip', now(), 'owner-web')`, [SP_FLOW.toString()]);
+    const [typo] = await db.query<{ id: string }>(
+      `insert into bucket_flows (bucket_id, occurred_on, amount_paise, kind, as_of, source)
+       values ('B3', '2026-10-02', 5000000, 'seed', now(), 'owner-web') returning id::text`);
+    await db.query(`insert into log_reversals (entity, entity_id, reason, as_of, source) values ('bucket_flow', $1, 'typo', now(), 'owner-web')`, [typo!.id]);
+    const gross = sum(HOLDINGS.map((h) => h.value));
+    const fi = card(await loadGoalTracker(db, NOW), 'FI');
+    expect(fi.balancePaise).toBe(gross - B2_FLOW - B3_FLOW - SP_FLOW);
+    expect(card(await loadGoalTracker(db, NOW), 'EMERGENCY').balancePaise).toBe(B3_FLOW);
+  });
+
   it('Review Focus 2: no rupee is counted twice across the four goals', async () => {
     const t = await loadGoalTracker(db, NOW);
     const positions = await loadPositions(db);
@@ -100,7 +117,7 @@ describe('goal tracker: FI', () => {
     const fi = card(await loadGoalTracker(db, NOW), 'FI');
     expect(fi.balancePaise).toBe(0n);
     expect(fi.reason).toBe(
-      `House, emergency and education money exceeds the holdings by ${formatInr((b2 + B3_FLOW - assets) as Paise)}`);
+      `House, emergency, education and planned-spending money exceeds the holdings by ${formatInr((b2 + B3_FLOW - assets) as Paise)}`);
   });
 
   it('FI assumptions state the nominal step-up from the same constant as the real one', async () => {
@@ -185,6 +202,27 @@ describe('goal tracker: house', () => {
     await db.query(`insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
                     values ($1, 'US:NOW', 80, 1, 'x', '2026-10-21T00:00:00Z', 'manual-seed')`, [snap!.id]);
     expect(card(await loadGoalTracker(db, NOW), 'HOUSE').balancePaise).toBe(B2_FLOW + 80n * NOW_CLOSE);
+  });
+
+  it('a logged sale of 10 of the 78 seeded shares into B2 leaves 68 shares plus the proceeds; reversing restores 78', async () => {
+    await fixture();
+    const PROCEEDS = rupees(1_200_000);
+    await logSale(db, { on: '2026-10-21', instrumentId: 'US:NOW', units: 10, proceedsPaise: PROCEEDS, destination: 'B2', note: '' }, NOW);
+    const house = card(await loadGoalTracker(db, NOW), 'HOUSE');
+    expect(house.balanceParts.map((p) => p.paise)).toEqual([B2_FLOW + PROCEEDS, 68n * NOW_CLOSE]);
+    expect(house.balanceParts[1]!.label).toMatch(/^68 ServiceNow shares @/);
+    // A sale dated before the seed row's as_of (2026-10-20 IST) is already in its 78.
+    await logSale(db, { on: '2026-10-19', instrumentId: 'US:NOW', units: 5, proceedsPaise: 1n, destination: null, note: '' }, NOW);
+    expect(card(await loadGoalTracker(db, NOW), 'HOUSE').balanceParts[1]!.paise).toBe(68n * NOW_CLOSE);
+    const [a] = await db.query<{ id: string }>(`select id::text from audit_log where entity = 'owner_sale' order by id limit 1`);
+    await reverseEntry(db, { entity: 'owner_sale', entityId: a!.id, reason: 'typo' }, NOW);
+    expect(card(await loadGoalTracker(db, NOW), 'HOUSE').balanceParts.map((p) => p.paise)).toEqual([B2_FLOW, RSU_QTY * NOW_CLOSE]);
+  });
+
+  it('a sold-out RSU is not held: the house is B2 money only', async () => {
+    await fixture();
+    await logSale(db, { on: '2026-10-21', instrumentId: 'US:NOW', units: 78, proceedsPaise: 1n, destination: null, note: '' }, NOW);
+    expect(card(await loadGoalTracker(db, NOW), 'HOUSE').balanceParts.map((p) => p.label)).toEqual(['House fund (B2) money']);
   });
 
   it('Review Focus 3: a house over target is ON_TRACK with a shortfall of 0n', async () => {
