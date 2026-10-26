@@ -1,6 +1,6 @@
 # Piece 3 — funds first, a strict stock gate, and a fund mix review — design
 
-Status: **draft for owner review** · 2026-10-23 · brainstormed with the owner 2026-10-23.
+Status: **approved by owner 2026-10-23** (plan decisions — headline-only rating downgrade, stocks withheld before a signed mix — approved 2026-10-26) · 2026-10-23 · brainstormed with the owner 2026-10-23.
 Supersedes §3 of `2026-10-14-sips-goals-advisor-design.md`. That section stays as the record
 of what was first asked; the ledger notes the change.
 
