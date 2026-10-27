@@ -5,12 +5,9 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
-- [x] **Piece 3 (funds first) — 10 tasks + docs committed 2026-10-26** on `feat/funds-first`, local,
-      NOT pushed (spec `2026-10-23-funds-first-design.md`). **Squashed onto local `main` 2026-10-27,
-      NOT pushed** — push only after 0037/0038 are on prod (owner approved release; the prod SQL
-      was blocked by the session's permission classifier). **Next: batch B** (3,4,8). Open from piece 3:
-  - [ ] Apply migrations **0037 and 0038 to prod before deploy** (else `/funds` 500s and the weekly report's advisor run fails: `sizing-input.ts` → `loadFundCandidates` reads `fund_mix_signed`).
-  - [ ] Browser-check `/advisor` and `/funds` after deploy (neither was browser-checked).
+- [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
+      applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
+      `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:
   - [ ] **Owner:** sign the fund mix on `/funds` (until then stocks are withheld and no fund is topped up).
   - [ ] **Owner:** add the Screener columns (Pledged %, Promoter holding, CFO 5Y, PAT 5Y) and send one export.
   - [ ] **Owner:** open the Nifty Next 50 index fund (and a US one when any reopens to SIPs).
