@@ -1,7 +1,7 @@
 import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
-import { downloadNavHistory, ingestNavs, type NavRow } from '../sources/amfi.js';
+import { amfiDate, downloadNavHistory, ingestNavs, type NavRow } from '../sources/amfi.js';
 import { isMainModule } from '../util/main-module.js';
 
 /**
@@ -38,14 +38,8 @@ interface NavBackfillOptions {
   fetchMonth?: (fromDate: string, toDate: string) => Promise<NavRow[]>;
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
-
-/** AMFI takes and returns `dd-MMM-yyyy`, never ISO. */
-export function amfiDate(iso: string): string {
-  const [y, m, d] = iso.split('-');
-  return `${d}-${MONTHS[Number(m) - 1]}-${y}`;
-}
+// Lives in sources/amfi.ts so web-reachable code need not import this job.
+export { amfiDate };
 
 /** First and last day of a 'YYYY-MM', as ISO. */
 export function monthBounds(month: string): { from: string; to: string } {

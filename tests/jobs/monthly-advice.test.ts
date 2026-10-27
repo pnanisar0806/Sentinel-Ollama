@@ -6,6 +6,8 @@ import { monthlyReviewDone } from '../../src/domain/cadence.js';
 import { persistSipSnapshot } from '../../src/domain/sips.js';
 import { monthlyAdvice } from '../../src/jobs/report.js';
 import { confirmBudget } from '../../src/domain/controls.js';
+import { awaitingGovernance } from '../../src/domain/stock-checks.js';
+import { GATE_AS_OF, GATE_NOW, seedGateStocks } from '../fixtures/stock-gate.js';
 
 /**
  * Owner decision 2026-10-15: a purchase withheld because SIPs are unknown must not consume
@@ -49,6 +51,48 @@ describe('monthlyAdvice', () => {
     expect(await advised()).toBe(1);
     expect(await monthlyReviewDone(db, 'advice', '2026-10')).toBe(true);
     await db.close();
+  });
+
+  describe('governance backfill before sizing (Piece 3 Task 3)', () => {
+    const ids = ['NSE:GATEX', 'NSE:GATEY'];
+    let urls: string[];
+    /** BSE stub: a 1000-row scrip list carrying both stocks, and announcements answered with `annStatus`. */
+    const bse = (annStatus: number) => (async (url: string) => {
+      urls.push(url);
+      if (url.includes('ListofScripData')) {
+        const rows = [...Array.from({ length: 1000 }, (_, n) => ({ SCRIP_CD: String(100000 + n), scrip_id: `FILL${n}` })),
+          ...ids.map((id, n) => ({ SCRIP_CD: String(900000 + n), scrip_id: id.slice(4) }))];
+        return new Response(JSON.stringify(rows), { status: 200 });
+      }
+      return new Response(JSON.stringify({ Table: [] }), { status: annStatus });
+    }) as unknown as typeof fetch;
+    const snapshot = async () => JSON.stringify((await db.query<{ input_snapshot: unknown }>(
+      `select input_snapshot from advisor_proposals where kind = 'ADVISE'`))[0]!.input_snapshot);
+    const runs = (id: string) => db.query<{ state: string }>(`select state from news_fetch_runs where instrument_id = $1`, [id]);
+
+    beforeEach(async () => {
+      urls = [];
+      await seedGateStocks(db, ids.map((id) => ({ id, composite: 90 })));
+      await persistSipSnapshot(db, [], GATE_NOW.toISOString());
+    });
+
+    it('each awaiting stock gets exactly one backfill, the scrip list is fetched once, and it then reaches the advisor', async () => {
+      expect(await awaitingGovernance(db, GATE_AS_OF, GATE_NOW)).toEqual(ids);
+      await monthlyAdvice(db, GATE_AS_OF, GATE_NOW.toISOString(), { apiKey: undefined, model: undefined, fetchImpl: bse(200) });
+      for (const id of ids) expect(await runs(id)).toEqual([{ state: 'success_empty' }]);
+      expect(urls.filter((u) => u.includes('ListofScripData'))).toHaveLength(1);
+      const snap = await snapshot();
+      for (const id of ids) expect(snap).toContain(`${id.slice(4)} Ltd`);
+      await db.close();
+    });
+
+    it('a failed backfill leaves the stock out of the advisor snapshot', async () => {
+      await monthlyAdvice(db, GATE_AS_OF, GATE_NOW.toISOString(), { apiKey: undefined, model: undefined, fetchImpl: bse(500) });
+      for (const id of ids) expect(await runs(id)).toEqual([{ state: 'failed' }]);
+      const snap = await snapshot();
+      for (const id of ids) expect(snap).not.toContain(id.slice(4));
+      await db.close();
+    });
   });
 
   it('IST days 1–7 without a budget confirmation: held before the SIP check, month open; it runs once settled', async () => {

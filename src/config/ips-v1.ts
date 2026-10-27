@@ -22,9 +22,9 @@ Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constr
 - Cash ceiling: ≤10% of total investable assets, measured on idle cash — bank balances only, less the funded B3 emergency-fund balance; EPF, bonds and liquid/debt funds count as debt, not cash. Only the balance actually in B3 is excused, never its target. Idle cash above the ceiling is uninvested capital and must be deployed or routed to B3.
 - B2 (house fund): 100% capital-preservation instruments once seeded.
 
-## 3.4 Equity structure: core–satellite 75/25
-- **Core (≥75% of equity flows):** index instruments (Nifty 50, Nifty Next 50, flexi-cap of PPFC type, US index exposure) — consolidate into the existing ICICI Nifty 50 Index folios and BeES ETFs.
-- **Satellite (≤25% of equity):** agent-recommended direct stocks, each with a ≤150-word written thesis containing an explicit falsification condition. Operates on the curated watchlist (Section 8).
+## 3.4 Equity structure: core–satellite 70/30
+- **Core (≥70% of equity flows):** index instruments (Nifty 50, Nifty Next 50, flexi-cap of PPFC type, US index exposure) — consolidate into the existing ICICI Nifty 50 Index folios and BeES ETFs.
+- **Non-core (≤30% of equity):** mid-cap, small-cap and active large-cap funds, and agent-recommended direct stocks, each stock with a ≤150-word written thesis containing an explicit falsification condition. Stocks operate on the curated watchlist (Section 8). Amended 2026-10-23 by the owner: "i dont need stocks unless they are very good".
 
 ## 3.5 Hard concentration caps (safety rails, machine-enforced)
 - Any single stock: ≤10% of liquid portfolio.

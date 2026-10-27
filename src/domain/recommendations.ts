@@ -4,6 +4,7 @@ import type { Db } from '../db/client.js';
 import { IPS_V1_TEXT, getIpsClauseIndex } from './ips.js';
 import type { FalsificationCondition } from './sell-triggers.js';
 import type { Redemption } from './redemptions.js';
+import { MIN_HOLD_MONTHS, isFundTopUp, lastRecommendedOn, monthsBetween } from './repeat-buy-hold.js';
 
 /**
  * FR-11 / FR-12 recommendation objects, and FR-55 paper mode.
@@ -21,8 +22,11 @@ export const MAX_THESIS_WORDS = 150;
 /** FR-12: at most four recommendation objects in a calendar month. */
 export const MAX_RECS_PER_MONTH = 4;
 
-/** FR-12 / IPS §3.7: no repeat BUY on a name inside twelve months of the last one. */
-export const MIN_HOLD_MONTHS = 12;
+/**
+ * FR-12 / IPS §3.7: no repeat BUY on a name inside twelve months of the last one. Fund
+ * top-ups (MF/ETF/gold) are exempt by owner amendment, 2026-10-27; stocks are not (`isFundTopUp`).
+ */
+export { MIN_HOLD_MONTHS };
 
 /**
  * FR-12: the only three events that may override the repeat-BUY hold. Anything else is a
@@ -304,18 +308,10 @@ export async function gateRecommendation(
     };
   }
 
-  if (rec.primary.action === 'BUY' && rec.primary.instrumentId !== null) {
-    const [prior] = await db.query<{ created_on: string | Date }>(
-      `select created_on from recommendations
-        where suppressed = false and primary_rec like $1
-        order by created_on desc limit 1`,
-      [`%"instrumentId":"${rec.primary.instrumentId}"%`],
-    );
-    if (prior !== undefined) {
-      const priorIso =
-        prior.created_on instanceof Date
-          ? prior.created_on.toISOString().slice(0, 10)
-          : String(prior.created_on).slice(0, 10);
+  if (rec.primary.action === 'BUY' && rec.primary.instrumentId !== null
+    && !(await isFundTopUp(db, rec.kind, rec.primary.instrumentId))) {
+    const priorIso = await lastRecommendedOn(db, rec.primary.instrumentId);
+    if (priorIso !== null) {
       const months = monthsBetween(priorIso, rec.createdOn);
       if (months < MIN_HOLD_MONTHS) {
         if (opts.override === undefined) {
@@ -334,16 +330,6 @@ export async function gateRecommendation(
   }
 
   return { allowed: true, reason: null };
-}
-
-function monthsBetween(fromIso: string, toIso: string): number {
-  const a = new Date(`${fromIso}T00:00:00Z`);
-  const b = new Date(`${toIso}T00:00:00Z`);
-  return (
-    (b.getUTCFullYear() - a.getUTCFullYear()) * 12 +
-    (b.getUTCMonth() - a.getUTCMonth()) -
-    (b.getUTCDate() < a.getUTCDate() ? 1 : 0)
-  );
 }
 
 export interface PersistResult {

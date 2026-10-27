@@ -242,6 +242,44 @@ describe('FR-12 caps', () => {
     expect(overridden.allowed).toBe(true);
   });
 
+  describe('fund top-ups are exempt from the hold (owner, 2026-10-27); stocks are not', () => {
+    const topUp = (instrumentId: string, createdOn: string) => buildRecommendation({
+      kind: 'rebalance', createdOn,
+      primary: leg({ intent: 'top up Flexi cap toward the approved fund mix', instrumentId }),
+    });
+    beforeEach(async () => {
+      await db.query(`insert into instruments (id, kind, name, currency) values
+        ('MF:TOPUP', 'MF', 'A Flexi Cap Fund', 'INR'), ('NSE:TOPUPETF', 'ETF', 'An Index ETF', 'INR'),
+        ('NSE:TOPUPGOLD', 'GOLD', 'A Gold ETF', 'INR'), ('NSE:STOCKX', 'EQUITY', 'A Stock', 'INR') on conflict do nothing`);
+    });
+
+    it('a fund, ETF or gold top-up recommended a month ago is allowed', async () => {
+      for (const id of ['MF:TOPUP', 'NSE:TOPUPETF', 'NSE:TOPUPGOLD']) {
+        expect((await persistRecommendation(db, topUp(id, '2026-08-01'))).suppressed).toBe(false);
+        expect(await gateRecommendation(db, topUp(id, '2026-09-01'))).toEqual({ allowed: true, reason: null });
+      }
+      // A switch into a fund is not a top-up: the hold still applies to it.
+      const sw = buildRecommendation({ kind: 'mf_switch', createdOn: '2026-09-01', primary: leg({ intent: 'switch', instrumentId: 'MF:TOPUP' }) });
+      expect((await gateRecommendation(db, sw)).reason).toMatch(/^FR-12: MF:TOPUP/);
+    });
+
+    it('a stock BUY a month later is still refused, whatever the recommendation kind', async () => {
+      await persistRecommendation(db, rec({ instrumentId: 'NSE:STOCKX' }, '2026-08-01'));
+      const satellite = await gateRecommendation(db, rec({ instrumentId: 'NSE:STOCKX' }, '2026-09-01'));
+      expect(satellite.allowed).toBe(false);
+      expect(satellite.reason).toMatch(/^FR-12: NSE:STOCKX was last recommended on 2026-08-01/);
+      // The instrument decides, not the label: a stock labelled 'rebalance' is still held.
+      const labelled = await gateRecommendation(db, topUp('NSE:STOCKX', '2026-09-01'));
+      expect(labelled.allowed).toBe(false);
+      expect(labelled.reason).toMatch(/^FR-12: NSE:STOCKX/);
+    });
+  });
+
+  it('dates the hold from the last BUY only: a SELL on the name does not block a BUY', async () => {
+    await persistRecommendation(db, rec({ intent: 'exit', instrumentId: 'NSE:SOLD', action: 'SELL' }, '2026-08-01'));
+    expect((await gateRecommendation(db, rec({ instrumentId: 'NSE:SOLD' }, '2026-09-01'))).allowed).toBe(true);
+  });
+
   it('takes only the three listed override events', async () => {
     await persistRecommendation(db, rec({}, '2026-08-01'));
     for (const ev of OVERRIDE_EVENTS) {

@@ -17,10 +17,13 @@ import { recordLlmCall, recordProposal } from './proposals.js';
  * Outcomes are distinct: BUY/SELL/HOLD/WAIT are the model's decisions; NO_ACTION means
  * nothing was eligible (no call made); UNAVAILABLE means no key, a failed call or an
  * invalid reply. Neither of the last two is ever reported as HOLD.
+ *
+ * Funds first (Piece 3, advise-v3): fund candidates are shown first and are exempt from the
+ * company-news gate (a fund has no filings); a stock BUY must say why not a fund.
  */
 
-const ADVISE_PROMPT_VERSION = 'advise-v2';
-const ADVISE_SCHEMA_VERSION = 'advise-schema-v1';
+const ADVISE_PROMPT_VERSION = 'advise-v3';
+const ADVISE_SCHEMA_VERSION = 'advise-schema-v2';
 export type Decision = 'BUY' | 'SELL' | 'HOLD' | 'WAIT' | 'NO_ACTION' | 'UNAVAILABLE';
 
 const NEWS_LOOKBACK_DAYS = 90;
@@ -37,11 +40,14 @@ const PROMPT = [
   '- You never state an amount, a number of shares or a price: sizes are fixed by the system.',
   '- "budget" shows his monthly budget, the SIPs already running and what is free. It is context: you still never state an amount.',
   '- Signal parts are scores out of the stated maximum ("outOf"): 9 of 30 is weak, not good value.',
+  'Funds come first: a FUND candidate is preferred; a stock is the exception.',
+  'A stock BUY must also return "whyNotFund": why this stock and not a fund this month.',
   'Ask: would he be content holding this for five years, and what would have to be true for that to be wrong?',
   'Reply with JSON only:',
   '{"decision":"BUY|SELL|HOLD|WAIT","candidateId":"<id or null>","timing":"this_month|next_review",',
   ' "horizonYears":<number >= 1>,"rationale":"<= 120 words","keyRisk":"...","falsification":"what would prove it wrong",',
-  ' "counterargument":"the best case against","evidenceIds":["news:<id>",...],"alternates":["<candidateId>","WAIT"|"HOLD"]}',
+  ' "counterargument":"the best case against","evidenceIds":["news:<id>",...],"alternates":["<candidateId>","WAIT"|"HOLD"],',
+  ' "whyNotFund":"<required for a stock BUY>"}',
 ].join('\n');
 
 /**
@@ -64,6 +70,9 @@ type Part = { score: number | null; outOf: number };
 
 interface CandidateContext {
   candidate: { id: string; action: string; instrument: string; name: string; basis: string; constraints: string[] };
+  vehicle: Candidate['vehicle'];
+  /** A fund's type, the signed range for it and where it stands; null for a stock. */
+  fund: { fundType: string; targetRange: { minPct: number; maxPct: number }; actualPct: number; quality: string } | null;
   /** Each component with its maximum, so a model cannot read 9 of 30 as "good value". */
   signal: { composite: Part; valuation: Part; trend: Part; earnings: Part; fit: Part; scoreDate: string } | null;
   news: { evidenceId: string; publishedAt: string; type: string; headline: string; polarity: string; materiality: string; summary: string }[];
@@ -71,6 +80,18 @@ interface CandidateContext {
 }
 
 async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: CandidateContext | null; excluded: string | null }> {
+  const candidate = { id: c.id, action: c.action, instrument: c.instrumentId, name: c.name, basis: c.basis, constraints: c.constraints };
+  if (c.fund !== null) {
+    // A fund files no company news, so the news gate does not apply; nor does a stock signal.
+    return {
+      excluded: null,
+      ctx: {
+        candidate, vehicle: c.vehicle, signal: null, news: [], coverage: 'not applicable (fund)',
+        fund: { fundType: c.fund.fundType, targetRange: { minPct: c.fund.minBps / 100, maxPct: c.fund.maxBps / 100 },
+          actualPct: c.fund.actualBps / 100, quality: c.fund.quality },
+      },
+    };
+  }
   const cov = await newsCoverage(db, c.instrumentId, now);
   if (cov.state !== 'fresh') return { ctx: null, excluded: `${c.name}: news coverage is ${cov.state}` };
 
@@ -95,7 +116,7 @@ async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: Candi
   return {
     excluded: null,
     ctx: {
-      candidate: { id: c.id, action: c.action, instrument: c.instrumentId, name: c.name, basis: c.basis, constraints: c.constraints },
+      candidate, vehicle: c.vehicle, fund: null,
       signal: sig ? {
         composite: { score: Number(sig.composite), outOf: 100 },
         valuation: { score: n(sig.reg_valuation), outOf: SATELLITE_WEIGHTS.valuation },
@@ -116,6 +137,7 @@ async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: Candi
 interface ModelDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WAIT'; candidateId: string | null; timing: string; horizonYears: number;
   rationale: string; keyRisk: string; falsification: string; counterargument: string; evidenceIds: string[]; alternates: string[];
+  whyNotFund: string | null;
 }
 
 function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecision {
@@ -125,11 +147,13 @@ function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecisio
   if (!['BUY', 'SELL', 'HOLD', 'WAIT'].includes(decision)) throw new Error(`unknown decision ${decision}`);
   const candidateId = d['candidateId'] === null || d['candidateId'] === undefined ? null : String(d['candidateId']);
   const byId = new Map(shown.map((s) => [s.candidate.id, s]));
+  const whyNotFund = typeof d['whyNotFund'] === 'string' ? d['whyNotFund'].trim() || null : null;
   if (decision === 'BUY' || decision === 'SELL') {
     const c = candidateId ? byId.get(candidateId) : undefined;
     if (!c) throw new Error(`candidate ${candidateId} was not offered`);
     const allowed = c.candidate.action === 'BUY' ? ['BUY'] : ['SELL'];
     if (!allowed.includes(decision)) throw new Error(`${decision} does not match candidate action ${c.candidate.action}`);
+    if (decision === 'BUY' && c.vehicle === 'STOCK' && whyNotFund === null) throw new Error('a stock BUY must say why not a fund (whyNotFund)');
   } else if (candidateId !== null && !byId.has(candidateId)) {
     throw new Error(`candidate ${candidateId} was not offered`);
   }
@@ -150,7 +174,7 @@ function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecisio
   return {
     decision: decision as ModelDecision['decision'], candidateId, timing: String(d['timing'] ?? 'next_review'),
     horizonYears: Number.isFinite(horizonYears) ? horizonYears : 0, rationale,
-    keyRisk: text('keyRisk'), falsification: text('falsification'), counterargument: text('counterargument'), evidenceIds, alternates,
+    keyRisk: text('keyRisk'), falsification: text('falsification'), counterargument: text('counterargument'), evidenceIds, alternates, whyNotFund,
   };
 }
 
@@ -166,6 +190,8 @@ export async function runAdvisor(
     const { ctx, excluded: why } = await contextFor(db, c, now);
     if (ctx) shown.push(ctx); else excluded.push(why!);
   }
+  // Funds first: the model reads fund candidates before any stock (stable within each).
+  shown.sort((a, b) => Number(a.vehicle === 'STOCK') - Number(b.vehicle === 'STOCK'));
   // The budget goes into the snapshot exactly as sent, so a replay sees what the model saw.
   const budget = opts.budget ? { budget: opts.budget } : {};
   const snapshot = { asOf: opts.asOf, shown, excluded, ...budget };
@@ -224,7 +250,9 @@ export async function runAdvisor(
       [...decided.evidenceIds, ...adverse.map((a) => a.evidenceId)]);
   }
   if (decided.decision === 'BUY' || decided.decision === 'SELL') {
-    return save(decided.decision, { ...base, amountPaise: chosen!.amountPaise?.toString() ?? null, units: chosen!.units }, model, decided.evidenceIds);
+    // whyNotFund is kept only where it is required: a stock BUY.
+    const whyNotFund = decided.decision === 'BUY' && chosen!.vehicle === 'STOCK' ? { whyNotFund: decided.whyNotFund } : {};
+    return save(decided.decision, { ...base, amountPaise: chosen!.amountPaise?.toString() ?? null, units: chosen!.units, ...whyNotFund }, model, decided.evidenceIds);
   }
   return save(decided.decision, base, model, decided.evidenceIds);
 }

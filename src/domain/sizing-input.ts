@@ -2,7 +2,9 @@ import type { Db } from '../db/client.js';
 import { loadPositions } from './networth.js';
 import { railPaise } from './rails.js';
 import { loadFreeEnvelope } from './sips.js';
-import { BANDS } from './engine.js';
+import { loadStockChecks } from './stock-checks.js';
+import { CAPS } from './allocation.js';
+import { loadFundCandidates } from './fund-mix.js';
 import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
 import type { SizingInput } from './sizing.js';
 import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
@@ -16,7 +18,7 @@ import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales
  */
 const OPEN = ['PENDING_APPROVAL', 'MODIFIED', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'];
 
-export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput> {
+export async function loadSizingInput(db: Db, asOf: string, now = new Date()): Promise<SizingInput> {
   const positions = await loadPositions(db);
   const portfolio = positions.reduce((s, p) => s + p.valuePaise, 0n);
   const cash = idleBankCash(positions, await loadBucketBalances(db));
@@ -50,14 +52,13 @@ export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput
        from prices_eod order by instrument_id, trade_date desc`,
   );
 
-  const [latestScore] = await db.query<{ d: string | null }>(`select max(score_date)::text as d from signal_scores`);
-  const buys = latestScore?.d
-    ? await db.query<{ instrument_id: string; name: string; kind: string; composite: string }>(
-      `select s.instrument_id, i.name, i.kind, s.composite::text from signal_scores s join instruments i on i.id = s.instrument_id
-        where s.score_date = $1 and s.quality_passed and s.composite >= $2`,
-      [latestScore.d, BANDS.medium],
-    )
-    : [];
+  // The stock gate (Piece 3): composite ≥ BANDS.high, the quality gate and five fail-closed
+  // checks (`isPassed`). Everything else never reaches sizing.
+  const passed = (await loadStockChecks(db, asOf, now)).filter((s) => s.passed);
+  const kinds = passed.length === 0 ? [] : await db.query<{ id: string; kind: string }>(
+    `select id, kind from instruments where id = any($1)`, [passed.map((s) => s.instrumentId)]);
+  const kindOf = new Map(kinds.map((k) => [k.id, k.kind]));
+  const buys = passed.map((s) => ({ instrumentId: s.instrumentId, name: s.name, kind: kindOf.get(s.instrumentId)!, score: s.composite! }));
 
   const sells = await db.query<{ instrument_id: string; name: string; kind: string; action: 'SELL' | 'TRIM'; amount_paise: string | null; blocked_by_minimum_hold: boolean; trigger_code: string; evidence: string }>(
     `select e.instrument_id, i.name, i.kind, e.action, e.amount_paise::text, e.blocked_by_minimum_hold, e.trigger_code, e.evidence
@@ -84,11 +85,13 @@ export async function loadSizingInput(db: Db, asOf: string): Promise<SizingInput
       kind: p.kind, costKnown: p.avgCostPaise !== null,
     })),
     quotes: new Map(quotes.map((q) => [q.instrument_id, { pricePaise: BigInt(q.close_paise), asOf: q.trade_date }])),
-    buys: buys.map((b) => ({ instrumentId: b.instrument_id, name: b.name, kind: b.kind, score: Number(b.composite) })),
+    buys,
     sells: sells.map((s) => ({
       instrumentId: s.instrument_id, name: s.name, kind: s.kind, action: s.action,
       amountPaise: s.amount_paise === null ? null : BigInt(s.amount_paise),
       blockedByMinimumHold: s.blocked_by_minimum_hold, reason: `${s.trigger_code}: ${s.evidence}`,
     })),
+    funds: await loadFundCandidates(db, asOf),
+    singleSchemeCapPct: Math.round(CAPS.singleMfScheme * 100),
   };
 }

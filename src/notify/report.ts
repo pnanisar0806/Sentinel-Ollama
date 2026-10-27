@@ -15,6 +15,7 @@ import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../dom
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
 import { railPaise } from '../domain/rails.js';
 import { CAPS, satelliteFit } from '../domain/allocation.js';
+import { NON_CORE_TYPES, typeOf } from '../domain/fund-mix.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/redemptions.js';
 import {
   buildRecommendation,
@@ -190,13 +191,21 @@ async function runSignalReview(
   }
 
   const inputs = await loadEngineInputs(db, asOf, { gsecYieldPct });
+  // IPS §3.4 (amended 2026-10-23): typed MID, SMALL and LARGE_ACTIVE funds count against
+  // the 30% non-core cap alongside direct stocks.
+  const nonCoreFundIds = new Set<string>();
+  for (const p of positions) {
+    if (p.assetClass !== 'EQUITY' || p.kind === 'EQUITY' || p.kind === 'RSU') continue;
+    const t = await typeOf(db, p.instrumentId);
+    if (t !== null && (NON_CORE_TYPES as readonly string[]).includes(t.type)) nonCoreFundIds.add(p.instrumentId);
+  }
   // These were `headroomPaise: 0n` and `sectorWeightPct: {}` written in by hand, so the
   // two halves of `fit` — 20 of the composite's 100 points — scored 0 and a full 10 for
   // every candidate on every run. Neither said anything about the name being scored.
   const ctx = {
     ...inputs.context,
     blockedIds: blocked,
-    fit: { ...satelliteFit(positions), sectorCapPct: CAPS.singleSector * 100 },
+    fit: { ...satelliteFit(positions, nonCoreFundIds), sectorCapPct: CAPS.singleSector * 100 },
   };
   const scored = inputs.candidates
     .map((c) => scoreSatellite(c, ctx))

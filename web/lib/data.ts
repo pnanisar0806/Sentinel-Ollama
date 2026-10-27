@@ -38,6 +38,13 @@ import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
 import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
+import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
+import {
+  FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, loadActualMix, loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady,
+  proposeMix, suggestSips, typeOf,
+  type ActualMix, type Finding, type FundCandidates, type FundType, type RangeRow, type SignedMix, type SipSuggestion,
+} from '../../src/domain/fund-mix.js';
+import { chooseIndexFund, loadIndexFundRows, type IndexFundChoice } from '../../src/sources/index-funds.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -699,6 +706,98 @@ export async function getMfSwitches(): Promise<{
   };
 }
 
+export type MixStatus = 'below midpoint' | 'in range' | 'above range' | '0% new money';
+
+export interface FundMixRow {
+  type: FundType;
+  label: string;
+  /** The signed range; null before the owner signs a proposal. */
+  target: RangeRow | null;
+  /** Floored bps of equity funds; null when no equity fund value is known (never 0%). */
+  actualBps: number | null;
+  /** Null on the same condition as actualBps: an unknown is never ₹0. */
+  valuePaise: bigint | null;
+  /** Null when either side is unknown. */
+  status: MixStatus | null;
+}
+
+function mixStatus(target: RangeRow | null, actualBps: number | null): MixStatus | null {
+  if (target === null || actualBps === null) return null;
+  if (!target.newMoney) return '0% new money';
+  if (actualBps > target.maxBps) return 'above range';
+  return actualBps < midBps(target) ? 'below midpoint' : 'in range';
+}
+
+/** /funds "Fund mix": the proposal, the signing in force, and target vs actual per type. */
+export async function getFundMix(): Promise<{
+  proposal: ReturnType<typeof proposeMix>;
+  signed: SignedMix | null;
+  newProposal: boolean;
+  actual: ActualMix;
+  findings: Finding[];
+  rows: FundMixRow[];
+}> {
+  const d = await db();
+  const now = new Date().toISOString();
+  const proposal = proposeMix(now);
+  const signed = await loadSignedMix(d);
+  const actual = await loadActualMix(d);
+  const rows = (Object.keys(FUND_TYPE_LABEL) as FundType[]).map((type) => {
+    const target = signed?.ranges.find((r) => r.type === type) ?? null;
+    const actualBps = actual.totalPaise > 0n ? actual.byType[type].shareBps : null;
+    return { type, label: FUND_TYPE_LABEL[type], target, actualBps, valuePaise: actualBps === null ? null : actual.byType[type].valuePaise, status: mixStatus(target, actualBps) };
+  });
+  return {
+    proposal, signed, newProposal: newProposalReady(signed, proposal, now), actual, findings: await loadFindings(d), rows,
+  };
+}
+
+/**
+ * /funds "Suggested SIPs" (Piece 3 Task 9): the live SIPs re-split toward the signed mix.
+ * A SIP is typed by its own ISIN first, then by its instrument. An unknown SIP total withholds
+ * the whole suggestion with the envelope's reason — never computed from a null read as 0.
+ */
+export async function getSipSuggestions(): Promise<{ rows: SipSuggestion[]; totalPaise: bigint } | { rows: null; reason: string }> {
+  const d = await db();
+  const now = new Date().toISOString();
+  const signed = await loadSignedMix(d);
+  if (signed === null) return { rows: null, reason: 'approve the fund mix first' };
+  const c = await loadSipCommitment(d, now);
+  if (c.totalPaise === null) return { rows: null, reason: (await loadFreeEnvelope(d, now)).reason ?? 'SIP commitment unknown' };
+  if (c.sips.length === 0) return { rows: null, reason: 'no active SIP on record — the indmoney-sips sync fills it' };
+  const isin = new Map((await d.query<{ sip_id: string; isin: string }>(
+    `select distinct sip_id, isin from sips where isin is not null and sip_id = any($1::text[])`, [c.sips.map((s) => s.sipId)],
+  )).map((r) => [r.sip_id, r.isin]));
+  const sips = [];
+  for (const s of c.sips) {
+    const t = FUND_TYPE_BY_ISIN[isin.get(s.sipId) ?? ''] ?? await typeOf(d, s.instrumentId);
+    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise });
+  }
+  const actual = await loadActualMix(d);
+  const types = Object.keys(FUND_TYPE_LABEL) as FundType[];
+  // A US / Next 50 new-fund row is named from the chooser's top pick (Task 10).
+  const { choices } = await getIndexFundChoices();
+  const rows = suggestSips({
+    sips, ranges: signed.ranges,
+    actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
+    heldByType: Object.fromEntries(types.map((t) => [t, actual.byType[t].holdings])) as Record<FundType, ActualMix['byType'][FundType]['holdings']>,
+    newFundNames: Object.fromEntries(choices.flatMap((c) => (c.top ? [[c.fundType, c.top.name]] : []))),
+  });
+  return { rows, totalPaise: sips.reduce((a, s) => a + s.amountPaise, 0n) };
+}
+
+/** /funds "New index fund" (Piece 3 Task 10): the latest day's candidates, ranked per type. */
+export async function getIndexFundChoices(): Promise<{ asOf: string | null; choices: IndexFundChoice[] }> {
+  const { asOf, rows } = await loadIndexFundRows(await db());
+  return { asOf, choices: (['US', 'NEXT50'] as const).map((t) => chooseIndexFund(rows, t)) };
+}
+
+/** /advisor "Fund candidates this month": held funds the sizer tries before any stock (Piece 3 Task 7). */
+export async function getFundCandidates(): Promise<FundCandidates> {
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  return loadFundCandidates(await db(), today);
+}
+
 export interface LogData {
   timeline: TimelineEntry[];
   buckets: { id: string; name: string }[];
@@ -810,6 +909,29 @@ export async function getAdvisor(): Promise<AdvisorData> {
     calibration: await calibrateByOrigin(d),
     names: await getInstrumentNames(),
   };
+}
+
+/**
+ * The Screener columns the five checks read (`loadStockChecks`), each with its accepted
+ * alternative. A column is missing when no row of the latest upload has a value in it.
+ */
+const CHECK_COLUMNS = [['Pledged %'], ['Promoter Holding', 'Promoter Chg 1Y'], ['CFO 5Y'], ['PAT 5Y'],
+  ['Profit 5Y CAGR', 'Profit 5Y CAGR %'], ['Sales 5Y CAGR', 'Sales 5Y CAGR %'], ['EPS']];
+
+/** /advisor "Stock checks": the five checks for every scored stock that passed quality, latest scores. */
+export async function getStockChecks(): Promise<{ asOf: string | null; rows: StockChecks[]; missingColumns: string[] }> {
+  const d = await db();
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const [s] = await d.query<{ d: string | null }>(`select max(score_date)::text as d from signal_scores where score_date <= $1`, [today]);
+  if (!s?.d) return { asOf: null, rows: [], missingColumns: [] };
+  const rows = (await loadStockChecks(d, today, new Date())).filter((r) => r.qualityPassed);
+  const uploaded = await d.query<{ data: string }>(
+    `select f.data from fundamentals f
+      where f.upload_id = (select id from screener_uploads where as_of <= $1 order by as_of desc, id desc limit 1)`, [today]);
+  const present = new Set(uploaded.flatMap((u) => Object.entries(JSON.parse(u.data) as Record<string, string>)
+    .filter(([, v]) => v.trim() !== '').map(([k]) => k)));
+  const missingColumns = uploaded.length === 0 ? [] : CHECK_COLUMNS.filter((alts) => !alts.some((k) => present.has(k))).map((alts) => alts[0]!);
+  return { asOf: s.d, rows, missingColumns };
 }
 
 export async function getInstrumentKinds(): Promise<Map<string, string>> {

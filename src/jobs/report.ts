@@ -18,6 +18,9 @@ import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
 import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
 import { formatInr, type Paise } from '../money/paise.js';
 import { loadBudgetMonth } from '../domain/controls.js';
+import { awaitingGovernance } from '../domain/stock-checks.js';
+import { backfillGovernance } from '../sources/news.js';
+import { fetchBseScrips, type BseScrip } from '../sources/bse.js';
 
 /**
  * FR-51 weekly deep report — `pnpm report [--as-of YYYY-MM-DD]`.
@@ -83,6 +86,26 @@ export async function advisorBudget(db: Db, nowIso: string): Promise<AdvisorBudg
 }
 
 /**
+ * Piece 3: a stock that passes the other four checks is held back only by an unchecked
+ * governance record, so its three years of BSE filings are fetched before sizing. The scrip
+ * list is fetched once for all of them. Any failure leaves the record unchecked, and an
+ * unchecked record is a failed check, so the stock simply stays out this month.
+ */
+async function backfillAwaiting(db: Db, asOf: string, now: Date, fetchImpl: typeof fetch = fetch): Promise<void> {
+  const waiting = await awaitingGovernance(db, asOf, now);
+  if (waiting.length === 0) return;
+  let scrips: BseScrip[];
+  try { scrips = await fetchBseScrips(fetchImpl); } catch (e) {
+    console.error(`governance backfill skipped: ${e instanceof Error ? e.message : String(e)}`);
+    return;
+  }
+  for (const id of waiting) {
+    const r = await backfillGovernance(db, id, now, { fetchImpl, scrips });
+    console.log(`governance backfill ${id}: ${r.state}`);
+  }
+}
+
+/**
  * Phase 2.5: the advisor decides once a month, in the same first successful weekly run
  * as the other proposals. It sizes candidates deterministically, reads their news, and
  * stores advice for the owner to sign on /advisor. Nothing here creates an order.
@@ -112,7 +135,9 @@ Advisor (${month}): held — ${budgetMonth.reason}.`;
 
 Advisor (${month}): held — ${envelope.reason ?? 'SIP data unknown'}. It runs at the next weekly report with fresh SIP data.`;
     }
-    const candidates = sizeCandidates(await loadSizingInput(db, asOf));
+    const now = new Date(generatedAt);
+    await backfillAwaiting(db, asOf, now, opts.fetchImpl);
+    const candidates = sizeCandidates(await loadSizingInput(db, asOf, now));
     // The report's own clock: the advisor sees the same envelope the rebalance sized against.
     const budget = await advisorBudget(db, generatedAt);
     const advice = await runAdvisor(db, { asOf, candidates, ...opts, budget });

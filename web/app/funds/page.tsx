@@ -1,13 +1,28 @@
-import { getMfRanking, getMfSwitches, getSips } from '@/lib/data';
-import { Badge, Card, DataTable, Money, Notice, PageHead, Stat } from '@/lib/ui';
+import { getFundMix, getIndexFundChoices, getMfRanking, getMfSwitches, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
+import { FUND_TYPE_LABEL, midBps } from '../../../src/domain/fund-mix';
+import { ASSUMPTIONS } from '../../../src/config/assumptions';
+import { ApproveMix } from './approve-mix';
 
 export const dynamic = 'force-dynamic';
 
+const pctOf = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`;
+const pctOf2 = (bps: number) => `${(bps / 100).toFixed(2)}%`;
+const STATUS_TONE: Record<MixStatus, Tone> = {
+  'below midpoint': 'amber', 'in range': 'green', 'above range': 'amber', '0% new money': 'gray',
+};
+
 export default async function FundsPage() {
+  const mix = await getFundMix();
+  const { proposal, signed, actual } = mix;
+  const unknownShare = actual.totalPaise === 0n;
+  const costUnstamped = mix.findings.some((f) => f.kind === 'cost' && f.text.startsWith('cost not compared'));
   const { ranked, caveats } = await getMfRanking();
   const { switches, margin } = await getMfSwitches();
   const sips = await getSips();
+  const suggested = await getSipSuggestions();
+  const indexFunds = await getIndexFundChoices();
   // Ranking rows carry the position id, which for an INDmoney fund is IND:<fund_id> — the
   // same id the SIP sync writes, so no canonical/sibling mapping is needed.
   // Active SIPs only: a SIP stopped this month still counts toward the month, but is not running.
@@ -20,6 +35,183 @@ export default async function FundsPage() {
         title="Mutual funds"
         sub="Every fund held, scored on consistency, cost and size."
       />
+
+      <Card
+        title="Fund mix: target vs actual"
+        aside={signed ? `signed ${signed.asOf.slice(0, 10)} · ${signed.band} years` : 'not signed'}
+      >
+        <DataTable
+          rows={[
+            ...mix.rows.map((r) => ({ key: r.type, r, u: null })),
+            ...actual.untyped.map((u) => ({ key: `u:${u.instrumentId}`, r: null, u })),
+          ]}
+          cols={[
+            { label: 'Type', value: ({ r, u }) => (r ? r.label : <><span className="dim">type unknown</span> · {u!.name}</>) },
+            {
+              label: 'Target',
+              value: ({ r }) => (r === null ? '—'
+                : r.target === null ? <span className="dim">not set — approve the proposal below</span>
+                : `${pctOf(r.target.minBps)}–${pctOf(r.target.maxBps)}`),
+            },
+            {
+              label: 'Actual',
+              value: ({ r, u }) => (unknownShare ? <span className="dim">unknown</span>
+                : r ? pctOf(r.actualBps!)
+                : pctOf(Number((u!.valuePaise * 10_000n) / actual.totalPaise))),
+            },
+            {
+              label: 'Held',
+              value: ({ r, u }) => (unknownShare ? <span className="dim">—</span>
+                : <Money p={(r ? r.valuePaise : u!.valuePaise) as never} />),
+            },
+            {
+              label: 'Status',
+              value: ({ r }) => (r?.status ? <Badge tone={STATUS_TONE[r.status]}>{r.status}</Badge> : <span className="dim">—</span>),
+            },
+          ]}
+        />
+        {unknownShare ? (
+          <p className="muted">
+            No equity fund value is known yet, so the actual mix and what is held are unknown.
+            The daily <span className="mono">pnpm sync</span> fills holdings.
+          </p>
+        ) : null}
+        {actual.untyped.length > 0 ? (
+          <p className="muted">
+            A fund of unknown type counts in the total but is never a top-up candidate. Its type
+            is set in <span className="mono">src/domain/fund-mix.ts</span>, keyed by ISIN.
+          </p>
+        ) : null}
+      </Card>
+
+      <Card
+        title="Proposal"
+        aside={`equity serves FI, ~${ASSUMPTIONS.ownerBirthYear + ASSUMPTIONS.fiTargetAge}, ${proposal.horizonYears} years`}
+      >
+        {proposal.band === null ? (
+          <Notice tone="amber">{proposal.reason}</Notice>
+        ) : (
+          <>
+            <DataTable
+              rows={proposal.ranges.map((r) => ({ key: r.type, r }))}
+              cols={[
+                { label: 'Type', value: ({ r }) => FUND_TYPE_LABEL[r.type] },
+                { label: 'Range', value: ({ r }) => `${pctOf(r.minBps)}–${pctOf(r.maxBps)}` },
+                { label: 'Midpoint', value: ({ r }) => pctOf(midBps(r)) },
+                { label: 'New money', value: ({ r }) => (r.newMoney ? 'yes' : <Badge tone="gray">0% new money</Badge>) },
+                { label: 'Why', value: ({ r }) => <span className="dim">{r.reason}</span> },
+              ]}
+            />
+            {mix.newProposal ? (
+              <Notice tone="amber">
+                A new proposal is ready for the {proposal.band}-year band. The signed ranges stay
+                in force until you sign this one.
+              </Notice>
+            ) : null}
+            {signed === null || mix.newProposal
+              ? <ApproveMix band={proposal.band} label={`Approve the ${proposal.band}-year ranges`} />
+              : <p className="muted">These ranges are signed and in force since {signed.asOf.slice(0, 10)}.</p>}
+          </>
+        )}
+
+        <h2 className="section-title">Findings</h2>
+        {mix.findings.length === 0 ? (
+          <p className="muted">No overlap, cost or single-scheme finding for the funds held.</p>
+        ) : (
+          <ul className="notyet-points">
+            {mix.findings.map((f, i) => (
+              <li key={`${f.kind}:${f.instrumentId ?? ''}:${i}`}>
+                <Badge tone={f.kind === 'scheme_cap' ? 'amber' : 'gray'}>{f.kind.replace('_', ' ')}</Badge> {f.text}
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="muted">
+          Informational. The single-scheme finding counts ETFs as schemes (an ETF is a mutual
+          fund scheme); the concentration check and the sell triggers look at mutual funds only.
+        </p>
+        {costUnstamped ? (
+          <Notice tone="amber">
+            Cost is not compared until held funds carry an AMFI category with peers&rsquo; expense
+            ratios. <span className="mono">pnpm mf:universe</span> fills it.
+          </Notice>
+        ) : null}
+      </Card>
+
+      <Card title="Suggested SIPs" aside="toward the signed mix · never sells">
+        {suggested.rows === null ? (
+          <Notice tone="amber">No suggestion: {suggested.reason}.</Notice>
+        ) : (
+          <>
+            <DataTable
+              rows={suggested.rows.map((s, i) => ({ key: `${s.instrumentId ?? 'new'}:${s.fundType ?? 'u'}:${i}`, s }))}
+              cols={[
+                { label: 'Fund', value: ({ s }) => (s.instrumentId === null ? <span className="dim">{s.fundName}</span> : s.fundName) },
+                { label: 'Type', value: ({ s }) => (s.fundType === null ? <span className="dim">type unknown</span> : FUND_TYPE_LABEL[s.fundType]) },
+                {
+                  label: 'Current → suggested', align: 'right',
+                  value: ({ s }) => <span className="tnum"><Money p={s.currentPaise as never} /> → <strong><Money p={s.suggestedPaise as never} /></strong></span>,
+                },
+                { label: 'Why', value: ({ s }) => <span className="dim">{s.reason}</span> },
+              ]}
+            />
+            <p className="muted">
+              Total unchanged at <Money p={suggested.totalPaise as never} />. Each amount is rounded
+              down to a whole ₹100; the remainder goes to the Nifty 50 index fund. Change SIPs in
+              INDmoney; the next sync shows them here.
+            </p>
+          </>
+        )}
+      </Card>
+
+      {indexFunds.choices.map((c) => {
+        const picks = c.top === null ? [] : [c.top, ...c.alternatives];
+        // Each type carries its own latest as-of: a missed listing leaves the last good one.
+        const asOf = picks[0]?.asOf ?? c.notProposed[0]?.row.asOf ?? null;
+        return (
+          <Card key={c.fundType} title={`New index fund: ${FUND_TYPE_LABEL[c.fundType]}`} aside={asOf ? `INDmoney · as of ${asOf}` : undefined}>
+            {asOf === null ? (
+              <Notice tone="amber">
+                No candidates on record — they are read by the daily <span className="mono">pnpm sync</span>.
+              </Notice>
+            ) : (
+              <>
+                {c.reason ? <Notice tone="amber">{c.reason}.</Notice> : null}
+                {picks.length > 0 ? (
+                  <DataTable
+                    rows={picks.map((r, i) => ({ key: r.indmoneyFundId, r, i }))}
+                    cols={[
+                      { label: '', value: ({ i }) => (i === 0 ? <Badge tone="green">top choice</Badge> : <Badge tone="gray">alternative</Badge>) },
+                      { label: 'Fund', value: ({ r }) => r.name },
+                      { label: 'Expense ratio', align: 'right', value: ({ r }) => pctOf2(r.expenseRatioBps!) },
+                      { label: 'Tracking error', align: 'right', value: ({ r }) => (r.trackingErrorBps === null ? <span className="dim">unavailable</span> : pctOf2(r.trackingErrorBps)) },
+                      { label: 'AUM', align: 'right', value: ({ r }) => <Money p={r.aumPaise! as never} /> },
+                      { label: 'Source', value: ({ r }) => <span className="dim">{r.source} · {r.asOf}</span> },
+                    ]}
+                  />
+                ) : null}
+                {c.notProposed.length > 0 ? (
+                  <>
+                    <h2 className="section-title">Not proposed</h2>
+                    <DataTable
+                      rows={c.notProposed.map((n) => ({ key: n.row.indmoneyFundId, n }))}
+                      cols={[
+                        { label: 'Fund', value: ({ n }) => n.row.name },
+                        { label: 'Why', value: ({ n }) => <span className="dim">{n.why}</span> },
+                      ]}
+                    />
+                  </>
+                ) : null}
+                <p className="muted">
+                  Ranked on expense ratio, then tracking error, then size.
+                  {c.trackingErrorAvailable ? null : ' Tracking error unavailable from INDmoney, so it does not rank.'}
+                  {' '}Open it in INDmoney as a Direct Growth SIP; once the sync sees it, it is a held fund like any other.
+                </p>
+              </>
+            )}
+          </Card>
+        );
+      })}
 
       {ranked.length === 0 ? (
         <Notice tone="amber">

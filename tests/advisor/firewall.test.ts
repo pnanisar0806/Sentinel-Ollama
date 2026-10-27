@@ -47,6 +47,8 @@ const FORBIDDEN = [
   'src/domain/orders.ts', 'src/domain/order-drafting.ts', 'src/domain/controls.ts',
   'src/domain/funded-status.ts', 'src/domain/recommendations.ts', 'src/domain/exit-promotion.ts',
   'src/notify/telegram-bot.ts', 'src/db/migrate.ts',
+  // The owner's fund-mix signature (approveMix) and the fund loaders. Pure fund types live in fund-types.ts.
+  'src/domain/fund-mix.ts',
 ];
 
 /** The only tables advisor code may write. */

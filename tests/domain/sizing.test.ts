@@ -6,6 +6,7 @@ import { seed } from '../../src/seed/seed.js';
 import { istDate, loadFreeEnvelope, persistSipSnapshot } from '../../src/domain/sips.js';
 import { logPurchase, logSale } from '../../src/domain/owner-log.js';
 import { loadSizingInput } from '../../src/domain/sizing-input.js';
+import { GATE_AS_OF, GATE_NOW, clearGovernance, seedGateStocks } from '../fixtures/stock-gate.js';
 
 /**
  * Phase 2.5 Task 4. The LLM advisor chooses among candidates; this decides how much. Every
@@ -26,6 +27,8 @@ const base = (over: Partial<SizingInput> = {}): SizingInput => ({
   quotes: new Map([['NSE:A', { pricePaise: 123_450n, asOf: '2026-09-26' }], ['NSE:B', { pricePaise: 80_000n, asOf: '2026-09-26' }]]),
   buys: [{ instrumentId: 'NSE:A', name: 'A Ltd', kind: 'EQUITY', score: 80 }],
   sells: [],
+  funds: { approved: true, buys: [], typesBelowMidpoint: [], excluded: [] },
+  singleSchemeCapPct: 35,
   ...over,
 });
 const eligible = (c: ReturnType<typeof sizeCandidates>) => c.filter((x) => x.status === 'ELIGIBLE');
@@ -158,6 +161,22 @@ describe('loadSizingInput offers at most what remains this month (SIP gaps Task 
   });
 });
 
+describe('loadSizingInput buys only stocks that pass the gate (Piece 3 Task 3)', () => {
+  it('composite ≥ 85, quality passed and five PASSes; one FAIL or composite 84 is out', async () => {
+    const db = await openDb();
+    await runMigrations(db);
+    await seedGateStocks(db, [
+      { id: 'NSE:PLEDGED', composite: 92, data: { 'Pledged %': '0.5' } },
+      { id: 'NSE:LOW', composite: 84 },
+      { id: 'NSE:GOOD', composite: 86 },
+    ]);
+    for (const id of ['NSE:PLEDGED', 'NSE:LOW', 'NSE:GOOD']) await clearGovernance(db, id, GATE_NOW);
+    const input = await loadSizingInput(db, GATE_AS_OF, GATE_NOW);
+    expect(input.buys).toEqual([{ instrumentId: 'NSE:GOOD', name: 'GOOD Ltd', kind: 'EQUITY', score: 86 }]);
+    await db.close();
+  });
+});
+
 describe('loadSizingInput counts manual-seed units after logged sales (final review I-1 sibling)', () => {
   it('US:NOW has 68 units to sell after a 10-of-78 sale, not the raw seed 78', async () => {
     const db = await openDb();
@@ -169,3 +188,74 @@ describe('loadSizingInput counts manual-seed units after logged sales (final rev
     await db.close();
   });
 });
+
+describe('funds before stocks (Piece 3 Task 7)', () => {
+  type FundBuy = SizingInput['funds']['buys'][number];
+  const fund = (instrumentId: string, gapBps: number, heldPaise: bigint): FundBuy => ({
+    instrumentId, name: instrumentId, kind: 'MF', fundType: 'MID', gapBps, actualBps: 2500 - gapBps, midBps: 2500, minBps: 2000, maxBps: 3000, heldPaise, quality: `rank 1 of 9 in Mid Cap`,
+  });
+  const funds = (buys: FundBuy[], typesBelowMidpoint: SizingInput['funds']['typesBelowMidpoint'] = ['MID']) =>
+    ({ approved: true, buys, typesBelowMidpoint, excluded: [] });
+  const fundIds = (out: ReturnType<typeof sizeCandidates>, f: FundBuy[]) => out.filter((c) => f.some((b) => b.instrumentId === c.instrumentId));
+
+  it('sizes the largest gap first with the whole tranche; the next waits a month', () => {
+    const buys = [fund('MF:SMALLGAP', 500, 0n), fund('MF:BIGGAP', 2000, 0n)];
+    const input = base({ buys: [], funds: funds(buys) });
+    const out = sizeCandidates(input);
+    const tranche = min(input.tacticalBudgetPaise, input.maxOrderPaise, input.cashAvailablePaise!);
+    expect(out[0]).toMatchObject({ instrumentId: 'MF:BIGGAP', action: 'BUY', status: 'ELIGIBLE', amountPaise: tranche, units: null, vehicle: 'FUND',
+      fund: { fundType: 'MID', actualBps: 500, midBps: 2500, minBps: 2000, maxBps: 3000, quality: 'rank 1 of 9 in Mid Cap' } });
+    expect(out[1]).toMatchObject({ instrumentId: 'MF:SMALLGAP', status: 'WITHHELD', withheldReason: expect.stringMatching(/already used/), vehicle: 'FUND' });
+  });
+
+  it('withholds a fund the tranche would take past the 35% scheme cap, and tries the next', () => {
+    const input = base({ buys: [] });
+    const cap = (input.portfolioPaise * 35n) / 100n;
+    const held = (input.portfolioPaise * 344n) / 1000n; // 34.4%: held + tranche > cap
+    expect(held + input.tacticalBudgetPaise > cap).toBe(true);
+    const out = sizeCandidates({ ...input, funds: funds([fund('MF:NEARCAP', 2000, held), fund('MF:NEXT', 500, 0n)]) });
+    expect(out[0]).toMatchObject({ instrumentId: 'MF:NEARCAP', status: 'WITHHELD', amountPaise: null,
+      withheldReason: 'would take it above the 35% single-scheme cap (IPS §3.5)' });
+    expect(out[1]).toMatchObject({ instrumentId: 'MF:NEXT', status: 'ELIGIBLE', amountPaise: input.tacticalBudgetPaise });
+  });
+
+  it('withholds a passing stock while a fund type is below its midpoint; sizes it when none is', () => {
+    const behind = sizeCandidates(base({ funds: funds([], ['MID', 'US']) }));
+    expect(behind).toHaveLength(1);
+    expect(behind[0]).toMatchObject({ instrumentId: 'NSE:A', status: 'WITHHELD', vehicle: 'STOCK', fund: null,
+      withheldReason: 'not this month — a fund is below target (Mid cap, US index)' });
+    const clear = sizeCandidates(base({ funds: funds([], []) }));
+    expect(clear[0]).toMatchObject({ instrumentId: 'NSE:A', status: 'ELIGIBLE', vehicle: 'STOCK' });
+  });
+
+  it('withholds every stock BUY before a mix is signed', () => {
+    const out = sizeCandidates(base({ funds: { approved: false, buys: [], typesBelowMidpoint: [], excluded: [] } }));
+    expect(out[0]).toMatchObject({ status: 'WITHHELD', withheldReason: 'no approved fund mix yet — approve it on /funds' });
+  });
+
+  it('a fund is withheld on unknown cash, and on a zero envelope with its reason (Review Focus 5)', () => {
+    const f = [fund('MF:F', 2000, 0n)];
+    expect(sizeCandidates(base({ buys: [], funds: funds(f), cashAvailablePaise: null }))[0])
+      .toMatchObject({ status: 'WITHHELD', withheldReason: 'cash available cannot be established' });
+    expect(sizeCandidates(base({ buys: [], funds: funds(f), tacticalBudgetPaise: 0n, envelopeReason: 'SIPs already use the whole budget' }))[0])
+      .toMatchObject({ status: 'WITHHELD', withheldReason: 'SIPs already use the whole budget' });
+  });
+
+  it('never sells from a fund candidate; a sale keeps its vehicle by kind', () => {
+    const f = [fund('MF:A', 2000, 0n), fund('MF:B', 1000, 400_000_000n), fund('MF:C', 10, 0n)];
+    for (const over of [{}, { cashAvailablePaise: null }, { tacticalBudgetPaise: 0n, envelopeReason: 'x' }]) {
+      const out = fundIds(sizeCandidates(base({ ...over, buys: [], funds: funds(f) })), f);
+      expect(out).toHaveLength(3);
+      expect(out.every((c) => c.action === 'BUY' && c.vehicle === 'FUND')).toBe(true);
+    }
+    const sells = sizeCandidates(base({
+      buys: [],
+      holdings: [{ instrumentId: 'MF:X', valuePaise: 1_000n, units: null, kind: 'MF', costKnown: true }, { instrumentId: 'NSE:B', valuePaise: 80_000n, units: '1', kind: 'EQUITY', costKnown: true }],
+      sells: [{ instrumentId: 'MF:X', name: 'X', kind: 'MF', action: 'SELL', amountPaise: null, blockedByMinimumHold: false, reason: 'r' },
+        { instrumentId: 'NSE:B', name: 'B', kind: 'EQUITY', action: 'SELL', amountPaise: null, blockedByMinimumHold: false, reason: 'r' }],
+    }));
+    expect(sells.map((c) => [c.instrumentId, c.vehicle])).toEqual([['MF:X', 'FUND'], ['NSE:B', 'STOCK']]);
+  });
+});
+
+const min = (...xs: bigint[]): bigint => xs.reduce((m, x) => (x < m ? x : m));

@@ -187,8 +187,8 @@ export function concentration(positions: Position[]): Concentration {
   };
 }
 
-/** IPS §3.4: the satellite bucket is capped at 25% of equity. */
-const SATELLITE_CAP_PCT = 25;
+/** IPS §3.4 (amended 2026-10-23): the non-core bucket is capped at 30% of equity. */
+const SATELLITE_CAP_PCT = 30;
 
 interface SatelliteFit {
   /** Room left under the §3.4 cap. 0n when the bucket is full or over. */
@@ -205,8 +205,10 @@ interface SatelliteFit {
  * 10 for every candidate, on every run. Twenty of the composite's hundred points said
  * nothing about the name being scored: one half pinned to the floor, one to the ceiling.
  *
- * **Satellite is agent-recommended DIRECT stocks** (IPS §3.4, core-satellite 75/25).
- * `kind === 'EQUITY'` is that set. The employer RSU is `kind === 'RSU'`: it counts toward
+ * **Non-core is agent-recommended DIRECT stocks plus typed MID, SMALL and LARGE_ACTIVE
+ * funds** (IPS §3.4, core-satellite 70/30, amended by the owner 2026-10-23).
+ * `kind === 'EQUITY'` is the stock half; `nonCoreFundIds` is the fund half, built by the
+ * caller with `typeOf` (fund typing needs the DB, this function does not). The employer RSU is `kind === 'RSU'`: it counts toward
  * equity, because it is equity, but never toward the satellite bucket — it is neither
  * agent-recommended nor sellable at will, and counting it would consume the whole bucket
  * on a position the advisor did not choose.
@@ -216,11 +218,15 @@ interface SatelliteFit {
  * into an "unknown" bucket, which would compete against real sectors for the cap and
  * read as a genuine concentration.
  */
-export function satelliteFit(positions: Position[]): SatelliteFit {
+export function satelliteFit(
+  positions: Position[],
+  /** Required: a caller that forgot it would undercount the 30% cap without warning. */
+  nonCoreFundIds: ReadonlySet<string>,
+): SatelliteFit {
   const sum = (rows: Position[]): bigint => rows.reduce((a, p) => a + p.valuePaise, 0n);
 
   const equityPaise = sum(positions.filter((p) => p.assetClass === 'EQUITY'));
-  const satellitePaise = sum(positions.filter((p) => p.kind === 'EQUITY'));
+  const satellitePaise = sum(positions.filter((p) => p.kind === 'EQUITY' || nonCoreFundIds.has(p.instrumentId)));
   const allowed = (equityPaise * BigInt(SATELLITE_CAP_PCT)) / 100n;
   const headroomPaise = allowed > satellitePaise ? allowed - satellitePaise : 0n;
 

@@ -133,7 +133,7 @@ const FLOW_HORIZON_MONTHS = 12n;
  *
  * - **Add to what is already held** ("prefer adding to conviction over rotating between
  *   names") — the largest existing holding in the class.
- * - **EQUITY goes to the core** (IPS §3.4: core is ≥75% of equity flows, index
+ * - **EQUITY goes to the core** (IPS §3.4: core is ≥70% of equity flows, index
  *   instruments). A rebalance top-up is a core flow, never a satellite stock pick; those
  *   come only from the satellite engine with a thesis. So only index-like holdings count.
  * - Instruments that cannot take money are skipped: EPF (payroll-only) and bonds (a

@@ -404,7 +404,7 @@ export function cagrPct(navs: readonly bigint[]): number | null {
 }
 
 /** The middle value, or the mean of the middle pair. */
-function median(xs: readonly number[]): number | null {
+export function median(xs: readonly number[]): number | null {
   if (xs.length === 0) return null;
   const sorted = [...xs].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -499,10 +499,13 @@ interface EngineInputs {
 }
 
 /** Screener raw-column names read back out of `fundamentals.data`. */
-function rawNumber(data: Record<string, string> | null, key: string): number | null {
+export function rawNumber(data: Record<string, string> | null, key: string): number | null {
   const v = data?.[key];
   if (v === undefined) return null;
-  const n = Number(v.replace(/,/g, '').replace(/%/g, '').trim());
+  const s = v.replace(/,/g, '').replace(/%/g, '').trim();
+  // Number('') is 0: a blank cell is unknown, never zero.
+  if (s === '') return null;
+  const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 

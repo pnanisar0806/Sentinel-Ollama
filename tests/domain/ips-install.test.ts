@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
-import { installIps, currentIps, IPS_V1_TEXT } from '../../src/domain/ips.js';
+import { installIps, currentIps, ipsClause, IPS_V1_TEXT } from '../../src/domain/ips.js';
 
 let db: Db;
 beforeEach(async () => {
@@ -78,5 +78,33 @@ describe('installIps is idempotent', () => {
     expect(back.created).toBe(true);
     expect(back.version).toBe(3);
     expect((await currentIps(db)).fullText).toBe(IPS_V1_TEXT);
+  });
+});
+
+/**
+ * The owner amended IPS §3.4 on 2026-10-23 from core ≥75% / satellite ≤25% to core ≥70% /
+ * non-core ≤30%. A database installed before that carries the 75/25 text at its tip; the
+ * next job start must append the amended text as a new version, once.
+ */
+describe('the 2026-10-23 amendment of §3.4', () => {
+  const OLD_3_4 = `## 3.4 Equity structure: core–satellite 75/25
+- **Core (≥75% of equity flows):** index instruments (Nifty 50, Nifty Next 50, flexi-cap of PPFC type, US index exposure) — consolidate into the existing ICICI Nifty 50 Index folios and BeES ETFs.
+- **Satellite (≤25% of equity):** agent-recommended direct stocks, each with a ≤150-word written thesis containing an explicit falsification condition. Operates on the curated watchlist (Section 8).`;
+
+  it('appends the amended text over a 75/25 tip, once', async () => {
+    const old = IPS_V1_TEXT.replace(ipsClause(IPS_V1_TEXT, '3.4'), OLD_3_4);
+    expect(old).not.toBe(IPS_V1_TEXT);
+    await db.query(
+      `insert into ips_versions (version, full_text, effective_at) values (1, $1, now())`,
+      [old],
+    );
+
+    const first = await installIps(db);
+    expect(first).toEqual({ version: 2, created: true });
+    expect(ipsClause((await currentIps(db)).fullText, '3.4')).toContain('≥70% of equity flows');
+
+    const second = await installIps(db);
+    expect(second).toEqual({ version: 2, created: false });
+    expect(await versions()).toHaveLength(2);
   });
 });

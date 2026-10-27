@@ -146,9 +146,9 @@ Maximize risk-adjusted return subject to a 30% maximum portfolio drawdown constr
 - Cash ceiling: ≤10% of total investable assets, measured on idle cash — bank balances only, less the funded B3 emergency-fund balance; EPF, bonds and liquid/debt funds count as debt, not cash. Only the balance actually in B3 is excused, never its target. Idle cash above the ceiling is uninvested capital and must be deployed or routed to B3.
 - B2 (house fund): 100% capital-preservation instruments once seeded.
 
-## 3.4 Equity structure: core–satellite 75/25
-- **Core (≥75% of equity flows):** index instruments (Nifty 50, Nifty Next 50, flexi-cap of PPFC type, US index exposure) — consolidate into the existing ICICI Nifty 50 Index folios and BeES ETFs.
-- **Satellite (≤25% of equity):** agent-recommended direct stocks, each with a ≤150-word written thesis containing an explicit falsification condition. Operates on the curated watchlist (Section 8).
+## 3.4 Equity structure: core–satellite 70/30
+- **Core (≥70% of equity flows):** index instruments (Nifty 50, Nifty Next 50, flexi-cap of PPFC type, US index exposure) — consolidate into the existing ICICI Nifty 50 Index folios and BeES ETFs.
+- **Non-core (≤30% of equity):** mid-cap, small-cap and active large-cap funds, and agent-recommended direct stocks, each stock with a ≤150-word written thesis containing an explicit falsification condition. Stocks operate on the curated watchlist (Section 8). Amended 2026-10-23 by the owner: "i dont need stocks unless they are very good".
 
 ## 3.5 Hard concentration caps (safety rails, machine-enforced)
 - Any single stock: ≤10% of liquid portfolio.
@@ -211,7 +211,7 @@ Numbered, independently testable. "Agent" = the system. Grouped by capability. E
 ## 5.2 Analysis & recommendations
 - **FR-10** Agent generates recommendations only from the engine spec in Section 6; every recommendation cites ≥1 IPS clause.
 - **FR-11** Every recommendation contains: primary action + exactly 2 alternates; for each: thesis (≤150 words), key risk, expected holding period, falsification condition, conviction level (LOW/MEDIUM/HIGH with stated basis), and the strongest argument against the action.
-- **FR-12** Agent enforces ≤4 recommended actions/month and 12-month minimum hold (with the three override events); attempted violations are logged and suppressed with a visible note in the weekly report.
+- **FR-12** Agent enforces ≤4 recommended actions/month and 12-month minimum hold (with the three override events); attempted violations are logged and suppressed with a visible note in the weekly report. *Amended 2026-10-27 by the owner: fund top-ups into MFs, ETFs and gold (ETFs, SGBs) are exempt from the 12-month repeat-buy hold; stocks are not. The ≤4/month cap still counts them.*
 - **FR-13** Monthly drift check against IPS bands (±5%); annual calendar rebalance proposal every April (fiscal-year aware for tax).
 - **FR-14** Agent maintains the legacy cleanup program (3.9) as a standing recommendation queue with a multi-year LTCG harvest calendar.
 - **FR-15** Sell logic is first-class: every holding is evaluated against sell triggers (Section 6.5) at least monthly; the system must be demonstrably capable of recommending exits, not only entries.

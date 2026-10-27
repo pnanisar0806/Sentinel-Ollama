@@ -5,6 +5,16 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **Piece 3 (funds first) — 10 tasks + docs committed 2026-10-26** on `feat/funds-first`, local,
+      NOT pushed (spec `2026-10-23-funds-first-design.md`). **Squashed onto local `main` 2026-10-27,
+      NOT pushed** — push only after 0037/0038 are on prod (owner approved release; the prod SQL
+      was blocked by the session's permission classifier). **Next: batch B** (3,4,8). Open from piece 3:
+  - [ ] Apply migrations **0037 and 0038 to prod before deploy** (else `/funds` 500s and the weekly report's advisor run fails: `sizing-input.ts` → `loadFundCandidates` reads `fund_mix_signed`).
+  - [ ] Browser-check `/advisor` and `/funds` after deploy (neither was browser-checked).
+  - [ ] **Owner:** sign the fund mix on `/funds` (until then stocks are withheld and no fund is topped up).
+  - [ ] **Owner:** add the Screener columns (Pledged %, Promoter holding, CFO 5Y, PAT 5Y) and send one export.
+  - [ ] **Owner:** open the Nifty Next 50 index fund (and a US one when any reopens to SIPs).
+  - [x] **Owner question:** exempt fund top-ups from FR-12's 12-month repeat-buy hold? — yes, 2026-10-27, gold included (stocks keep it).
 - [x] **Log batch A (2,5,6,13) SHIPPED 2026-10-23** — squashed onto `main`; migration 0036 applied to prod
       2026-10-23 (recorded in `schema_migrations`). Owner to push; then browser-test /log with refused inputs only. Spec
       `2026-10-22-log-batch-a-design.md`. **Browser QA 2026-10-23 found two prod bugs (reversals refused;
@@ -14,7 +24,7 @@ MEMORY.md; the code map lives in index.md.
       owner SIP payments + rupee budget editor; migration 0034 → prod, push, record HDFC ₹3,001
       2026-10-12 via `recordSipPayment` source `owner-chat`) → **piece 2** (goal tracker + goal plan;
       brainstorm opens with the five spec §2.5 owner inputs) → **log batch A** (2,5,6,13) →
-      **piece 3** (funds-first) → **batch B** (3,4,8; Invesco/mandates live here) → **batch C** (9,10).
+      ~~**piece 3** (funds-first)~~ (committed 2026-10-26) → **batch B** ← next (3,4,8; Invesco/mandates live here) → **batch C** (9,10).
       Each: design for owner approval → opus SDD → one squashed push. Migration 0035 (drop the 18
       permissive `using (true)` RLS policies) already applied to prod 2026-10-16.
 - [ ] **SIPs → goals → funds-first (owner, 2026-10-13/14).** Spec:
@@ -66,6 +76,12 @@ MEMORY.md; the code map lives in index.md.
       mistaken entry via reversal) → B (3 SIP change, 4 lump sum received, 8 scheduled budget
       raise) → C (9 decisions about a holding as advisor rules, 10 life events updating
       assumptions / IPS stop rules).
+  - **Batch B also carries SIP advice (owner, 2026-10-27):** the advisor suggests starting a SIP in a
+    new fund, raising/reducing/stopping a SIP, and other SIP changes (today `/funds` only rebalances
+    within an unchanged total). **Ask at batch B brainstorm start, with B's other questions:**
+    (1) suggest raising the total SIP from recurring free money? (my default: only after 3
+    consecutive months of surplus); (2) where shown? (my default: `/funds` card + one weekly-report
+    line only when a change is due).
 - [ ] **Maturity/vest-funded buys are not logged as purchases** (form: this month's budget
       only) — they wait for "lump sum received" (batch B).
 - [ ] **Owner: free amount is also capped by `tactical_monthly_paise` (₹50k).** Envelope =

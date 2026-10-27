@@ -17,6 +17,7 @@ const NOW = new Date('2026-09-27T10:00:00Z');
 const cand = (over: Partial<Candidate> = {}): Candidate => ({
   id: 'c-bajaj', action: 'BUY', instrumentId: 'NSE:BAJAJ-AUTO', name: 'Bajaj Auto', status: 'ELIGIBLE', withheldReason: null,
   amountPaise: 4_512_400n, units: '4', pricePaise: 1_128_100n, quoteAsOf: '2026-09-26', basis: 'b', constraints: [], policyVersion: 'sizing-v1',
+  vehicle: 'STOCK', fund: null,
   ...over,
 });
 
@@ -34,6 +35,7 @@ const good = {
   rationale: 'Quality franchise with export growth; valuation reasonable.', keyRisk: 'Two-wheeler demand slowdown.',
   falsification: 'Return on capital falls below 15% for two years.', counterargument: 'EV transition may erode margins.',
   evidenceIds: [], alternates: ['WAIT'],
+  whyNotFund: 'Every fund type is at its midpoint this month, and this franchise adds what the index funds hold little of.',
 };
 
 async function covered(instrumentId: string, completedAt = '2026-09-26T10:00:00Z'): Promise<void> {
@@ -210,13 +212,86 @@ describe('the budget the model sees (SIP tracking Task 8)', () => {
     expect((await db.query<{ error: string }>(`select error from llm_calls`)).every((c) => /"amount"/.test(c.error))).toBe(true);
   });
 
-  it('the prompt tells the model the budget is context, and the version is advise-v2', async () => {
+  it('the prompt tells the model the budget is context, and the version is advise-v3', async () => {
     const { f } = capture();
     let system = '';
     const spy = (async (u: string, init: { body: string }) => { system = JSON.parse(init.body).messages[0].content; return f(u, init as never); }) as unknown as typeof fetch;
     await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: spy, now: NOW, budget });
     expect(system).toMatch(/"budget" shows his monthly budget.*you still never state an amount/);
     const [p] = await db.query<{ prompt_version: string }>(`select prompt_version from advisor_proposals order by id desc limit 1`);
-    expect(p!.prompt_version).toBe('advise-v2');
+    expect(p!.prompt_version).toBe('advise-v3');
+    expect(system).toMatch(/Funds come first: a FUND candidate is preferred; a stock is the exception\./);
+    expect(system).toMatch(/A stock BUY must also return "whyNotFund": why this stock and not a fund this month\./);
+    expect(system).toMatch(/"whyNotFund":"<required for a stock BUY>"/);
+  });
+});
+
+describe('funds first (advise-v3)', () => {
+  const fundCand = (over: Partial<Candidate> = {}): Candidate => cand({
+    id: 'c-ppfc', instrumentId: 'MF:PPFC', name: 'Parag Parikh Flexi Cap Direct', amountPaise: 2_000_000n, units: null,
+    pricePaise: null, quoteAsOf: null, vehicle: 'FUND',
+    fund: { fundType: 'FLEXI', actualBps: 1200, midBps: 2000, minBps: 1500, maxBps: 2500, quality: 'rank 2 of 11 in Equity Scheme - Flexi Cap Fund' }, ...over,
+  });
+  const fundBuy = { ...good, candidateId: 'c-ppfc', whyNotFund: undefined,
+    rationale: 'Flexi cap is below its approved share; topping up a held fund keeps the plan simple.' };
+  const snapshot = async () => {
+    const [r] = await db.query<{ s: unknown }>(`select input_snapshot as s from advisor_proposals order by id desc limit 1`);
+    return (typeof r!.s === 'string' ? JSON.parse(r!.s) : r!.s) as { shown: Record<string, unknown>[]; excluded: string[] };
+  };
+  beforeEach(async () => {
+    await covered('NSE:BAJAJ-AUTO');
+  });
+
+  it('refuses a stock BUY that does not say why not a fund — both attempts invalid', async () => {
+    for (const whyNotFund of [undefined, '   ', 42]) {
+      const [{ n }] = await db.query<{ n: number }>(`select coalesce(max(id), 0)::int as n from llm_calls`) as [{ n: number }];
+      const { f, calls } = reply({ ...good, whyNotFund });
+      const r = await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: f, now: NOW });
+      expect(r.decision).toBe('UNAVAILABLE');
+      expect(calls()).toBe(2);
+      const rows = await db.query<{ outcome: string; error: string }>(`select outcome, error from llm_calls where id > $1 order by id`, [n]);
+      expect(rows.map((x) => x.outcome)).toEqual(['invalid', 'invalid']);
+      expect(rows.every((x) => x.error === 'a stock BUY must say why not a fund (whyNotFund)')).toBe(true);
+    }
+  });
+
+  it('a stock BUY that says why not a fund is kept, with the reason in the payload', async () => {
+    const r = await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: reply(good).f, now: NOW });
+    expect(r.decision).toBe('BUY');
+    expect((await lastProposal()).payload).toMatchObject({ decision: 'BUY', whyNotFund: good.whyNotFund });
+  });
+
+  it('a fund BUY needs no whyNotFund, and is sized by the system', async () => {
+    const r = await runAdvisor(db, { asOf: AS_OF, candidates: [fundCand()], apiKey: 'k', fetchImpl: reply(fundBuy).f, now: NOW });
+    expect(r.decision).toBe('BUY');
+    expect((await lastProposal()).payload).toMatchObject({ decision: 'BUY', candidateId: 'c-ppfc', amountPaise: '2000000', units: null });
+  });
+
+  it('keeps whyNotFund only on a stock BUY — never on a fund BUY or a HOLD', async () => {
+    await runAdvisor(db, { asOf: AS_OF, candidates: [fundCand()], apiKey: 'k', fetchImpl: reply({ ...fundBuy, whyNotFund: 'stray' }).f, now: NOW });
+    expect((await lastProposal()).payload['whyNotFund'] ?? null).toBeNull();
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand()], apiKey: 'k', fetchImpl: reply({ ...good, decision: 'HOLD', candidateId: null }).f, now: NOW });
+    expect((await lastProposal()).payload['whyNotFund'] ?? null).toBeNull();
+  });
+
+  it('a fund with no news coverage is shown with no signal and no news; a stock with none is still excluded', async () => {
+    const stock = cand({ id: 'c-hal', instrumentId: 'NSE:HAL', name: 'HAL' });
+    const { f } = reply({ ...good, decision: 'HOLD', candidateId: null });
+    await runAdvisor(db, { asOf: AS_OF, candidates: [stock, fundCand()], apiKey: 'k', fetchImpl: f, now: NOW });
+    const s = await snapshot();
+    expect(s.shown.map((x) => (x['candidate'] as { id: string }).id)).toEqual(['c-ppfc']);
+    expect(s.shown[0]).toMatchObject({
+      vehicle: 'FUND', signal: null, news: [],
+      fund: { fundType: 'FLEXI', targetRange: { minPct: 15, maxPct: 25 }, actualPct: 12, quality: 'rank 2 of 11 in Equity Scheme - Flexi Cap Fund' },
+    });
+    expect(s.excluded).toEqual(['HAL: news coverage is missing']);
+  });
+
+  it('shows the model funds before stocks', async () => {
+    const { f } = reply({ ...good, decision: 'HOLD', candidateId: null });
+    await runAdvisor(db, { asOf: AS_OF, candidates: [cand(), fundCand()], apiKey: 'k', fetchImpl: f, now: NOW });
+    const s = await snapshot();
+    expect(s.shown.map((x) => x['vehicle'])).toEqual(['FUND', 'STOCK']);
+    expect(s.shown[1]).toMatchObject({ vehicle: 'STOCK', fund: null });
   });
 });

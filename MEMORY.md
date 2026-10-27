@@ -632,6 +632,23 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
   not a web button, and not a Next.js dependency in Phase 0. **Ran successfully 2026-08-22**:
   scope `portfolio:read`, refresh token stored encrypted in the local `.pglite`.
 
+- **Funds first (2026-10-13, amended 2026-10-23; spec `2026-10-23-funds-first-design.md` §4).**
+  - Funds take priority over stocks in the monthly advice.
+  - No owner watchlist sign-off for a stock; the universe is the stocks scored today.
+  - Five stock checks (debt, pledge, valuation, growth, management): any FAIL is a no; UNKNOWN is a FAIL.
+  - A stock must also be HIGH band: composite ≥ `BANDS.high` (85), plus the quality gate.
+  - The monthly fund pick tops up **held** funds only (category-rank top half; index/ETF exempt).
+  - **IPS §3.4 amended: core ≥ 70% of equity flows** (was 75%); mid/small funds and stocks share the 30%.
+  - Funds before stocks in a month: stocks are sized only when no fund type is below its signed
+    midpoint, and never before a mix is signed (owner-approved 2026-10-26).
+  - Sentinel proposes the per-type ranges; the owner signs them whole on `/funds` (no edits).
+  - On signing, Sentinel suggests SIP amounts per fund (never a sale; total unchanged).
+  - For US index and Nifty Next 50 the owner opens new index MFs; Sentinel names the fund.
+  - **FR-12 amended 2026-10-27:** fund top-ups into MF, ETFs and gold (instrument kind MF/ETF/GOLD, rec
+    kind `rebalance`) are exempt from the 12-month repeat-buy hold; stocks and fund switches are not.
+    Gold ETFs and SGBs are both kind GOLD, so both are exempt.
+    The ≤4/month cap still counts them.
+
 ## Documented scope calls (deviations from a literal PRD reading)
 
 1. **No Next.js UI in Phase 0.** IPS is rendered via Telegram and a `pnpm ips` CLI.
@@ -789,6 +806,43 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
 - **Deferred minor (pre-existing):** `sizing-input` sums the latest rows from every source, including
   seed rows `loadPositions` has replaced with live data; an instrument in both seed and a live feed
   could have its units counted twice when a sale is sized. US:NOW is not affected.
+
+### Funds-first contracts (2026-10-26, branch `feat/funds-first`)
+- **Stock checks** (`src/domain/stock-checks.ts`): `evaluateChecks` (pure, always five results in
+  order debt, pledge, valuation, growth, management; each with value, threshold, as_of, source);
+  `isPassed` = quality gate ∧ composite ≥ 85 ∧ five PASS. `loadStockChecks(db, asOf, now)` reads the
+  latest `signal_scores` date ≤ asOf; P/E is **recomputed on read** (latest close ÷ uploaded EPS) and
+  compared to ≤ 1.5× sector median over the whole latest upload (`uploadSectorPe`). Management FAILs
+  whenever governance events exist (even UNCHECKED); 5y PAT ≤ 0 FAILs; promoter "a year ago" must be
+  365–400 days before the latest upload, else UNKNOWN.
+- **Governance** (`src/sources/news.ts`): `governanceStatus(db, id, now)` → CLEAR only on a
+  successful 3-year BSE run ≤ 35 days old, else UNCHECKED; events listed whatever the status.
+  Rating downgrade is read from the headline only. `backfillGovernance` takes `scrips` (fetch once).
+- **Signed mix** (`src/domain/fund-mix.ts`, `fund_mix_signed`, 0037): append-only; the latest row is
+  in force. `approveMix` refuses if the proposal band moved. `typeOf` resolves the ISIN from the
+  instrument or any canonical sibling, then `FUND_TYPE_BY_ID` for ISIN-less held funds
+  (IND:INDS20619 → NEXT50, IND:VOO and IND:118951 → US; all topUp false).
+- **Advisor firewall covers fund-mix.ts** (`tests/advisor/firewall.test.ts` FORBIDDEN): the owner's
+  signature lives there. Pure types (`FundType`, `FUND_TYPE_LABEL`, `RangeRow`, `midBps`, `FundBuy`,
+  `FundCandidates`, `byGap`) live in the leaf `fund-types.ts` (re-exported by fund-mix.ts); sizer and
+  anything advisor-reachable import the leaf. `Candidate.fund` carries the signed `minBps`/`maxBps`.
+- **Fund candidates:** `loadFundCandidates(db, asOf)` → held, topUp, type below its **raw** signed
+  midpoint (raws sum 97.5%), active funds in
+  the category's top half; sorted `byGap`. `Candidate.vehicle` ('FUND' | 'STOCK') and `Candidate.fund`
+  ({fundType, actualBps, midBps, quality} | null) carry it to the advisor.
+- **advise-v3** (`src/advisor/recommend.ts`): funds shown first and exempt from the news gate; a stock
+  BUY must return `whyNotFund` (refused otherwise; kept only on a stock BUY).
+- **Fund rec** (`signAdvice`): kind `'rebalance'`, intent "top up <type> toward the approved fund mix",
+  clauses 3.4/3.5, machine falsification `null` (the fund exit is the category-rank switch). Named
+  alternates may be ELIGIBLE or WITHHELD for `TRANCHE_USED` only; with none, a fund primary gets a
+  no-instrument REDIRECT leg "reach <type> through next month's SIP" — never NSE:NIFTYBEES.
+- **`suggestSips`:** typed SIP total re-split; weight = mid + max(0, mid − actual), 0 for a no-new-money
+  type; non-core capped at 30% (core scaled up); pro rata within a type, else the largest held
+  top-uppable fund, else a new-fund row; each row floored to ₹100, remainder to the largest Nifty 50 row.
+- **Index chooser** (`src/sources/index-funds.ts`, `index_fund_candidates`, 0038): daily INDmoney
+  listing in sync; `chooseIndexFund` eligible = benchmark match ∧ AMFI Direct Growth code ∧ SIP open;
+  ranked by expense ratio, tracking error (only if any eligible row has it), AUM. Missing values are
+  shown as not-proposed, never ranked as 0.
 
 ## Gotchas learned the hard way (each cost a fix round)
 
@@ -1172,6 +1226,27 @@ month, *not* the ₹36,53,354 seed outstanding. Both asserted exactly.
 
 ## Owner true-up items (need real statements — do not guess)
 
+**Funds first (2026-10-26) — owner inputs and questions:**
+- **Screener columns:** the export lacks Pledged %, Promoter holding, CFO 5Y, PAT 5Y (confirmed in the
+  2026-09-16 prod upload), so pledge and management are UNKNOWN for every stock — no stock passes.
+  Owner adds them (plus a 1-year promoter-change column if offered) and sends one export so the
+  aliases are verified. The paste path would store "Pledged %" as 'Pledged' — alias needed then.
+- **Stocks stay withheld** while US and Next 50 are below midpoint and no held fund there can take
+  money, until the owner opens new US / Next 50 index funds. 2026-10-23/26: every INDmoney global
+  index fund had `sip_allowed` false (US closed to SIPs); Next 50 open — top pick 2026-10-26
+  Edelweiss Nifty Next 50 (0.20%).
+- **Governance matcher judgment calls (Task 1; headline-only downgrade owner-approved 2026-10-26):**
+  SEBI-only penalties; statutory auditor only; the never-match list is checked first (a pledge
+  invocation inside a SAST filing is missed; no real pledge-invocation fixture); a party-to-CIRP
+  filing flags (fails closed); the quarterly C1 default form never counts alone; rating downgrade
+  from the headline only.
+- **ISINs:** JUNIORBEES found (INF732E01045). Vanguard IND:VOO / IND:118951 and IND:INDS20619 carry no
+  ISIN anywhere — typed by id (`FUND_TYPE_BY_ID`); a new ISIN-less held fund needs a row there.
+- **Index chooser:** INDmoney carries no tracking error; AMFI Direct Growth matching by name is
+  unverified against live AMFI — check the first live sync's not-proposed reasons.
+- **Prod deploy:** apply migrations 0037 and 0038 first, else `/funds` 500s and the weekly report's
+  advisor run fails (`sizing-input.ts` → `loadFundCandidates` reads `fund_mix_signed`).
+
 **RSU quantity for the house card (2026-10-21):** read from the latest `US:NOW` holding row, a
 manual seed. ~~A sale logged to B2/B3 double counts until that quantity is updated.~~ Closed by
 log batch A (2026-10-22): a logged sale reduces a manual-seed quantity.
@@ -1435,6 +1510,18 @@ end-of-branch fix wave. The "fixes at" column is the expected home, not a hard s
 - T1: a SIP debited and stopped between two snapshots is invisible (bounded by daily sync); February instalment-day clamp untested.
 - T2: IST month-boundary test has a negligible flake window.
 - T3: `/api/log` purchase route assumes string fields from JSON callers; no route-level test (vitest lacks the `@/` alias); "Next step-up" kept as a 5th Overview tile.
+
+**Funds first (2026-10-26) — deferred minors** (ledger workspace is gitignored):
+- T1: `news.ts` word-boundary / quarterly-phrase matching is brittle; the whole SAST category is suppressed; `recordNews` governance-fallback rows; Sammaan fixture header.
+- T2: a stale Screener upload has no age limit; ~4 queries per stock; promoter window anchored on the upload, not asOf; no 365/400/401-day edge tests; valuation built inline.
+- T3: `v.trim()` on non-strings; redundant `kinds` query; `loadAll` run twice; `band()` duplicates `bandOf`; `CHECK_COLUMNS` duplicated.
+- T4: floored type shares can sum below 10000; no `IND:118951` test; own-ISIN-not-in-map skips the sibling lookup (fails safe).
+- T5: `/api/funds` returns 409 for every error; `funds-mix-shape` test uses the real clock.
+- T7/T8: `product.ts` hard-codes 35%; missing-type label; no heldPaise tie-break test; ETF cap uses the pre-rounding tranche; REDIRECT SIP thesis assumes a SIP exists; `monthsBetween` duplicated in `sell-triggers.ts`.
+- T9: SIP ISIN not limited to the latest snapshot; "₹X → ₹0 kept" wording; no non-MONTHLY test.
+- T10: the first bad run of a day pins null scheme codes for that day; `backfill-navs.ts:42` re-export may be dead.
+- FR-12: the hold matches a single instrument id, so a seed/live sibling (canonical id) escapes it (pre-existing).
+- FR-12: no rails (`checkRails`) test for a stock labelled 'rebalance' (only `gateRecommendation` covers it).
 
 ---
 
@@ -3163,7 +3250,8 @@ vesting 15 Nov" reappearing after every sync. sync now projects only grants with
 ## Phase 2.5 owner inputs (2026-09-27) — Phase 2.5 was NOT started before this date
 
 - **Satellite BUY size:** one tactical tranche = min(tactical_monthly_paise, max_order_paise),
-  ₹50k today. Satellite stays inside IPS §3.4's 25% of equity flows.
+  ₹50k today. ~~Satellite stays inside IPS §3.4's 25% of equity flows.~~ Superseded 2026-10-23:
+  §3.4 amended to core ≥ 70% (see Owner decisions → Funds first).
 - **News sources:** free only: NSE/BSE corporate announcements + business RSS (ET Markets,
   Livemint, Moneycontrol). No paid feed.
 - **News role (owner accepted the suggestion):** long-term investor, so ONLY material corporate

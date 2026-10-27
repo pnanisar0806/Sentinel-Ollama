@@ -57,6 +57,9 @@ describe('parseScreenPaste', () => {
     expect(sparc!.columns['Profit 5Y CAGR']).toBe('65.28');
     expect(sparc!.columns['Sales 5Y CAGR']).toBe('49.34');
     expect(sparc!.deRatio).toBe(0.42);
+    // The stock checks read these two canonical keys (valuation's EPS, debt's D/E).
+    expect(sparc!.columns['EPS']).toBe('48.79');
+    expect(sparc!.columns['D/E']).toBe('0.42');
 
     // P & G Hygiene: positive 5Y FCF average → FCF-positive.
     expect(pgh!.fcfPos5y).toBe(true);

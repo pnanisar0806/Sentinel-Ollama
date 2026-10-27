@@ -52,6 +52,18 @@ describe('append-only tables refuse every mutation path', () => {
     await expect(db.query(`truncate ${t} cascade`)).rejects.toThrow(/append-only/);
   });
 
+  it('the signed fund mix fund_mix_signed refuses UPDATE, DELETE and TRUNCATE', async () => {
+    await expect(db.query(`update fund_mix_signed set source = source`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`delete from fund_mix_signed`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`truncate fund_mix_signed cascade`)).rejects.toThrow(/append-only/);
+  });
+
+  it('the index fund candidates index_fund_candidates refuse UPDATE, DELETE and TRUNCATE', async () => {
+    await expect(db.query(`update index_fund_candidates set source = source`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`delete from index_fund_candidates`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`truncate index_fund_candidates cascade`)).rejects.toThrow(/append-only/);
+  });
+
   it('covers every table the PRD calls an audit surface', () => {
     // Guards against a table being added to the schema and quietly left unprotected.
     expect(new Set(APPEND_ONLY.map((t) => t.table))).toEqual(

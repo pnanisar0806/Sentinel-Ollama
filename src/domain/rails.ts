@@ -8,6 +8,7 @@ import type { OverrideEvent } from './recommendations.js';
 import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
 import { loadFreeEnvelope } from './sips.js';
 import { loadBucketBalances } from './bucket-balances.js';
+import { isFundTopUp, monthsBetween } from './repeat-buy-hold.js';
 
 export { DEFAULT_OWNER_RAILS, railPaise };
 
@@ -112,7 +113,9 @@ export async function checkRails(
     }
   }
 
-  if (recommendation.primary.action === 'BUY' && primaryInst) {
+  // Fund top-ups are exempt from the hold (owner amendment to FR-12, 2026-10-27).
+  if (recommendation.primary.action === 'BUY' && primaryInst
+    && !(await isFundTopUp(db, recommendation.kind, primaryInst))) {
     // One query, not two. The count that used to guard this threw
     // `column "recommendations.created_on" must appear in the GROUP BY clause` —
     // `count(*)` with an `order by` and no grouping is invalid, and it sat directly
@@ -247,12 +250,6 @@ async function syntheticPosition(db: Db, id: string, amountPaise: bigint): Promi
     asOf: new Date().toISOString(),
     source: 'rails-projection',
   };
-}
-
-function monthsBetween(fromIso: string, toIso: string): number {
-  const a = new Date(`${fromIso}T00:00:00Z`);
-  const b = new Date(`${toIso}T00:00:00Z`);
-  return (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth()) - (b.getUTCDate() < a.getUTCDate() ? 1 : 0);
 }
 
 /**

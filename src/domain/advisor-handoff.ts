@@ -4,9 +4,12 @@ import { buildRecommendation, persistRecommendation, type RecLeg } from './recom
 import { draftPendingOrders } from './order-drafting.js';
 import { loadExitCandidates } from './sell-triggers.js';
 import { promoteExitCandidate } from './exit-promotion.js';
-import type { Candidate } from './sizing.js';
+import { TRANCHE_USED, type Candidate } from './sizing.js';
 import { snapshotBenchmark } from './scoring.js';
 import { BANDS } from './engine.js';
+import { FUND_TYPE_LABEL, type FundType } from './fund-types.js';
+
+const fundIntent = (t: FundType) => `top up ${FUND_TYPE_LABEL[t]} toward the approved fund mix`;
 
 /**
  * The owner's sign-off on advice (Phase 2.5 Task 6) — outside src/advisor/, which may not
@@ -53,21 +56,44 @@ export async function signAdvice(
 
   const thesis = `${String(d['rationale'])} Key risk: ${String(d['keyRisk'])} Would be wrong if: ${String(d['falsification'])}`
     .split(/\s+/).slice(0, 150).join(' ');
-  const primary: RecLeg = {
+  const primary: RecLeg = fresh.fund !== null ? {
+    // A top-up toward the signed fund mix (§3.4 core/satellite, §3.5 the single-scheme cap).
+    intent: fundIntent(fresh.fund.fundType), instrumentId: fresh.instrumentId, action: 'BUY',
+    amountPaise: fresh.amountPaise!.toString(), thesis, ipsClauseRefs: ['3.4', '3.5'],
+    // The closed grammar has no fund metric: roce_pct is a company's, and a never-firing price
+    // floor would read as a live condition. A fund's exit is the category-rank switch; the
+    // model's own falsification words are in the thesis.
+    falsification: null,
+  } : {
     intent: 'add satellite equity exposure', instrumentId: fresh.instrumentId, action: 'BUY',
     amountPaise: fresh.amountPaise!.toString(), thesis, ipsClauseRefs: ['3.4', '3.6'],
     // The quality gate is the machine-testable kill condition; the model's own words are in the thesis.
     falsification: { metric: 'roce_pct', op: 'lt', value: 15 },
   };
   const other = (Array.isArray(d['alternates']) ? (d['alternates'] as string[]) : [])
-    .map((id) => opts.candidates.find((c) => c.id === id && c.action === 'BUY' && c.instrumentId !== fresh.instrumentId))
+    // Eligible, or held back only because the month's single tranche went to the first choice.
+    // A fund of another type is another intent, so it cannot be A1 (§6.6); it is dropped, and
+    // A2 stays "do nothing this cycle" — hold is visible on every recommendation.
+    .map((id) => opts.candidates.find((c) => c.id === id && c.action === 'BUY' && c.instrumentId !== fresh.instrumentId
+      && (c.status === 'ELIGIBLE' || c.withheldReason === TRANCHE_USED)
+      && (fresh.fund === null || c.fund === null || c.fund.fundType === fresh.fund.fundType)))
     .find(Boolean);
+  const alternate: RecLeg | undefined = other ? {
+    ...primary, instrumentId: other.instrumentId, amountPaise: other.amountPaise?.toString() ?? null,
+    thesis: other.status === 'ELIGIBLE'
+      ? `The advisor's second choice: ${other.name}, sized ${other.basis}.`
+      : `The advisor's second choice: ${other.name}, not sized this month because the single tranche went to the first choice.`,
+  } : fresh.fund !== null ? {
+    // A fund never takes the stock index route: the same end, reached through the SIP.
+    intent: primary.intent, instrumentId: null, action: 'REDIRECT', amountPaise: primary.amountPaise,
+    thesis: `Reach ${FUND_TYPE_LABEL[fresh.fund.fundType]} through next month's SIP instead of a lump sum: `
+      + 'slower, but no one-off order, and the money still goes to the fund type below its approved share.',
+    ipsClauseRefs: ['3.4'], falsification: null,
+  } : undefined;
   const rec = buildRecommendation({
-    kind: 'satellite', createdOn, primary,
-    ...(other ? { sameIntentAlternates: [{
-      ...primary, instrumentId: other.instrumentId, amountPaise: other.amountPaise?.toString() ?? null,
-      thesis: `The advisor's second choice: ${other.name}, sized ${other.basis}.`,
-    }] } : {}),
+    // A fund top-up toward the signed mix is a rebalance, not a stock idea.
+    kind: fresh.fund !== null ? 'rebalance' : 'satellite', createdOn, primary,
+    ...(alternate ? { sameIntentAlternates: [alternate] } : {}),
     engineEvidence: {
       advisorProposalId: proposalId, sizing: fresh.basis, units: fresh.units, horizonYears: d['horizonYears'],
       counterargument: d['counterargument'], evidence: p.evidenceIds,

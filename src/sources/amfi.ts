@@ -8,6 +8,15 @@ function normalizeIsin(raw: string | undefined): string | null {
   return v === '' || v === '-' ? null : v;
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
+/** AMFI takes and returns `dd-MMM-yyyy`, never ISO. */
+export function amfiDate(iso: string): string {
+  const [y, m, d] = iso.split('-');
+  return `${d}-${MONTHS[Number(m) - 1]}-${y}`;
+}
+
 export interface NavRow {
   schemeCode: string;
   isinDivPayout: string | null;

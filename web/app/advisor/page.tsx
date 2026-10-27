@@ -1,11 +1,15 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, getInvestmentControls, getSips } from '../../lib/data';
-import { Badge, Card, ClassChip, DataTable, Notice, PageHead } from '../../lib/ui';
+import { getAdvisor, getDigest, getFundCandidates, getInvestmentControls, getSips, getStockChecks } from '../../lib/data';
+import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import { rupees } from '../../lib/format';
 import { humanize } from '../../lib/plain';
 import { budgetRaise, disclosureLines, inr, pendingBlocks, setAsideLine } from '../../lib/goals';
 import type { GoalPlan, GoalTracker } from '../../../src/domain/goal-plan.js';
+import { BANDS } from '../../../src/domain/engine.js';
+import type { CheckName, CheckStatus } from '../../../src/domain/stock-checks.js';
+import { FUND_TYPE_LABEL } from '../../../src/domain/fund-mix.js';
+import { CAPS } from '../../../src/domain/allocation.js';
 import { AdviceActions, LineActions, ProposeRails } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -15,6 +19,89 @@ const DECISION: Record<string, { tone: Tone; label: string }> = {
   WAIT: { tone: 'amber', label: 'Wait' }, NO_ACTION: { tone: 'gray', label: 'Nothing eligible' }, UNAVAILABLE: { tone: 'red', label: 'Advisor unavailable' },
 };
 const POLARITY: Record<string, Tone> = { POSITIVE: 'green', NEGATIVE: 'red', NEUTRAL: 'gray', UNKNOWN: 'gray' };
+
+const CHECK: Record<CheckStatus, Tone> = { PASS: 'green', FAIL: 'red', UNKNOWN: 'amber' };
+const CHECK_LABEL: [CheckName, string][] = [['debt', 'Debt'], ['pledge', 'Pledge'], ['valuation', 'Valuation'], ['growth', 'Growth'], ['management', 'Management']];
+const band = (c: number): [Tone, string] =>
+  c >= BANDS.high ? ['green', 'high'] : c >= BANDS.medium ? ['amber', 'medium'] : c >= BANDS.watch ? ['gray', 'watch'] : ['gray', 'none'];
+
+/** The five fail-closed stock checks (Piece 3). UNKNOWN is a no; a stock needs five PASSes and composite ≥ 85. */
+async function StockChecksCard() {
+  const { asOf, rows, missingColumns } = await getStockChecks();
+  const allFive = rows.filter((r) => r.checks.every((c) => c.status === 'PASS')).length;
+  return (
+    <Card title="Stock checks" aside={asOf ? `scores of ${asOf} · quality-passed stocks only` : undefined}>
+      {asOf === null ? <Notice>No scores yet. <code>pnpm report</code> scores the watchlist; the checks appear after it runs.</Notice>
+        : rows.length === 0 ? <Notice>No scored stock passed the quality gate on {asOf}. <code>pnpm report</code> re-scores the watchlist each week.</Notice>
+        : <>
+          <p style={{ margin: '0 0 8px' }}><strong className="tnum">{allFive} of {rows.length}</strong> pass all five. A stock reaches the advisor only with five passes and composite ≥ {BANDS.high}.</p>
+          {allFive === 0 ? <Notice tone="amber">
+            No stock passes all five checks this month — that is a correct answer.
+            {missingColumns.length > 0 && rows.some((r) => r.checks.some((c) => c.status === 'UNKNOWN'))
+              ? <> The latest Screener upload has no {missingColumns.join(', ')} {missingColumns.length === 1 ? 'column' : 'columns'}, so the checks that read {missingColumns.length === 1 ? 'it' : 'them'} are unknown — and unknown is a no. Add {missingColumns.length === 1 ? 'it' : 'them'} to the screen.</>
+              : null}
+          </Notice> : null}
+          <DataTable
+            rows={rows.map((r) => ({ key: r.instrumentId, r }))}
+            cols={[
+              { label: 'Company', value: ({ r }) => r.name },
+              { label: 'Composite', align: 'right', value: ({ r }) => r.composite === null ? <span className="dim">unknown</span>
+                : <><strong className="tnum">{r.composite.toFixed(1)}</strong>{' '}<Badge tone={band(r.composite)[0]}>{band(r.composite)[1]}</Badge></> },
+              ...CHECK_LABEL.map(([name, label]) => ({
+                label,
+                value: ({ r }: { r: (typeof rows)[number] }) => {
+                  const c = r.checks.find((x) => x.check === name);
+                  if (!c) return <span className="dim">—</span>;
+                  return <>
+                    <Badge tone={CHECK[c.status]}>{c.status}</Badge>
+                    <div className="dim" style={{ fontSize: 12, marginTop: 2 }}>{c.value ?? 'unknown'} · {c.threshold} · as of {c.asOf ?? 'unknown'}</div>
+                  </>;
+                },
+              })),
+            ]}
+          />
+        </>}
+      <p className="muted" style={{ margin: '8px 0 0' }}>Credit-rating direction is read from the filing headline; the PDF is not parsed.</p>
+    </Card>
+  );
+}
+
+/** Funds first (Piece 3): held funds below their signed midpoint, in the order the sizer tries them. */
+async function FundCandidatesCard() {
+  const { approved, buys, typesBelowMidpoint, excluded } = await getFundCandidates();
+  const pct = (bps: number) => `${(bps / 100).toFixed(1)}%`;
+  const below = typesBelowMidpoint.map((t) => FUND_TYPE_LABEL[t]).join(', ');
+  return (
+    <Card title="Fund candidates this month" aside={`one tranche · ${Math.round(CAPS.singleMfScheme * 100)}% single-scheme cap · never a sale`}>
+      {!approved
+        ? <Notice tone="amber">no approved fund mix yet — approve it on <Link href="/funds">/funds</Link>. Until then no fund is topped up and every stock buy is withheld.</Notice>
+        : typesBelowMidpoint.length === 0
+          ? <Notice>Every fund type is at or above its midpoint, so no fund needs money this month and a stock that passes every check may be sized.</Notice>
+          : <>
+            <p style={{ margin: '0 0 8px' }}>Below target: <strong>{below}</strong>. The first fund below takes this month&apos;s tranche; stocks wait until every type reaches its midpoint.</p>
+            {buys.length === 0
+              ? <Notice tone="amber">No held fund of these types can take new money (see why below), so nothing is topped up — and stocks still wait.</Notice>
+              : <DataTable
+                rows={buys.map((b, i) => ({ key: b.instrumentId, b, i }))}
+                cols={[
+                  { label: '#', value: ({ i }) => <span className="tnum dim">{i + 1}</span> },
+                  { label: 'Fund', value: ({ b }) => b.name },
+                  { label: 'Type', value: ({ b }) => FUND_TYPE_LABEL[b.fundType] },
+                  { label: 'Actual vs midpoint', align: 'right', value: ({ b }) => <span className="tnum">{pct(b.actualBps)} vs {pct(b.midBps)}</span> },
+                  { label: 'Gap', align: 'right', value: ({ b }) => <strong className="tnum">{pct(b.gapBps)}</strong> },
+                  { label: 'Quality', value: ({ b }) => <span className="dim">{b.quality}</span> },
+                  { label: 'Held', align: 'right', value: ({ b }) => <span className="tnum"><Money p={b.heldPaise as never} /></span> },
+                ]}
+              />}
+          </>}
+      {excluded.length > 0 && (
+        <details style={{ marginTop: 10 }}><summary className="muted">{excluded.length} held fund(s) not a candidate, and why</summary>
+          <ul className="muted" style={{ paddingLeft: 18 }}>{excluded.map((e) => <li key={e.instrumentId}>{e.name}: {e.reason}</li>)}</ul>
+        </details>
+      )}
+    </Card>
+  );
+}
 
 const IPS_EQUITY_CEILING_PCT = 60;
 const WAIT = 'waits 48 hours';
@@ -125,7 +212,7 @@ export default async function AdvisorPage() {
       <PageHead
         title="Advisor"
         badge={<Badge tone="indigo">monthly · you sign, then approve</Badge>}
-        sub="Once a month the advisor reads each candidate's news, trend and scores and decides for a five-year holder: buy, sell, hold or wait. Amounts are fixed by the system, not the model. Signing sends a buy or sell to Approvals; it is not an order."
+        sub="Funds come first: this month's money tops up a held fund below its approved target, and a stock is the exception — sized only when every fund type is at its midpoint and the stock passes all five checks. Once a month the advisor reads each candidate's news, trend and scores and decides for a five-year holder: buy, sell, hold or wait. Amounts are fixed by the system, not the model. Signing sends a buy or sell to Approvals; it is not an order."
       />
 
       <div className="bento">
@@ -146,6 +233,7 @@ export default async function AdvisorPage() {
                 {p['deferredByNews'] ? <Notice tone="amber">The model said buy, but recent material negative news turned it into WAIT — the owner's rule that news may delay a buy.</Notice> : null}
                 {p['reason'] ? <p className="dim">{str(p['reason'])}</p> : null}
                 {p['rationale'] ? <><div className="option-label" style={{ marginTop: 12 }}>Why</div><p style={{ margin: 0 }}>{humanize(str(p['rationale']), names)}</p></> : null}
+                {p['whyNotFund'] ? <><div className="option-label" style={{ marginTop: 12 }}>Why not a fund</div><p style={{ margin: 0 }}>{humanize(str(p['whyNotFund']), names)}</p></> : null}
                 {p['keyRisk'] ? <><div className="option-label" style={{ marginTop: 12 }}>Key risk</div><p style={{ margin: 0 }}>{str(p['keyRisk'])}</p></> : null}
                 {p['falsification'] ? <><div className="option-label" style={{ marginTop: 12 }}>What would prove it wrong</div><p className="option-kill" style={{ margin: 0 }}>{str(p['falsification'])}</p></> : null}
                 {p['counterargument'] ? <><div className="option-label" style={{ marginTop: 12 }}>The best case against</div><p className="dim" style={{ margin: 0 }}>{str(p['counterargument'])}</p></> : null}
@@ -173,6 +261,14 @@ export default async function AdvisorPage() {
           <Card title="Do nothing this month" tone="ok">
             <p style={{ margin: 0 }}>Signing neither plan is a correct answer. The budget and the equity ceiling stay as they are, and nothing is bought or sold without your approval.</p>
           </Card>
+        </div>
+
+        <div className="span-12">
+          <FundCandidatesCard />
+        </div>
+
+        <div className="span-12">
+          <StockChecksCard />
         </div>
 
         <div className="span-12">

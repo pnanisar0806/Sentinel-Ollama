@@ -23,8 +23,8 @@ export const AREAS: Area[] = [
     name: 'Advisor (Phase 2.5)',
     stage: 'live',
     what: 'Monthly buy / sell / hold / wait decision by the model among deterministically sized candidates, with news, owner sign-off, quarterly watchlist revision, commentary and track record.',
-    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20', 'Goal plan beside the normal plan: extra money per goal with its funds, "raise budget" as a 48-hour rail change (tactical cap too when it binds)', 'FI more-risk route with the full crash disclosure, sent as the rail change’s note; signing proposes the rebalance’s portfolio equity ceiling (a raise never triggers a sale), revocable with a trim warning', 'House and emergency routes are signable: one rail change raises the budget and the goal set-aside together, and the normal plan never invests the set-aside', 'Monthly advice waits for the budget to be confirmed or changed, until the 7th'],
-    missing: ['The model reads filing headlines, not the PDFs', 'US holdings have no news source', 'Past rails and cash are not versioned, so replay does not re-size'],
+    works: ['Material BSE filings for held and watched companies, read by the model', 'Decision with thesis, key risk, falsification and counterargument', 'Sign sends to Approvals; dismiss needs a reason', 'Per-line watchlist sign-off', 'Commentary with every number bound to a fact', 'Calibration by origin, withheld under 20', 'Goal plan beside the normal plan: extra money per goal with its funds, "raise budget" as a 48-hour rail change (tactical cap too when it binds)', 'FI more-risk route with the full crash disclosure, sent as the rail change’s note; signing proposes the rebalance’s portfolio equity ceiling (a raise never triggers a sale), revocable with a trim warning', 'House and emergency routes are signable: one rail change raises the budget and the goal set-aside together, and the normal plan never invests the set-aside', 'Monthly advice waits for the budget to be confirmed or changed, until the 7th', 'Five fail-closed stock checks with value, threshold and as-of', 'Stocks reach the advisor only at composite ≥ 85 with five passes', 'Funds first: held funds below their signed midpoint take the month’s tranche before any stock (largest gap first, 35% single-scheme cap, active funds only in the top half of their category with no switch pending)', 'Stocks withheld while a fund type is below its midpoint or no fund mix is signed', 'Fund candidates and excluded funds with reasons on /advisor', 'The model sees fund candidates first, without the company-news gate; a stock buy must say why not a fund, shown as “Why not a fund”', 'Signing a fund buy books a top-up toward the approved mix (IPS §3.4, §3.5), not a satellite stock'],
+    missing: ['The model reads filing headlines, not the PDFs', 'US holdings have no news source', 'Past rails and cash are not versioned, so replay does not re-size', 'Pledge, promoter and cash-flow checks need the Screener columns the owner adds', 'Promoter trend unknown until a year of uploads or a 1-year change column', 'Rating direction from headline only'],
   },
 
   {
@@ -187,11 +187,18 @@ export const AREAS: Area[] = [
       'Consistency over rolling 12-MONTH windows, downsampled from daily NAVs',
       'Cost and size from INDmoney, with AUM in rupees crore verified against known fund sizes',
       'A fund with too little NAV history has its consistency withheld rather than scored 0 silently',
+      'Fund mix proposal with reasons and findings',
+      'Owner approval stored append-only',
+      'Target vs actual per fund type',
+      'Suggested SIPs keep the total and never sell',
+      'New index fund proposal for US and Nifty Next 50, ranked on expense ratio then AUM (tracking error has no source)',
     ],
     missing: [
       'Fund tenure and style drift have no source — 25 of the 100 points are unreachable, so 75 is full marks',
       'Size scores the same for every fund held: the AUM ramp tops out at 2,000 crore and all six are far above it',
       'No mf_switch recommendation — a switch needs a candidate universe, which is an owner decision',
+      "Cost finding needs universe peers' expense ratios (`pnpm mf:universe`)",
+      'Tracking error has no source',
     ],
   },
   {

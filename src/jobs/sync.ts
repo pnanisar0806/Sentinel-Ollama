@@ -12,6 +12,7 @@ import { McpClient } from '../sources/mcp-client.js';
 import { fetchBalanceSnapshot } from '../sources/balances.js';
 import { persistBalanceSnapshot } from '../domain/balance-history.js';
 import { fetchMfDetails } from '../sources/indmoney.js';
+import { recordIndexFundCandidates } from '../sources/index-funds.js';
 import { recordDrawdown } from '../domain/drawdown.js';
 import { recordNowCloses } from '../sources/now-history.js';
 import { recordRatingFilings } from '../sources/credit-ratings.js';
@@ -345,6 +346,16 @@ if (isMainModule(import.meta.url)) {
       console.log(`mf metadata ${asOf}: ${inserted} new of ${rows.length} (0 new = already captured today)`);
     } catch (error) {
       console.error(`mf metadata capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    // Spec §8.1: candidates for the new US and Nifty Next 50 index fund. Same isolation:
+    // a failure here must not fail the portfolio sync.
+    try {
+      const asOf = new Date().toISOString().slice(0, 10);
+      const r = await recordIndexFundCandidates(db, indmoney.client, asOf);
+      console.log(`index fund candidates ${asOf}: ${r.stored} new (0 new = already captured today)`);
+    } catch (error) {
+      console.error(`index fund candidate capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

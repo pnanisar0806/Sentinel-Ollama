@@ -21,6 +21,8 @@ export interface PeerFund {
   navDate: string | null;
   /** Whether INDmoney will actually let the owner buy it. */
   purchaseAllowed: boolean;
+  /** Whether INDmoney takes a new SIP in it; null when the listing is silent. */
+  sipAllowed?: boolean | null;
 }
 
 const num = (v: unknown): number | null =>
@@ -176,6 +178,7 @@ export async function fetchAllInCategory(
         nav: typeof d['nav'] === 'number' ? d['nav'] : null,
         navDate: typeof d['nav_date'] === 'string' ? d['nav_date'] : null,
         purchaseAllowed: d['purchase_allowed'] !== false,
+        sipAllowed: typeof d['sip_allowed'] === 'boolean' ? d['sip_allowed'] : null,
       });
     }
     if (payload.next_page !== true) break;
