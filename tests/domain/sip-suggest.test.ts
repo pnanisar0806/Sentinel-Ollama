@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { parseMfSips } from '../../src/sources/indmoney.js';
 import {
-  FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, NON_CORE_TYPES, RANGE_TABLE, midBps, normalisedMidpointsBps, suggestSips,
+  FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, NON_CORE_TYPES, RANGE_TABLE, midBps, neverCut, normalisedMidpointsBps, suggestSips,
   type FundType, type SipSuggestion,
 } from '../../src/domain/fund-mix.js';
 
@@ -109,5 +109,59 @@ describe('suggestSips', () => {
     const active = empty.filter((r) => r.fundType !== 'US' && r.fundType !== 'NEXT50');
     expect(active.length).toBeGreaterThan(0);
     for (const r of active) expect(r.fundName).toBe(`no held ${FUND_TYPE_LABEL[r.fundType!]} fund can take new money`);
+  });
+
+  it('never sends money to a held fund the switch check says to leave; names the switch pick instead', () => {
+    const held = noneHeld();
+    held.MID = [
+      { instrumentId: 'IND:MOTILAL', name: 'Motilal Midcap', valuePaise: 100n, topUp: true },
+      { instrumentId: 'IND:HDFCMID', name: 'HDFC Mid Cap', valuePaise: 900n, topUp: true },
+    ];
+    const leaving = { 'IND:HDFCMID': 'Invesco India Mid Cap Fund' };
+    const one = suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: held, leaving });
+    expect(one.filter((r) => r.fundType === 'MID')).toEqual([expect.objectContaining({ instrumentId: 'IND:MOTILAL' })]);
+    const both = suggestSips({
+      sips: liveSips, ranges, actualBps: capActual, heldByType: held,
+      leaving: { ...leaving, 'IND:MOTILAL': 'Invesco India Mid Cap Fund' },
+    });
+    expect(both.filter((r) => r.fundType === 'MID')).toEqual([
+      expect.objectContaining({ instrumentId: null, fundName: 'Invesco India Mid Cap Fund', currentPaise: 0n }),
+    ]);
+    // A live SIP into a fund marked to leave is kept, never raised.
+    const flexi = liveSips.find((x) => x.type === 'FLEXI')!;
+    const kept = suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: held, leaving: { [flexi.instrumentId]: 'Better Flexi' } });
+    expect(kept.filter((r) => r.instrumentId === flexi.instrumentId)).toHaveLength(1);
+    expect(kept.find((r) => r.instrumentId === flexi.instrumentId)).toMatchObject({ suggestedPaise: 0n, reason: 'kept, not topped up — the switch check says to leave it' });
+  });
+
+  it('a logged SIP input stays logged; feed SIPs and new-fund rows are not (fund switch §3)', () => {
+    const held = noneHeld();
+    held.MID = [{ instrumentId: 'MF:HDFC-MIDCAP', name: 'HDFC Mid Cap', valuePaise: 900n, topUp: true }];
+    const rows = suggestSips({
+      sips: [...liveSips, { instrumentId: 'MFU:120505', fundName: 'Invesco India Mid Cap Fund', type: 'MID', topUp: true, amountPaise: 300_100n, logged: true }],
+      ranges, actualBps: capActual, heldByType: held, leaving: { 'MF:HDFC-MIDCAP': 'Invesco India Mid Cap Fund' },
+    });
+    expect(rows.filter((r) => r.logged)).toEqual([expect.objectContaining({ instrumentId: 'MFU:120505', fundType: 'MID', currentPaise: 300_100n })]);
+    expect(rows.filter((r) => r.instrumentId === null).length).toBeGreaterThan(0);
+    for (const r of rows.filter((x) => x.instrumentId !== 'MFU:120505')) expect(r.logged).toBe(false);
+    expect(neverCut(rows).filter((r) => r.logged).map((r) => r.instrumentId)).toEqual(['MFU:120505']);
+  });
+});
+
+describe('neverCut (owner, 2026-10-28)', () => {
+  it('keeps every SIP at least at its current amount; additions are untouched', () => {
+    const rows = neverCut(suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: noneHeld() }));
+    for (const r of rows) expect(r.suggestedPaise >= r.currentPaise).toBe(true);
+    const n50 = rows.find((r) => r.fundType === 'NIFTY50')!;
+    expect(n50.suggestedPaise).toBe(n50.currentPaise);
+    expect(n50.reason).toMatch(/never suggests cutting/);
+    expect(rows.some((r) => r.suggestedPaise > r.currentPaise)).toBe(true);
+  });
+});
+
+describe('FUND_TYPE_BY_ISIN (owner, 2026-10-29)', () => {
+  it('types Invesco India Mid Cap Direct Growth as a top-uppable mid cap', () => {
+    // AMFI scheme 120403, ISIN confirmed against mfapi.in and the prod MFU:120403 row.
+    expect(FUND_TYPE_BY_ISIN.INF205K01MV6).toEqual({ type: 'MID', topUp: true });
   });
 });

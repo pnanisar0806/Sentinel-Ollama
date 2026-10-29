@@ -1,6 +1,8 @@
-import { getFundMix, getIndexFundChoices, getMfRanking, getMfSwitches, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { sipText, unitsText } from '@/lib/funds';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
+import { INDEX_SWITCH_MIN_BPS } from '../../../src/domain/index-switch';
 import { FUND_TYPE_LABEL, midBps } from '../../../src/domain/fund-mix';
 import { ASSUMPTIONS } from '../../../src/config/assumptions';
 import { ApproveMix } from './approve-mix';
@@ -19,7 +21,9 @@ export default async function FundsPage() {
   const unknownShare = actual.totalPaise === 0n;
   const costUnstamped = mix.findings.some((f) => f.kind === 'cost' && f.text.startsWith('cost not compared'));
   const { ranked, caveats } = await getMfRanking();
-  const { switches, margin } = await getMfSwitches();
+  const fundMoves = await getFundMoves();
+  // One feed, one reason: every fund's SIP answer is unknown together.
+  const sipUnknown = fundMoves.moves.map((m) => m.sip).find((x) => x.kind === 'unknown');
   const sips = await getSips();
   const suggested = await getSipSuggestions();
   const indexFunds = await getIndexFundChoices();
@@ -138,7 +142,7 @@ export default async function FundsPage() {
         ) : null}
       </Card>
 
-      <Card title="Suggested SIPs" aside="toward the signed mix · never sells">
+      <Card title="Suggested SIPs" aside="toward the signed mix · never cuts a SIP">
         {suggested.rows === null ? (
           <Notice tone="amber">No suggestion: {suggested.reason}.</Notice>
         ) : (
@@ -146,7 +150,11 @@ export default async function FundsPage() {
             <DataTable
               rows={suggested.rows.map((s, i) => ({ key: `${s.instrumentId ?? 'new'}:${s.fundType ?? 'u'}:${i}`, s }))}
               cols={[
-                { label: 'Fund', value: ({ s }) => (s.instrumentId === null ? <span className="dim">{s.fundName}</span> : s.fundName) },
+                {
+                  label: 'Fund',
+                  value: ({ s }) => (s.instrumentId === null ? <span className="dim">{s.fundName}</span>
+                    : s.logged ? <>{s.fundName} <Badge tone="gray">logged, not yet in the feed</Badge></> : s.fundName),
+                },
                 { label: 'Type', value: ({ s }) => (s.fundType === null ? <span className="dim">type unknown</span> : FUND_TYPE_LABEL[s.fundType]) },
                 {
                   label: 'Current → suggested', align: 'right',
@@ -156,8 +164,11 @@ export default async function FundsPage() {
               ]}
             />
             <p className="muted">
-              Total unchanged at <Money p={suggested.totalPaise as never} />. Each amount is rounded
-              down to a whole ₹100; the remainder goes to the Nifty 50 index fund. Change SIPs in
+              Today&apos;s SIPs total <Money p={suggested.totalPaise as never} />
+              {suggested.rows.some((s) => s.logged) ? ', counting SIP moves logged on /log that the feed does not show yet' : ''}. No SIP is ever
+              suggested below its current amount, so the suggested total can be higher; the increases
+              would come from your monthly free money, which these amounts are not yet checked
+              against. A fund the switch check says to leave gets no new money. Change SIPs in
               INDmoney; the next sync shows them here.
             </p>
           </>
@@ -274,32 +285,47 @@ export default async function FundsPage() {
 
           <Card
             title="Switch check"
-            aside={`${switches.filter((s) => s.challengerId !== null).length} of ${switches.length} clear the bar`}
+            aside={`${fundMoves.moves.filter((m) => m.units.kind === 'move').length} of ${fundMoves.moves.length} clear the bar`}
           >
             <p className="muted">
-              Each fund against every Direct growth fund AMFI lists in its category. A
-              challenger must beat the holding by {margin} points on a{' '}
-              {MAX_ACHIEVABLE_COMPOSITE}-point scale before a switch is proposed — a
-              margin a month of NAV noise can cross is not a reason to realise tax.
+              Each active fund against every Direct growth fund AMFI lists in its category: a
+              challenger must beat the holding by {fundMoves.margin} points on a{' '}
+              {MAX_ACHIEVABLE_COMPOSITE}-point scale. Each index fund against funds tracking the
+              same index: a challenger must cost at least {(INDEX_SWITCH_MIN_BPS / 100).toFixed(2)} points a
+              year less. Only mutual funds are checked, not ETFs. Moving a SIP stops this SIP and
+              starts the same amount in the new fund — no tax; past units are untouched.
             </p>
+            {sipUnknown && <Notice tone="amber">SIP answers unknown — {sipUnknown.reason}</Notice>}
             <DataTable
-              rows={switches.map((s) => ({ key: s.heldInstrumentId, s }))}
+              rows={fundMoves.moves.map((m) => ({ key: m.instrumentId, m }))}
               cols={[
-                { label: 'Fund', value: ({ s }) => s.heldName },
-                { label: 'Category', value: ({ s }) => s.category },
-                { label: 'Cohort', value: ({ s }) => (s.cohortSize === 0
-                  ? <span className="dim">none comparable</span> : s.cohortSize) },
-                { label: 'Rank', value: ({ s }) => (s.cohortSize === 0
-                  ? '—' : `${s.heldRank} of ${s.cohortSize + 1}`) },
+                { label: 'Fund', value: ({ m }) => m.name },
+                { label: 'Category', value: ({ m }) => m.category },
                 {
-                  label: 'Verdict',
-                  value: ({ s }) => (s.challengerId === null
-                    ? <Badge tone="green">HOLD</Badge>
-                    : <Badge tone="amber">SWITCH</Badge>),
+                  label: 'SIP',
+                  value: ({ m }) => (m.sip.kind === 'none' || m.sip.kind === 'unknown' ? <span className="dim">{sipText(m.sip)}</span>
+                    : <Badge tone={m.sip.kind === 'move' ? 'amber' : m.sip.kind === 'moved' ? 'indigo' : 'green'}>{sipText(m.sip)}</Badge>),
                 },
-                { label: 'Why', value: ({ s }) => <span className="dim">{s.reason}</span> },
+                {
+                  label: 'Units',
+                  value: ({ m }) => <Badge tone={m.units.kind === 'move' ? 'amber' : 'green'}>{unitsText(m.units)}</Badge>,
+                },
+                {
+                  label: 'Gain if sold now', align: 'right',
+                  value: ({ m }) => (m.units.kind === 'keep' ? <span className="dim">—</span>
+                    : m.units.gainPaise === null ? <span className="dim">unknown</span>
+                    : <span className="tnum"><Money p={m.units.gainPaise as never} /></span>),
+                },
+                { label: 'Why', value: ({ m }) => <span className="dim">{m.units.why}</span> },
               ]}
             />
+            <p className="muted">
+              Annual LTCG exemption: <Money p={fundMoves.ltcgExemptionPaise as never} /> — not net of
+              gains already realised this FY. A move staged across financial years can keep long-term
+              gains inside each year&apos;s exemption. Gains on units held under 12 months are
+              short-term; Sentinel has no purchase dates for funds, so the split is unknown.
+              Decisions are yours; change funds in INDmoney.
+            </p>
           </Card>
 
           <Card title="What this score does not include">
@@ -313,12 +339,6 @@ export default async function FundsPage() {
                 <strong>Size scores the same for every fund held.</strong> The AUM ramp tops
                 out at ₹2,000 crore and every fund here is far above it, so cost is the only
                 one of the two INDmoney facts that separates them.
-              </li>
-              <li>
-                <strong>Index funds are not switch-checked.</strong> AMFI&rsquo;s category
-                says a fund is an index fund, not which index it tracks, so a Nifty 50
-                tracker and a smallcap tracker would be ranked against each other. Their
-                peer set needs same-index matching first.
               </li>
             </ul>
           </Card>

@@ -22,6 +22,8 @@ export interface Position {
   valuePaise: Paise;
   /** NULL = unknown cost (FR-02). Never 0, never rendered as Rs 0. */
   avgCostPaise: Paise | null;
+  /** The cost was carried over from a retired seed row, not reported on this live row. */
+  costFromSeed?: true;
   assetClass: AssetClass;
   issuer: string | null;
   /** PRD 3.5 single-sector cap. NULL where the instrument carries no sector. */
@@ -269,6 +271,7 @@ export async function loadPositions(db: Db, businessDate?: string): Promise<Posi
       const canon = e.row.canonical_id;
       if (canon && orphanedSeedCost.has(canon)) {
         e.pos.avgCostPaise = orphanedSeedCost.get(canon)!;
+        e.pos.costFromSeed = true;
         orphanedSeedCost.delete(canon);
       }
     }

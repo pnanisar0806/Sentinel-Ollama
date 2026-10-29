@@ -2,9 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../src/db/migrate.js';
 import { BUCKETS } from '../../src/domain/buckets.js';
 import { rupees } from '../../src/money/paise.js';
-import { logEarmark, logGoalMove, logNote } from '../../src/domain/owner-log.js';
+import { logEarmark, logGoalMove, logNote, logSipMove } from '../../src/domain/owner-log.js';
 import { reverseEntry } from '../../src/domain/reversals.js';
-import { db, getLog } from '../../web/lib/data.js';
+import { db, getLog, getSipMoveOptions } from '../../web/lib/data.js';
 import { balanceText } from '../../web/lib/goals.js';
 import { canReverse, plannedSpendingLine } from '../../web/lib/log.js';
 
@@ -72,5 +72,67 @@ describe('/log getter', () => {
     expect(canReverse({ reversible: { entity: 'bogus' as never, entityId: '1' }, reversed: null })).toBe(false);
 
     expect(plannedSpendingLine(log.spLabels)).toBe('Planned spending ₹2.50L (Himachal trip ₹2.50L)');
+  });
+
+  it('SIP move pickers: held funds one per fund, deduped across accounts; "to" by the category logSipMove checks', async () => {
+    const d = await db();
+    const MID = 'Equity Scheme - Mid Cap Fund';
+    const FLEXI = 'Equity Scheme - Flexi Cap Fund';
+    const inst = (id: string, name: string, canonical: string | null, meta: object) => d.query(
+      `insert into instruments (id, kind, name, currency, canonical_id, metadata) values ($1, 'MF', $2, 'INR', $3, $4::jsonb)`,
+      [id, name, canonical, JSON.stringify(meta)]);
+    await inst('MF:HDFC-MID', 'HDFC Mid Cap', 'C-HDFC-MID', { amfiCategory: MID });
+    await inst('IND:HDFC-MID', 'HDFC MID CAP OPP DIR GR', 'C-HDFC-MID', {});   // category only on its seed sibling
+    await inst('MF:PPFAS', 'Parag Parikh Flexi Cap', null, { amfiCategory: FLEXI });
+    await inst('MFU:1', 'Invesco India Mid Cap Fund - Direct Growth', null, { universe: true, category: MID });
+    await inst('MFU:2', 'HDFC Flexi Cap Fund - Direct Growth', null, { universe: true, category: FLEXI });
+    // The seed row retires behind its live sibling; the live fund in two accounts is two positions, one fund.
+    const hold = (s: string, id: string, account: string, source: string) => d.query(
+      `insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
+       values ($1, $2, '1', $3, $4, now(), $5)`, [s, id, rupees(10_000).toString(), account, source]);
+    await hold(snap, 'MF:HDFC-MID', 'groww', 'manual-seed');
+    await hold(snap, 'MF:PPFAS', 'groww', 'manual-seed');
+    const [{ id: live }] = await d.query<{ id: string }>(
+      `insert into snapshots (business_date, source) values ($1, 'indmoney') returning id::text`, [day(-1)]) as [{ id: string }];
+    await hold(live, 'IND:HDFC-MID', 'zerodha', 'indmoney');
+    await hold(live, 'IND:HDFC-MID', 'indmoney', 'indmoney');
+
+    const o = await getSipMoveOptions();
+    expect(o.from).toEqual([
+      { instrumentId: 'IND:HDFC-MID', name: 'HDFC Mid Cap', category: MID },
+      { instrumentId: 'MF:PPFAS', name: 'Parag Parikh Flexi Cap', category: FLEXI },
+    ]);   // MF:F has no category: not offered
+    expect(o.toByCategory[MID]).toEqual([
+      { instrumentId: 'IND:HDFC-MID', name: 'HDFC Mid Cap' },
+      { instrumentId: 'MFU:1', name: 'Invesco India Mid Cap Fund - Direct Growth' },
+    ]);
+    expect(o.toByCategory[MID]!.some((f) => /flexi/i.test(f.name))).toBe(false);
+
+    // Every pair the pickers offer passes logSipMove's own category check.
+    const { id } = await logSipMove(d, {
+      on: day(-1), fromInstrumentId: 'IND:HDFC-MID', toInstrumentId: 'MFU:1', amountPaise: rupees(5_000),
+      firstMonth: day(0).slice(0, 7), note: '',
+    });
+    expect(id).toMatch(/^\d+$/);
+  });
+
+  it('index fund "to" options track the same index: a Nifty 50 SIP is never offered a Nifty Next 50 fund', async () => {
+    const d = await db();
+    const IDX = 'Other Scheme - Index Funds';
+    await d.query(`insert into instruments (id, kind, name, currency, isin, metadata) values
+      ('MF:ICICI-N50', 'MF', 'ICICI Pru Nifty 50 Index Direct', 'INR', 'INF109K012M7', jsonb_build_object('amfiCategory', $1::text)),
+      ('MFU:149999', 'MF', 'Navi Nifty 50 Index Fund', 'INR', null, jsonb_build_object('indexChallenger', true, 'category', $1::text, 'indexType', 'NIFTY50')),
+      ('MFU:150000', 'MF', 'Edelweiss Nifty Next 50 Index Fund', 'INR', null, jsonb_build_object('indexChallenger', true, 'category', $1::text, 'indexType', 'NEXT50'))`, [IDX]);
+    const [{ id: s }] = await d.query<{ id: string }>(
+      `insert into snapshots (business_date, source) values ($1, 'indmoney') returning id::text`, [day(0)]) as [{ id: string }];
+    await d.query(`insert into holdings (snapshot_id, instrument_id, quantity, value_paise, account, as_of, source)
+      values ($1, 'MF:ICICI-N50', '1', 6884320000, 'indmoney', now(), 'indmoney')`, [s]);
+    const o = await getSipMoveOptions();
+    const icici = o.from.find((f) => f.instrumentId === 'MF:ICICI-N50')!;
+    expect(icici.category).toBe(`${IDX} · Nifty 50 index`);
+    expect(o.toByCategory[icici.category]).toEqual([
+      { instrumentId: 'MF:ICICI-N50', name: 'ICICI Pru Nifty 50 Index Direct' },
+      { instrumentId: 'MFU:149999', name: 'Navi Nifty 50 Index Fund' },
+    ]);
   });
 });

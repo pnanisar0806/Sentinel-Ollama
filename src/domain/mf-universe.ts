@@ -108,7 +108,7 @@ export async function persistUniverse(
     const rows = await db.query<{ id: string }>(
       `insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
        values ($1, 'MF', $2, 'INR', $3, $4, $5::jsonb)
-       on conflict (id) do update set name = excluded.name, metadata = excluded.metadata
+       on conflict (id) do update set name = excluded.name, metadata = instruments.metadata || excluded.metadata
        returning id`,
       [c.instrumentId, c.name, c.isin, c.schemeCode,
        JSON.stringify({ universe: true, category: c.category })],

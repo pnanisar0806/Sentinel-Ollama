@@ -105,11 +105,30 @@ describe('evaluating a switch against the whole category', () => {
     await navSeriesAlternating('MF:HELD', 30);
     await candidate('222', 'Much Better');
     await navSeries('MFU:222', 30, 1.0);
+    // 190 bps scores 0 cost points — the same as the unknown it replaces — so the edge is
+    // the NAV record's alone. An unknown expense ratio withholds the switch (next test).
+    await persistMfMetadata(db, [{
+      instrumentId: 'MF:HELD', asOf: '2026-09-21', expenseRatioBps: 190,
+      aumPaise: null, category: MID, benchmarkName: null,
+    }]);
 
     const [s] = await evaluateSwitches(db, '2026-09-21');
     expect(s!.challengerId).toBe('MFU:222');
     expect(s!.edge!).toBeGreaterThanOrEqual(SWITCH_MARGIN);
     expect(s!.reason).toContain('Much Better');
+    await db.close();
+  });
+
+  it("withholds a challenger when the holding's expense ratio is unknown: a null scores 0 of 20 cost points, more than the margin", async () => {
+    await heldFund('MF:A', 'HELD');
+    await navSeriesAlternating('MF:HELD', 30);
+    await candidate('222', 'Much Better');
+    await navSeries('MFU:222', 30, 1.0);
+
+    const [s] = await evaluateSwitches(db, '2026-09-21');
+    expect(s!.challengerId).toBeNull();
+    expect(s!.challengerName).toBeNull();
+    expect(s!.reason).toBe('expense ratio unknown');
     await db.close();
   });
 

@@ -5,6 +5,23 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **FUND SWITCH BUILT 2026-10-29** on `fix/sip-suggestions` (local, not pushed): `46184c2` SIP-card
+      fix + T1–T6 (SIP moves on /log, Nifty 50 index switch check, per-fund SIP and units answers on
+      `/funds`, SIP card follows moves). Ledger `.superpowers/sdd/2026-10-29-fund-switch/progress.md`. Ship:
+  - [x] Reviewed, squashed onto `main`; 0039 + 0040 applied to prod 2026-10-29 (in `schema_migrations`, triggers + RLS, constraints widened). Pushed. Next: run MF sync + index job, browser-check `/funds` + `/log`.
+        First verify prod constraint names `log_reversals_entity_check` (0039) and
+        `index_fund_candidates_fund_type_check` (0040); null any `expense_ratio_bps = 0` rows from before
+        `expensePctToBps(0)` → null, or confirm loaders read only the latest listing.
+  - [ ] **Right after deploy, before the owner opens /funds:** run the MF sync and the index job
+        (`pnpm sync`) so legacy `expense_ratio_bps = 0` rows are superseded and index challengers are
+        registered as `MFU:<scheme>` instruments.
+  - [ ] **After deploy, owner:** log HDFC Mid Cap → Invesco India Mid Cap, ₹3,001 from 2026-11, on /log.
+  - [x] Invesco India Mid Cap Direct Growth `INF205K01MV6` (AMFI 120403) typed MID in `FUND_TYPE_BY_ISIN`, 2026-10-29.
+  - [x] ~~Fix wave: index challengers not loggable~~ — fix wave 2026-10-29 (`fix-wave-report.md`): the index
+        job registers them; /log and `logSipMove` require the same index.
+  - [ ] Known gap: ETFs (e.g. Nifty 50 ETFs) are not switch-checked; only mutual funds (`/funds` says so).
+      **Then batch B** — ask its 5 questions at brainstorm start (SIP-total raise, where shown, lump
+      sums, budget raise incl. ₹50k tactical cap, which SIP changes).
 - [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
       applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
       `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:

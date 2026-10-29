@@ -39,7 +39,7 @@ export function aumCroreToPaise(crore: number): bigint | null {
 
 /** INDmoney reports the expense ratio as a percent: 0.69 means 69bps. */
 export function expensePctToBps(pct: number): number | null {
-  if (!Number.isFinite(pct) || pct < 0) return null;
+  if (!Number.isFinite(pct) || pct <= 0) return null; // INDmoney sends 0 for "--"
   return Math.round(pct * 100);
 }
 

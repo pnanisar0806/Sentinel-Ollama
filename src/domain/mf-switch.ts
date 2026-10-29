@@ -179,6 +179,11 @@ export async function evaluateSwitches(
           : `best alternative is ${edge} points ahead, short of the ${SWITCH_MARGIN}-point `
             + `margin on a ${MAX_ACHIEVABLE_COMPOSITE}-point scale`,
       });
+    } else if (candidates[0]!.expenseRatioBps === null) {
+      // An unknown cost scores the holding 0 of the cost points — more than the margin — so
+      // the edge may be missing data, not a better fund. Same rule as the index path.
+      out.push({ ...base, challengerId: null, challengerName: null, challengerComposite: null,
+        edge, reason: 'expense ratio unknown' });
     } else {
       out.push({ ...base,
         challengerId: best.instrumentId, challengerName: best.name,

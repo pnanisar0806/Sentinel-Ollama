@@ -844,6 +844,30 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
   ranked by expense ratio, tracking error (only if any eligible row has it), AUM. Missing values are
   shown as not-proposed, never ranked as 0.
 
+### Fund switch contracts (2026-10-29, branch `fix/sip-suggestions`)
+- **`sip_moves`** (0039): from/to instrument ids, `amount_paise` > 0, `first_month` `YYYY-MM`,
+  `occurred_on`, `as_of`, `source` 'owner-web'; append-only + RLS; reversed only via `log_reversals`
+  entity `'sip_move'`. `logSipMove` refuses unless both funds share an AMFI category **and the same
+  `indexType`** (NIFTY50/NEXT50/US or null, `sipMoveFunds`; Nifty 50 → Next 50 refused); one active
+  move per "from" fund. /log pickers group index funds by `"<category> · <index label>"`. No FK to `instruments`; `loadActiveSipMoves` inner-joins.
+- **Move semantics:** a move = stop the old SIP + start the same amount in the new fund. An active
+  move's "from" feed SIP is **dropped** even while the feed still lists it, and the "to" stands in
+  (logged amount until the feed shows it, then the feed amount): the money is counted once. Moves and
+  SIPs join funds by `fundAliases`/`sameFund` (canonical id + ISINs + feed ISIN), never raw id.
+- **Switch check** (`loadFundMoves`): one challenger and one bar decide both the SIP and the units
+  answer. Active funds: `SWITCH_MARGIN`. Index funds (Nifty 50 / Next 50 / US): same-index peers
+  only, on expense ratio, **bar `INDEX_SWITCH_MIN_BPS` = 10 bps**. No tax rupee figure (no fund
+  purchase dates). An active holding with a **null expense ratio gets no challenger** ("expense ratio
+  unknown"). `SipAnswer` has `'unknown'` (stale/unknown feed, with `sipUnknownReason`). The SIP card
+  and `loadFundCandidates` read "leave this fund" from `loadFundMoves` (units `move`), not `evaluateSwitches`.
+- **Index challengers are instruments:** the daily index job registers each ranked same-index fund as
+  `MFU:<scheme>` (metadata `indexChallenger`, `category` = the held same-index fund's AMFI category,
+  `indexType`, `benchmark`, `asOf`, `source`), skipping funds already held. They appear in `loadUniverse`.
+- **`expensePctToBps(0)` → null** (a 0% expense ratio is a missing value, not free).
+- **`holdings.avg_cost_paise` on a live INDmoney MF row is the fund's total invested**, not per unit;
+  gain if sold = value − invested, null (rendered "unknown") when any account's invested is null **or
+  the cost was carried over from a retired seed row** (`Position.costFromSeed`).
+
 ## Gotchas learned the hard way (each cost a fix round)
 
 - **`mf_sips` `step_up_by` carries no unit** (`1000` meant ₹1,000, `10` means 10%).

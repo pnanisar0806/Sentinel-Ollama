@@ -342,13 +342,16 @@ export async function loadFreeEnvelope(db: Db, nowIso: string, excludeOrderInten
   return { ...base, remainingPaise: left > 0n ? left : 0n };
 }
 
+/** Why a commitment's total is unknown (`totalPaise === null`). */
+export function sipUnknownReason(c: SipCommitment): string {
+  return c.asOf === null
+    ? 'SIP commitment unknown: INDmoney SIPs have never synced (indmoney-sips)'
+    : c.stale ? `SIP commitment unknown: last SIP sync ${c.asOf.slice(0, 10)} is older than ${SIP_MAX_AGE_DAYS} days (indmoney-sips)`
+    : c.unknownReason ?? 'SIP commitment unknown';
+}
+
 function envelopeOf(budgetPaise: bigint, tacticalPaise: bigint, setAsidePaise: bigint, c: SipCommitment): { envelopePaise: bigint | null; reason: string | null } {
-  if (c.totalPaise === null) {
-    return { envelopePaise: null, reason: c.asOf === null
-      ? 'SIP commitment unknown: INDmoney SIPs have never synced (indmoney-sips)'
-      : c.stale ? `SIP commitment unknown: last SIP sync ${c.asOf.slice(0, 10)} is older than ${SIP_MAX_AGE_DAYS} days (indmoney-sips)`
-      : c.unknownReason ?? 'SIP commitment unknown' };
-  }
+  if (c.totalPaise === null) return { envelopePaise: null, reason: sipUnknownReason(c) };
   if (budgetPaise <= 0n) return { envelopePaise: 0n, reason: 'the monthly budget is set to ₹0' };
   const free = budgetPaise - c.totalPaise;
   if (free <= 0n) return { envelopePaise: 0n, reason: 'SIPs already use the whole budget' };

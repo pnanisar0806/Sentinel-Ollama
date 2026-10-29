@@ -56,7 +56,9 @@ describe('INDmoney fund detail units', () => {
   it('treats a missing or nonsense figure as unknown, never as zero', () => {
     expect(expensePctToBps(Number.NaN)).toBeNull();
     expect(aumCroreToPaise(0)).toBeNull();
-    // A zero expense ratio would read as a free fund and rank it top.
+    // A zero expense ratio would read as a free fund and rank it top. INDmoney sends 0 when it
+    // has none ("Expense Ratio --", Aditya Birla Nifty 50 and an NFO, live 2026-10-28).
+    expect(expensePctToBps(0)).toBeNull();
     expect(expensePctToBps(-1)).toBeNull();
   });
 

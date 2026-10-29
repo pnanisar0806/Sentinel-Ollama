@@ -25,7 +25,7 @@ import { pendingRailChanges, type PendingRailChange } from '../../src/domain/con
 import { DEFAULT_OWNER_RAILS } from '../../src/domain/rail-values.js';
 import { loadRatingFilings, watchedIssuers, type StoredFiling } from '../../src/sources/credit-ratings.js';
 import { rankHeldFunds, type MfRankingResult } from '../../src/domain/mf-ranking.js';
-import { evaluateSwitches, SWITCH_MARGIN, type SwitchCandidate } from '../../src/domain/mf-switch.js';
+import { SWITCH_MARGIN } from '../../src/domain/mf-switch.js';
 import { concentration } from '../../src/domain/allocation.js';
 import { calibration, type Calibration } from '../../src/domain/scoring.js';
 import type { RecLeg } from '../../src/domain/recommendations.js';
@@ -33,18 +33,21 @@ import { getOrder, getOrderHistory, type OrderIntent } from '../../src/domain/or
 import { humanize, sentence } from './plain';
 import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
-import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
+import { loadActiveSipMoves, loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
 import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
 import {
-  FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, loadActualMix, loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady,
-  proposeMix, suggestSips, typeOf,
-  type ActualMix, type Finding, type FundCandidates, type FundType, type RangeRow, type SignedMix, type SipSuggestion,
+  FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, fundAliases, loadActualMix, loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady,
+  neverCut, proposeMix, sameFund, suggestSips, typeOf,
+  type ActualMix, type Finding, type FundCandidates, type FundType, type RangeRow, type SignedMix, type SipInput, type SipSuggestion,
 } from '../../src/domain/fund-mix.js';
 import { chooseIndexFund, loadIndexFundRows, type IndexFundChoice } from '../../src/sources/index-funds.js';
+import { sipMoveFunds } from '../../src/domain/owner-log.js';
+import { loadUniverse } from '../../src/domain/mf-universe.js';
+import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -692,18 +695,12 @@ export async function getMfRanking(): Promise<MfRankingResult> {
 }
 
 /**
- * Each held fund against its whole AMFI category.
- *
- * "No switch" is the expected answer and a first-class one: IPS §3.7's twelve-month
- * hold is a floor, and a switch has to be worth realising tax for.
+ * /funds "Switch check" (fund switch §4): per held fund, a SIP answer (new money, no tax) and a
+ * units answer (a sale; gain = value − invested, null when invested is unknown — never ₹0).
+ * "Keep" is the expected answer and a first-class one: IPS §3.7's twelve-month hold is a floor.
  */
-export async function getMfSwitches(): Promise<{
-  switches: SwitchCandidate[]; margin: number;
-}> {
-  return {
-    switches: await evaluateSwitches(await db(), new Date().toISOString().slice(0, 10)),
-    margin: SWITCH_MARGIN,
-  };
+export async function getFundMoves(): Promise<{ moves: FundMove[]; ltcgExemptionPaise: bigint; margin: number }> {
+  return { ...await loadFundMoves(await db(), new Date().toISOString()), margin: SWITCH_MARGIN };
 }
 
 export type MixStatus = 'below midpoint' | 'in range' | 'above range' | '0% new money';
@@ -753,9 +750,13 @@ export async function getFundMix(): Promise<{
 }
 
 /**
- * /funds "Suggested SIPs" (Piece 3 Task 9): the live SIPs re-split toward the signed mix.
+ * /funds "Suggested SIPs" (Piece 3 Task 9): the live SIPs re-split toward the signed mix, never
+ * below a current SIP and never into a fund the switch check says to leave (owner, 2026-10-28).
  * A SIP is typed by its own ISIN first, then by its instrument. An unknown SIP total withholds
  * the whole suggestion with the envelope's reason — never computed from a null read as 0.
+ * A logged SIP move (fund switch §3) stops its "from" SIP (dropped even while the feed still lists
+ * it) and leaves that fund; the "to" fund stands in at the logged amount, `logged: true`, until the
+ * feed shows that SIP; then the feed amount wins. The total counts the moved money once.
  */
 export async function getSipSuggestions(): Promise<{ rows: SipSuggestion[]; totalPaise: bigint } | { rows: null; reason: string }> {
   const d = await db();
@@ -768,21 +769,50 @@ export async function getSipSuggestions(): Promise<{ rows: SipSuggestion[]; tota
   const isin = new Map((await d.query<{ sip_id: string; isin: string }>(
     `select distinct sip_id, isin from sips where isin is not null and sip_id = any($1::text[])`, [c.sips.map((s) => s.sipId)],
   )).map((r) => [r.sip_id, r.isin]));
-  const sips = [];
+  const moves = await Promise.all((await loadActiveSipMoves(d)).map(async (m) => ({
+    ...m, from: await fundAliases(d, m.fromInstrumentId), to: await fundAliases(d, m.toInstrumentId) })));
+  // Funds to leave: a logged move's "from" (listed first, so it wins), then every fund the /funds
+  // switch check (active and index, fund switch §4) says to move, with the pick's name.
+  const leavers: { from: string[]; toName: string }[] = [...moves, ...await Promise.all((await loadFundMoves(d, now)).moves
+    .flatMap((f) => (f.units.kind === 'move' ? [{ id: f.instrumentId, toName: f.units.toName }] : []))
+    .map(async (f) => ({ from: await fundAliases(d, f.id), toName: f.toName })))];
+  // Spec §3: a moved SIP's new fund is in the same AMFI category, so an untyped "to" takes the "from" type.
+  const typed = async (instrumentId: string, isinOf: string | null, aliases: string[]) => {
+    const t = FUND_TYPE_BY_ISIN[isinOf ?? ''] ?? await typeOf(d, instrumentId);
+    const m = t === null ? moves.find((x) => sameFund(x.to, aliases)) : undefined;
+    return m ? await typeOf(d, m.fromInstrumentId) : t;
+  };
+  const sips: SipInput[] = [];
+  const feed: string[][] = [];
   for (const s of c.sips) {
-    const t = FUND_TYPE_BY_ISIN[isin.get(s.sipId) ?? ''] ?? await typeOf(d, s.instrumentId);
+    const aliases = leavers.length === 0 ? [] : await fundAliases(d, s.instrumentId, isin.get(s.sipId) ?? null);
+    feed.push(aliases);
+    // A moved SIP was stopped: the feed may still list it (lag), but its money now runs in the "to" fund.
+    if (moves.some((m) => sameFund(m.from, aliases))) continue;
+    const t = await typed(s.instrumentId, isin.get(s.sipId) ?? null, aliases);
     sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise });
+  }
+  // A move whose new fund the feed does not show yet: its logged amount stands in until the feed does.
+  for (const m of moves.filter((x) => !feed.some((f) => sameFund(f, x.to)))) {
+    const t = await typed(m.toInstrumentId, null, m.to);
+    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true });
   }
   const actual = await loadActualMix(d);
   const types = Object.keys(FUND_TYPE_LABEL) as FundType[];
   // A US / Next 50 new-fund row is named from the chooser's top pick (Task 10).
   const { choices } = await getIndexFundChoices();
-  const rows = suggestSips({
+  // A fund to leave gets no new money, under every id it appears as (feed SIP or holding); its type names the pick.
+  const leaving: Record<string, string> = {};
+  const leave = (id: string, own: string[]) => { const m = leavers.find((x) => sameFund(x.from, own)); if (m) leaving[id] = m.toName; };
+  c.sips.forEach((s, i) => leave(s.instrumentId, feed[i]!));
+  for (const h of leavers.length === 0 ? [] : types.flatMap((t) => actual.byType[t].holdings)) leave(h.instrumentId, await fundAliases(d, h.instrumentId));
+  const rows = neverCut(suggestSips({
     sips, ranges: signed.ranges,
     actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
     heldByType: Object.fromEntries(types.map((t) => [t, actual.byType[t].holdings])) as Record<FundType, ActualMix['byType'][FundType]['holdings']>,
     newFundNames: Object.fromEntries(choices.flatMap((c) => (c.top ? [[c.fundType, c.top.name]] : []))),
-  });
+    leaving,
+  }));
   return { rows, totalPaise: sips.reduce((a, s) => a + s.amountPaise, 0n) };
 }
 
@@ -848,6 +878,42 @@ export async function getLog(): Promise<LogData> {
     spLabels: await loadSpLabels(d),
     idleBankCashPaise: idleBankCash(positions, balances),
   };
+}
+
+export interface SipMoveOptions {
+  /** Held funds with a known category, one per fund, deduped across accounts. `category` is the picker group: an index fund's adds its index. */
+  from: { instrumentId: string; name: string; category: string }[];
+  /** Per category: switch-universe funds plus held funds. The form drops the chosen "from". */
+  toByCategory: Record<string, { instrumentId: string; name: string }[]>;
+}
+
+/** The "Move a SIP" pickers on /log, by the category `logSipMove` checks. */
+export async function getSipMoveOptions(): Promise<SipMoveOptions> {
+  const d = await db();
+  const held = (await loadPositions(d, new Date().toISOString().slice(0, 10))).filter((p) => p.kind === 'MF');
+  const universe = await loadUniverse(d);
+  const funds = new Map((await sipMoveFunds(d, [...held, ...universe].map((f) => f.instrumentId))).map((f) => [f.id, f]));
+  // One per fund: a fund held in two accounts is two positions. A seed row whose live
+  // sibling exists is already retired by loadPositions, so the live id is what is left.
+  // An index fund's group is its category and its index, as logSipMove checks: Nifty 50 never offers Next 50.
+  const group = (f: { category: string | null; indexType: keyof typeof FUND_TYPE_LABEL | null }) =>
+    f.category && (f.indexType === null ? f.category : `${f.category} · ${FUND_TYPE_LABEL[f.indexType]}`);
+  const from = new Map<string, SipMoveOptions['from'][number]>();
+  for (const p of held) {
+    const f = funds.get(p.instrumentId);
+    const key = f?.canonicalId ?? p.instrumentId;
+    if (f?.category && !from.has(key)) from.set(key, { instrumentId: f.id, name: p.name, category: group(f)! });
+  }
+  const fromList = [...from.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const toByCategory: SipMoveOptions['toByCategory'] = {};
+  for (const c of new Set(fromList.map((f) => f.category))) {
+    toByCategory[c] = [
+      ...fromList.filter((f) => f.category === c).map((f) => ({ instrumentId: f.instrumentId, name: f.name })),
+      ...universe.filter((u) => { const f = funds.get(u.instrumentId); return f !== undefined && group(f) === c; })
+        .map((u) => ({ instrumentId: u.instrumentId, name: u.name })),
+    ].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  return { from: fromList, toByCategory };
 }
 
 /** Open Planned-spending labels for the Overview's one line. */

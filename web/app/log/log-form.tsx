@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'bond' | 'milestone' | 'note';
+type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'milestone' | 'note';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
@@ -11,6 +11,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'spend', label: 'Money spent' },
   { id: 'sale', label: 'A sale I made' },
   { id: 'purchase', label: 'Purchase outside Sentinel' },
+  { id: 'sip_move', label: 'Move a SIP' },
   { id: 'bond', label: 'Bond matured' },
   { id: 'milestone', label: 'Milestone done' },
   { id: 'note', label: 'Anything else' },
@@ -22,6 +23,11 @@ type Label = { label: string; held: string };
 
 const POTS = ['B2', 'B3', 'B4', 'SP'];
 
+type SipMoveOptions = {
+  from: { instrumentId: string; name: string; category: string }[];
+  toByCategory: Record<string, { instrumentId: string; name: string }[]>;
+};
+
 async function post(body: object): Promise<{ ok: boolean; text: string }> {
   const res = await fetch('/api/log', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const json = await res.json() as { message?: string; error?: string };
@@ -32,7 +38,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -42,6 +48,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   pots: Pot[];
   spLabels: Label[];
   idleCash: string;
+  sipMoves: SipMoveOptions;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('goal');
@@ -110,6 +117,11 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   const spendFrom = pick['from'] ?? (noLabels ? 'BANK' : 'SP');
   const sold = sellable.find((h) => h.id === (pick['instrumentId'] ?? sellable[0]?.id));
   const saleTo = pick['destination'] ?? '';
+  const moveFrom = sipMoves.from.find((f) => f.instrumentId === (pick['fromInstrumentId'] ?? sipMoves.from[0]?.instrumentId));
+  const moveTo = moveFrom ? (sipMoves.toByCategory[moveFrom.category] ?? []).filter((f) => f.instrumentId !== moveFrom.instrumentId) : [];
+  // The domain refuses a first month before last month (IST); the picker says so up front.
+  const [ty, tm] = today.split('-').map(Number) as [number, number];
+  const minMonth = tm === 1 ? `${ty - 1}-12` : `${ty}-${String(tm - 1).padStart(2, '0')}`;
 
   return (
     <div className="form">
@@ -308,6 +320,54 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
           </>
         )}
 
+        {tab === 'sip_move' && (
+          <>
+            <p className="dim">
+              You moved a monthly SIP from one fund to another in the same category. Sentinel records it; the SIP itself
+              is changed where you hold it. Only funds with a known category are offered, and the new fund must share it.
+            </p>
+            {!moveFrom
+              ? <p className="dim">No held fund with a known category on record.</p>
+              : (
+                <>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="fromInstrumentId">From</label>
+                      <select id="fromInstrumentId" name="fromInstrumentId" defaultValue={moveFrom.instrumentId} onChange={choose('fromInstrumentId')} required>
+                        {sipMoves.from.map((f) => <option key={f.instrumentId} value={f.instrumentId}>{f.name}</option>)}
+                      </select>
+                      <span className="help">{moveFrom.category}</span>
+                    </div>
+                    <div className="field">
+                      {moveTo.length === 0
+                        ? <><span>To</span><span className="help">No other fund in this category on record.</span></>
+                        : (
+                          <>
+                          <label htmlFor="toInstrumentId">To</label>
+                          <select id="toInstrumentId" name="toInstrumentId" key={moveFrom.instrumentId} required>
+                            {moveTo.map((f) => <option key={f.instrumentId} value={f.instrumentId}>{f.name}</option>)}
+                          </select>
+                          </>
+                        )}
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="rupees">Monthly amount (₹)</label>
+                      <input id="rupees" name="rupees" inputMode="decimal" required />
+                    </div>
+                    <div className="field">
+                      <label htmlFor="firstMonth">First month of the new SIP</label>
+                      <input id="firstMonth" name="firstMonth" type="month" min={minMonth} defaultValue={today.slice(0, 7)} required />
+                    </div>
+                    {date}
+                  </div>
+                  {note}
+                </>
+              )}
+          </>
+        )}
+
         {tab === 'bond' && (bonds.length === 0
           ? <p className="dim">No outstanding bonds on record.</p>
           : (
@@ -356,7 +416,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
         )}
 
         <div className="btn-row">
-          <button className="btn btn-primary" type="submit" disabled={busy}>
+          <button className="btn btn-primary" type="submit" disabled={busy || (tab === 'sip_move' && moveTo.length === 0)}>
             {busy ? <span className="spinner" aria-hidden="true" /> : null}
             Record it
           </button>

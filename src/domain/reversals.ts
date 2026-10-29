@@ -5,17 +5,18 @@ import { formatInr, type Paise } from '../money/paise.js';
 /**
  * Correcting a mistaken owner entry (spec §3.4): a `log_reversals` row, never an edit.
  *
- * Keys: a single row (purchase, SIP payment, goal move) keys on its table id; a group
+ * Keys: a single row (purchase, SIP payment, goal move, SIP move) keys on its table id; a group
  * (earmark, spend, sale) keys on its owner audit row id, whose payload `rowIds` lists the
  * group's flows. A group writes its key plus one `bucket_flow` reversal per flow, so the
  * balance reader sees them. Only entries whose audit payload carries `rowId`/`rowIds` —
  * those written since batch A — can be reversed.
  */
-export const REVERSAL_ENTITIES = ['bucket_flow', 'owner_purchase', 'owner_sip_payment', 'owner_sale', 'earmark', 'spend'] as const;
+export const REVERSAL_ENTITIES = ['bucket_flow', 'owner_purchase', 'owner_sip_payment', 'owner_sale', 'earmark', 'spend', 'sip_move'] as const;
 export type ReversalEntity = typeof REVERSAL_ENTITIES[number];
 
 const TABLES: Partial<Record<ReversalEntity, string>> = {
   bucket_flow: 'bucket_flows', owner_purchase: 'owner_purchases', owner_sip_payment: 'owner_sip_payments', owner_sale: 'owner_sales',
+  sip_move: 'sip_moves',
 };
 export const GROUPS: ReadonlySet<ReversalEntity> = new Set(['earmark', 'spend', 'owner_sale']);
 

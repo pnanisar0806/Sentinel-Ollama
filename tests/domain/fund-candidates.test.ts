@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import type { SwitchCandidate } from '../../src/domain/mf-switch.js';
+import { persistMfMetadata } from '../../src/domain/mf-metadata.js';
 
 /**
  * Piece 3 Task 7 (Decisions 7–9): which held funds may take this month's money. Only a fund
@@ -118,5 +119,42 @@ describe('loadFundCandidates', () => {
     const r = await loadFundCandidates(db, AS_OF);
     expect(r.excluded.map((e) => e.instrumentId)).not.toContain('MF:IDX');
     expect(r.buys[0]!.instrumentId).toBe('MF:IDX');
+  });
+
+  // Fund switch §4.4: the index switch check's verdict reaches the advisor too.
+  it('an index fund whose same-index peer clears the 0.10-point bar is excluded, naming the peer', async () => {
+    await approveMix(db, { band: '15+' }, NOW);
+    await persistMfMetadata(db, [{ instrumentId: 'MF:IDX', asOf: AS_OF, expenseRatioBps: 20, aumPaise: null, category: null, benchmarkName: null }]);
+    await db.query(
+      `insert into index_fund_candidates (fund_type, indmoney_fund_id, name, benchmark_name, amfi_scheme_code,
+         expense_ratio_bps, aum_paise, sip_allowed, as_of, source)
+       values ('NIFTY50', '1039539', 'Navi Nifty 50 Index Fund', 'Nifty 50 TR INR', '149999', 9, 1000000000000, true, $1, 'indmoney-mcp')`,
+      [AS_OF]);
+    const r = await loadFundCandidates(db, AS_OF);
+    expect(r.excluded.find((e) => e.instrumentId === 'MF:IDX')?.reason).toBe('flagged for a switch to Navi Nifty 50 Index Fund');
+    expect(r.buys.map((b) => b.instrumentId)).not.toContain('MF:IDX');
+  });
+
+  // Fund switch §3: a fund whose SIP the owner moved takes no new money from the advisor.
+  const moveFrom = async (fromId: string) => {
+    await db.query(`insert into instruments (id, kind, name, currency, isin) values ('MFU:120505', 'MF', 'Invesco India Mid Cap Fund', 'INR', 'INF205K01MN9')`);
+    await db.query(`insert into sip_moves (from_instrument_id, to_instrument_id, amount_paise, first_month, occurred_on, as_of, source)
+      values ($1, 'MFU:120505', 300100, '2026-11', '2026-10-18', '2026-10-18T06:00:00Z', 'owner-web')`, [fromId]);
+  };
+
+  it('a fund whose SIP was moved is excluded: SIP moved to <to>', async () => {
+    await approveMix(db, { band: '15+' }, NOW);
+    await moveFrom('MF:HDFC-MID');
+    const r = await loadFundCandidates(db, AS_OF);
+    expect(r.excluded.find((e) => e.instrumentId === 'MF:HDFC-MID')?.reason).toBe('SIP moved to Invesco India Mid Cap Fund');
+    expect(r.buys.map((b) => b.instrumentId)).toEqual(['MF:IDX']);
+  });
+
+  it('a move from an ISIN alias of the holding excludes it too, not only the raw id', async () => {
+    await approveMix(db, { band: '15+' }, NOW);
+    await db.query(`insert into instruments (id, kind, name, currency, isin) values ('IND:3097', 'MF', 'HDFC Mid Cap (INDmoney)', 'INR', 'INF179K01XQ0')`);
+    await moveFrom('IND:3097');
+    const r = await loadFundCandidates(db, AS_OF);
+    expect(r.excluded.find((e) => e.instrumentId === 'MF:HDFC-MID')?.reason).toBe('SIP moved to Invesco India Mid Cap Fund');
   });
 });

@@ -1,10 +1,12 @@
 import type { Db } from '../db/client.js';
 import { formatInr, type Paise } from '../money/paise.js';
-import { istDate } from './sips.js';
+import { istDate, istMonth } from './sips.js';
 import { GROUPS, type ReversalEntity } from './reversals.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
 import { loadPositions } from './networth.js';
 import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
+import { typeOf } from './fund-mix.js';
+import { FUND_TYPE_LABEL } from './fund-types.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -311,6 +313,116 @@ export async function logPurchase(
   });
 }
 
+export interface SipMove {
+  id: string; fromInstrumentId: string; fromName: string; toInstrumentId: string; toName: string;
+  amountPaise: bigint; firstMonth: string /* YYYY-MM */; on: string; note: string;
+}
+
+/** YYYY-MM one month before `month`. */
+const prevMonth = (month: string): string => {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+};
+
+export type SipIndexType = 'NIFTY50' | 'NEXT50' | 'US';
+const INDEX_TYPES: readonly string[] = ['NIFTY50', 'NEXT50', 'US'] satisfies SipIndexType[];
+
+/**
+ * The funds a SIP move may name, with the category it is checked against: `amfiCategory` on
+ * the instrument or its canonical sibling, else a switch-universe fund's (`MFU:*`)
+ * `metadata.category`. `indexType` is the index an index fund tracks: a registered challenger's
+ * `metadata.indexType`, else the fund's type (`typeOf`); null for any other fund. The /log
+ * pickers read both, so every pair they offer passes.
+ */
+export async function sipMoveFunds(
+  db: Db, ids: string[], lock = false,
+): Promise<{ id: string; name: string; canonicalId: string | null; category: string | null; indexType: SipIndexType | null }[]> {
+  const rows = await db.query<{ id: string; name: string; canonicalId: string | null; category: string | null; metaIndexType: string | null }>(
+    `select i.id, i.name, i.canonical_id "canonicalId",
+            coalesce(i.metadata->>'amfiCategory',
+                     (select s.metadata->>'amfiCategory' from instruments s
+                       where s.canonical_id = i.canonical_id and s.id <> i.id and s.metadata->>'amfiCategory' is not null
+                       limit 1),
+                     case when i.id like 'MFU:%' then i.metadata->>'category' end) category,
+            i.metadata->>'indexType' "metaIndexType"
+       from instruments i where i.id = any($1::text[])${lock ? ' for update of i' : ''}`,
+    [ids]);
+  return Promise.all(rows.map(async ({ metaIndexType, ...r }) => {
+    const t = metaIndexType ?? (await typeOf(db, r.id))?.type ?? null;
+    return { ...r, indexType: t !== null && INDEX_TYPES.includes(t) ? t as SipIndexType : null };
+  }));
+}
+
+/**
+ * A SIP moved from one fund to another in the same AMFI category (fund switch spec §3).
+ * The category is the one `sipMoveFunds` reads. One active move per "from" fund; a reversed one frees it.
+ */
+export async function logSipMove(
+  db: Db,
+  m: { on: string; fromInstrumentId: string; toInstrumentId: string; amountPaise: bigint; firstMonth: string; note: string },
+  now = new Date().toISOString(),
+): Promise<{ id: string }> {
+  if (!m.fromInstrumentId.trim()) throw new Error('pick the fund the SIP moved from');
+  if (!m.toInstrumentId.trim()) throw new Error('pick the fund the SIP moved to');
+  if (m.fromInstrumentId === m.toInstrumentId) throw new Error('the new fund must differ from the old one');
+  if (m.amountPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(m.on, now);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(m.firstMonth)) throw new Error(`not a month: ${m.firstMonth}`);
+  const earliest = prevMonth(istMonth(now));
+  if (m.firstMonth < earliest) throw new Error(`the first month cannot be before ${earliest}`);
+  const note = m.note.trim();
+  return db.withTransaction(async (tx) => {
+    // Row locks on both funds, so two concurrent moves from one fund serialise on the active check.
+    const funds = await sipMoveFunds(tx, [m.fromInstrumentId, m.toInstrumentId], true);
+    const fund = (id: string) => {
+      const f = funds.find((x) => x.id === id);
+      if (!f) throw new Error(`no fund ${id}`);
+      if (!f.category) throw new Error(`category unknown for ${f.name}`);
+      return f as { id: string; name: string; category: string; indexType: SipIndexType | null };
+    };
+    const from = fund(m.fromInstrumentId);
+    const to = fund(m.toInstrumentId);
+    if (from.category !== to.category) throw new Error('the new fund must be in the same category');
+    // AMFI files every index under one category: Nifty 50 → Next 50 would pass the check above.
+    if (from.indexType !== to.indexType) {
+      const tracks = (f: { name: string; indexType: SipIndexType | null }) =>
+        `${f.name} ${f.indexType === null ? 'is not an index fund' : `tracks the ${FUND_TYPE_LABEL[f.indexType]}`}`;
+      throw new Error(`a SIP moves only between funds tracking the same index: ${tracks(from)}, ${tracks(to)}`);
+    }
+    if ((await loadActiveSipMoves(tx)).some((x) => x.fromInstrumentId === from.id)) {
+      throw new Error('a move from this fund is already logged; reverse it first');
+    }
+    const [row] = await tx.query<{ id: string }>(
+      `insert into sip_moves (from_instrument_id, to_instrument_id, amount_paise, first_month, note, occurred_on, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, $7, 'owner-web') returning id::text`,
+      [from.id, to.id, m.amountPaise.toString(), m.firstMonth, note, m.on, now]);
+    await audit(tx, 'sip_move', row!.id, 'LOGGED', {
+      on: m.on, fromInstrumentId: from.id, fromName: from.name, toInstrumentId: to.id, toName: to.name,
+      amountPaise: m.amountPaise.toString(), firstMonth: m.firstMonth, note, rowId: row!.id, source: 'owner-web',
+    });
+    return { id: row!.id };
+  });
+}
+
+/** Every SIP move not reversed, newest first. */
+export async function loadActiveSipMoves(db: Db): Promise<SipMove[]> {
+  const rows = await db.query<{
+    id: string; from_id: string; from_name: string; to_id: string; to_name: string;
+    amount_paise: string; first_month: string; on: string; note: string;
+  }>(
+    `select m.id::text, m.from_instrument_id from_id, f.name from_name, m.to_instrument_id to_id, t.name to_name,
+            m.amount_paise::text, m.first_month, m.occurred_on::text "on", m.note
+       from sip_moves m
+       join instruments f on f.id = m.from_instrument_id
+       join instruments t on t.id = m.to_instrument_id
+      where not exists (select 1 from log_reversals r where r.entity = 'sip_move' and r.entity_id = m.id::text)
+      order by m.id desc`);
+  return rows.map((r) => ({
+    id: r.id, fromInstrumentId: r.from_id, fromName: r.from_name, toInstrumentId: r.to_id, toName: r.to_name,
+    amountPaise: BigInt(r.amount_paise), firstMonth: r.first_month, on: r.on, note: r.note,
+  }));
+}
+
 export async function completeMilestone(db: Db, id: string, on: string, now = new Date().toISOString()): Promise<void> {
   assertDate(on, now);
   const [m] = await db.query<{ completed_on: string | null; name: string }>(
@@ -340,6 +452,7 @@ export interface TimelineEntry {
 }
 
 type Payload = Record<string, unknown>;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 function describe(entity: string, entityId: string, action: string, p: Payload): { kind: string; summary: string } {
   const money = (v: unknown) => (typeof v === 'string' ? formatInr(BigInt(v) as Paise) : 'unknown amount');
@@ -363,6 +476,11 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       return { kind: 'Sale', summary: `Sold ${p['units'] ? `${String(p['units'])} ` : ''}${String(p['name'] ?? entityId)} for ${money(p['proceedsPaise'])} → ${to}` };
     }
     case 'owner_sip_payment/RECORDED': return { kind: 'SIP', summary: `Paid a ${money(p['amountPaise'])} SIP instalment` };
+    case 'sip_move/LOGGED': {
+      const [y, mo] = String(p['firstMonth'] ?? '').split('-');
+      const month = y && mo ? `${MONTHS[Number(mo) - 1] ?? mo} ${y}` : 'unknown month';
+      return { kind: 'SIP move', summary: `SIP moved: ${String(p['fromName'] ?? '')} → ${String(p['toName'] ?? '')}, ${money(p['amountPaise'])}/month from ${month}` };
+    }
     case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
     case 'owner_note/NOTE': return { kind: 'Note', summary: String(p['text'] ?? '') };
@@ -378,7 +496,7 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
       where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
-        'owner_sip_payment', 'earmark', 'spend', 'owner_sale')
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move')
       order by at desc, id desc limit $1`,
     [limit],
   );

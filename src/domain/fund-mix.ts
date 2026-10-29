@@ -4,7 +4,10 @@ import { CAPS } from './allocation.js';
 import { loadMfMetadata } from './mf-metadata.js';
 import { heldFunds } from './mf-ranking.js';
 import { evaluateSwitches } from './mf-switch.js';
+import { loadFundMoves } from './fund-moves.js';
 import { loadPositions, type Position } from './networth.js';
+import { loadActiveSipMoves } from './owner-log.js';
+import { sipInstrumentKey } from './sips.js';
 import { FUND_TYPE_LABEL, byGap, midBps, type FundBuy, type FundCandidates, type FundType, type RangeRow } from './fund-types.js';
 
 export { FUND_TYPE_LABEL, byGap, midBps, type FundBuy, type FundCandidates, type FundType, type RangeRow };
@@ -37,6 +40,7 @@ export const FUND_TYPE_BY_ISIN: Record<string, FundTyping> = {
   INF109K016L0: { type: 'LARGE_ACTIVE', topUp: true },  // ICICI Pru Large Cap Direct
   INF179K01XQ0: { type: 'MID', topUp: true },           // HDFC Mid Cap Direct
   INF247L01445: { type: 'MID', topUp: true },           // Motilal Oswal Midcap Direct
+  INF205K01MV6: { type: 'MID', topUp: true },           // Invesco India Mid Cap Direct (AMFI 120403; SIP from Nov 2026)
   INF194KB1AL4: { type: 'SMALL', topUp: true },         // Bandhan Small Cap Direct
   INF732E01045: { type: 'NEXT50', topUp: false },       // Junior BeES — §8: kept, not topped up
 };
@@ -173,9 +177,11 @@ export function normalisedMidpointsBps(ranges: RangeRow[]): Record<FundType, num
 export interface SipSuggestion {
   fundType: FundType | null; instrumentId: string | null; fundName: string;
   currentPaise: bigint; suggestedPaise: bigint; reason: string;
+  /** A logged SIP move's new fund the feed does not show yet (fund switch §3). */
+  logged: boolean;
 }
 
-export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint }
+export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint; logged?: boolean }
 
 const ROUND_PAISE = 10_000n; // ₹100
 const NON_CORE_CAP_BPS = 3_000n;
@@ -196,7 +202,10 @@ export function suggestSips(i: {
   heldByType: Record<FundType, { instrumentId: string; name: string; valuePaise: bigint; topUp: boolean }[]>;
   /** The new fund to open per type, e.g. `chooseIndexFund(...).top.name` for US and NEXT50. */
   newFundNames?: Partial<Record<FundType, string>>;
+  /** Held funds the switch check says to leave → the switch pick's name (owner, 2026-10-28). */
+  leaving?: Record<string, string>;
 }): SipSuggestion[] {
+  const leaving = i.leaving ?? {};
   const typed = i.sips.filter((s) => s.type !== null);
   const total = typed.reduce((a, s) => a + s.amountPaise, 0n);
   const range = new Map(i.ranges.map((r) => [r.type, r]));
@@ -220,18 +229,20 @@ export function suggestSips(i: {
   for (const t of ALL_TYPES) {
     const mine = typed.filter((s) => s.type === t);
     if (weight(t) === 0n) {
-      for (const s of mine) rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: '0% new money — held, never topped up' });
+      for (const s of mine) rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: '0% new money — held, never topped up', logged: s.logged ?? false });
       continue;
     }
-    for (const s of mine.filter((x) => !x.topUp)) {
-      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: 'kept, not topped up' });
+    for (const s of mine.filter((x) => !x.topUp || leaving[x.instrumentId] !== undefined)) {
+      const why = s.topUp ? 'kept, not topped up — the switch check says to leave it' : 'kept, not topped up';
+      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: why, logged: s.logged ?? false });
     }
     const amount = typePaise(t);
-    let to: { instrumentId: string | null; fundName: string; amountPaise: bigint }[] = mine.filter((x) => x.topUp);
+    let to: { instrumentId: string | null; fundName: string; amountPaise: bigint; logged?: boolean }[] = mine.filter((x) => x.topUp && leaving[x.instrumentId] === undefined);
     if (to.length === 0) {
       if (amount === 0n) continue;
-      const held = i.heldByType[t].filter((h) => h.topUp).sort((a, b) => (b.valuePaise > a.valuePaise ? 1 : b.valuePaise < a.valuePaise ? -1 : 0))[0];
-      to = [held ? { instrumentId: held.instrumentId, fundName: held.name, amountPaise: 0n } : { instrumentId: null, fundName: newFundLabel(t, i.newFundNames ?? {}), amountPaise: 0n }];
+      const held = i.heldByType[t].filter((h) => h.topUp && leaving[h.instrumentId] === undefined).sort((a, b) => (b.valuePaise > a.valuePaise ? 1 : b.valuePaise < a.valuePaise ? -1 : 0))[0];
+      const pick = i.heldByType[t].map((h) => leaving[h.instrumentId]).find((n) => n !== undefined);
+      to = [held ? { instrumentId: held.instrumentId, fundName: held.name, amountPaise: 0n } : { instrumentId: null, fundName: pick ?? newFundLabel(t, i.newFundNames ?? {}), amountPaise: 0n }];
     }
     const current = to.reduce((a, s) => a + s.amountPaise, 0n);
     const r = range.get(t)!;
@@ -239,7 +250,7 @@ export function suggestSips(i: {
       + `(midpoint ${bpsText(midBps(r))}, actual ${bpsText(i.actualBps[t])}${capped && isNonCore(t) ? '; non-core capped at 30%' : ''})`;
     for (const s of to) {
       const share = current === 0n ? amount : (amount * s.amountPaise) / current;
-      const row: SipSuggestion = { fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: (share / ROUND_PAISE) * ROUND_PAISE, reason: why };
+      const row: SipSuggestion = { fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: (share / ROUND_PAISE) * ROUND_PAISE, reason: why, logged: s.logged ?? false };
       rows.push(row);
       if (t === 'NIFTY50' && (anchor === null || row.currentPaise > anchor.currentPaise)) anchor = row;
     }
@@ -249,9 +260,19 @@ export function suggestSips(i: {
     anchor.reason += '; takes the ₹100 rounding remainder';
   }
   for (const s of i.sips.filter((x) => x.type === null)) {
-    rows.push({ fundType: null, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: 'type unknown — kept as is' });
+    rows.push({ fundType: null, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: 'type unknown — kept as is', logged: s.logged ?? false });
   }
   return rows;
+}
+
+/**
+ * Owner, 2026-10-28: a SIP is never suggested below its current amount. Until batch B sizes
+ * additions against the free money, the re-split's cuts are shown as "kept" and only its
+ * additions stand, so the suggested total can exceed today's.
+ */
+export function neverCut(rows: SipSuggestion[]): SipSuggestion[] {
+  return rows.map((r) => (r.suggestedPaise >= r.currentPaise ? r
+    : { ...r, suggestedPaise: r.currentPaise, reason: 'kept — Sentinel never suggests cutting a SIP' }));
 }
 
 /**
@@ -272,6 +293,20 @@ export async function typeOf(db: Db, instrumentId: string): Promise<FundTyping |
   if (isin !== null) return FUND_TYPE_BY_ISIN[isin] ?? null;
   return FUND_TYPE_BY_ID[instrumentId] ?? null;
 }
+
+/**
+ * What identifies a fund across sources: its alias key (`sipInstrumentKey`) and every ISIN on it
+ * or a one-hop alias, plus a feed row's own ISIN. Two funds are one when the lists share an entry —
+ * a move's "to" may be MFU:* or MF:* while the feed and holdings say IND:*.
+ */
+export async function fundAliases(db: Db, instrumentId: string, isin: string | null = null): Promise<string[]> {
+  const isins = await db.query<{ isin: string }>(
+    `select distinct b.isin from instruments a join instruments b on b.id=a.id
+       or (a.canonical_id is not null and b.canonical_id=a.canonical_id)
+       or (a.isin is not null and b.isin=a.isin) where a.id=$1 and b.isin is not null`, [instrumentId]);
+  return [await sipInstrumentKey(db, instrumentId), ...isins.map((r) => r.isin), ...(isin === null ? [] : [isin])];
+}
+export const sameFund = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
 export interface ActualMix {
   totalPaise: bigint;
@@ -416,15 +451,26 @@ export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCand
 
   const excluded: FundCandidates['excluded'] = mix.untyped.map((u) => ({ instrumentId: u.instrumentId, name: u.name, reason: 'type unknown' }));
   const buys: FundBuy[] = [];
+  const moves = await Promise.all((await loadActiveSipMoves(db)).map(async (m) => ({ toName: m.toName, from: await fundAliases(db, m.fromInstrumentId) })));
   let switches: Awaited<ReturnType<typeof evaluateSwitches>> | null = null;
+  let leaving: Map<string, string> | null = null;
   for (const t of ALL_TYPES) {
     const r = range.get(t);
     const actualBps = mix.byType[t].shareBps;
     for (const h of mix.byType[t].holdings) {
       const out = (reason: string) => excluded.push({ instrumentId: h.instrumentId, name: h.name, reason });
+      if (moves.length > 0) {
+        const own = await fundAliases(db, h.instrumentId);
+        const moved = moves.find((m) => sameFund(m.from, own));
+        if (moved) { out(`SIP moved to ${moved.toName}`); continue; }
+      }
       if (r === undefined || !r.newMoney) { out('0% new money'); continue; }
       if (!h.topUp) { out('kept, not topped up'); continue; }
       if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
+      // The /funds switch check (active and index, fund switch §4) is the one verdict on leaving a fund.
+      leaving ??= new Map((await loadFundMoves(db, asOf)).moves.flatMap((f) => (f.units.kind === 'move' ? [[f.instrumentId, f.units.toName] as const] : [])));
+      const pick = leaving.get(h.instrumentId);
+      if (pick !== undefined) { out(`flagged for a switch to ${pick}`); continue; }
       let quality: string;
       if (!ACTIVE_TYPES.has(t) || h.kind === 'ETF') {
         quality = h.kind === 'ETF' ? 'ETF — exempt' : 'index fund — exempt';
@@ -433,7 +479,6 @@ export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCand
         const s = switches.find((x) => x.heldInstrumentId === h.instrumentId);
         // cohortSize counts the category's scored peers, not the held fund: n = cohortSize + 1.
         if (s === undefined || s.cohortSize === 0) { out('no category cohort on record'); continue; }
-        if (s.challengerId !== null) { out(`flagged for a switch to ${s.challengerName ?? s.challengerId}`); continue; }
         const n = s.cohortSize + 1;
         if (s.heldRank > Math.ceil(n / 2)) { out(`rank ${s.heldRank} of ${n} — not in the top half`); continue; }
         quality = `rank ${s.heldRank} of ${n} in ${s.category}`;

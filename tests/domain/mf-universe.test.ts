@@ -115,6 +115,16 @@ describe('choosing candidates', () => {
     await db.close();
   });
 
+  it("a manual universe rebuild keeps a registered index challenger's index fields", async () => {
+    await db.query(`insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
+      values ('MFU:7', 'MF', 'Navi Nifty 50 Index Fund', 'INR', 'INF007A01019', '7', $1::jsonb)`,
+      [JSON.stringify({ indexChallenger: true, category: 'Other Scheme - Index Funds', indexType: 'NIFTY50' })]);
+    await persistUniverse(db, candidatesIn([row('7', 'INF007A01019', MID)], [MID]));
+    const [m] = await db.query<{ metadata: Record<string, unknown> }>(`select metadata from instruments where id = 'MFU:7'`);
+    expect(m!.metadata).toMatchObject({ indexChallenger: true, indexType: 'NIFTY50', universe: true, category: MID });
+    await db.close();
+  });
+
   it('round-trips the category through instrument metadata', async () => {
     await persistUniverse(db, candidatesIn([row('7', 'INF007A01019', MID)], [MID]));
     expect((await loadUniverse(db))[0]!.category).toBe(MID);

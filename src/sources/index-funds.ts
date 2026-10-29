@@ -6,20 +6,25 @@ import {
 import { fetchAllInCategory, isoFromIndmoneyDate, resolvePeerToAmfi } from './mf-peers.js';
 import { fetchMfDetails } from './indmoney.js';
 import { aumCroreToPaise, expensePctToBps } from '../domain/mf-metadata.js';
+import { universeInstrumentId } from '../domain/mf-universe.js';
+import { sipMoveFunds } from '../domain/owner-log.js';
 
 /**
  * Spec §8.1 / Decision 11: the new US and Nifty Next 50 index fund. The owner keeps the
  * funds held there but tops neither up, so new money needs a new fund; this reads the
- * candidates daily and ranks the Direct Growth plans open to SIPs.
+ * candidates daily and ranks the Direct Growth plans open to SIPs. Fund-switch spec §4.4:
+ * Nifty 50 funds are read the same way, as same-index peers for a held Nifty 50 fund
+ * (`src/domain/index-switch.ts`).
  *
  * Verified live 2026-10-26 (tests/fixtures/indmoney-index-funds-2026-10-26.json):
  *  - `get_mf_by_category` carries `sip_allowed`; every `global-index-funds` row was false.
  *  - No field in `get_mf_by_category` or `get_mf_funds_details` (baseline or
  *    `fund_performance`) carries tracking error, so `tracking_error_bps` stays null.
  */
-export type IndexFundType = 'US' | 'NEXT50';
+export type IndexFundType = 'US' | 'NEXT50' | 'NIFTY50';
 
 export const INDEX_FUND_SLUGS: Record<IndexFundType, string> = {
+  NIFTY50: 'nifty-50-index-funds', // fund-switch spec §4.4: same-index peers for a held Nifty 50 fund
   NEXT50: 'nifty-next-50-index-funds',
   US: 'global-index-funds',
 };
@@ -66,12 +71,12 @@ export async function recordIndexFundCandidates(
   db: Db, client: McpClient, asOf: string, deps: AmfiDeps = {},
 ): Promise<{ stored: number }> {
   // Downloaded only once a listing has needed it, so an INDmoney failure costs no AMFI fetch.
-  let directGrowth: Set<string> | null = null;
+  let directGrowth: Map<string, UniverseRow> | null = null;
   const navOn = deps.amfiNavOn ?? defaultNavOn;
   const navCache = new Map<string, NavRow[]>();
 
   let stored = 0;
-  for (const fundType of ['NEXT50', 'US'] as const) {
+  for (const fundType of ['NEXT50', 'US', 'NIFTY50'] as const) {
     // The tool takes 1–20 per page.
     const peers = await fetchAllInCategory(client, INDEX_FUND_SLUGS[fundType], 20);
     const benchmark = new Map<string, string | null>();
@@ -84,8 +89,8 @@ export async function recordIndexFundCandidates(
       const iso = p.navDate === null ? null : isoFromIndmoneyDate(p.navDate);
       let schemeCode: string | null = null;
       if (iso !== null) {
-        directGrowth ??= new Set((await (deps.amfiUniverse ?? defaultUniverse)())
-          .filter(isDirectGrowth).map((u) => u.schemeCode));
+        directGrowth ??= new Map((await (deps.amfiUniverse ?? defaultUniverse)())
+          .filter(isDirectGrowth).map((u) => [u.schemeCode, u]));
         const dg = directGrowth;
         if (!navCache.has(iso)) navCache.set(iso, (await navOn(iso)).filter((r) => dg.has(r.schemeCode)));
         schemeCode = resolvePeerToAmfi(p, navCache.get(iso)!)?.schemeCode ?? null;
@@ -105,7 +110,47 @@ export async function recordIndexFundCandidates(
       stored += inserted.length;
     }
   }
+  await registerIndexChallengers(db, directGrowth);
   return { stored };
+}
+
+/**
+ * Fund switch §4.4: each ranked same-index fund becomes an `MFU:<scheme>` instrument — the id
+ * `loadFundMoves` names — so a SIP move to it can be logged on /log. Idempotent; follows
+ * `persistUniverse`, and a fund the owner already holds keeps its own instrument.
+ *
+ * `metadata.category` is the AMFI category `logSipMove` reads on the held fund of the same index:
+ * AMFI files index funds under more than one heading, so the peer's own heading could refuse a
+ * like-for-like move. The real gate is `metadata.indexType`, which `logSipMove` also checks. No
+ * held fund of that index with a category: nothing to register, as no move from it can be logged.
+ */
+async function registerIndexChallengers(db: Db, amfi: ReadonlyMap<string, UniverseRow> | null): Promise<void> {
+  const { rows } = await loadIndexFundRows(db);
+  const owned = await db.query<{ id: string }>(`select id from instruments where kind = 'MF' and id not like 'MFU:%'`);
+  const categoryOf = new Map<string, string>();
+  for (const f of await sipMoveFunds(db, owned.map((r) => r.id))) {
+    if (f.category !== null && f.indexType !== null && !categoryOf.has(f.indexType)) categoryOf.set(f.indexType, f.category);
+  }
+  for (const fundType of Object.keys(INDEX_FUND_SLUGS) as IndexFundType[]) {
+    const category = categoryOf.get(fundType);
+    const choice = chooseIndexFund(rows, fundType);
+    if (category === undefined || choice.top === null) continue;
+    for (const r of [choice.top, ...choice.alternatives]) {
+      const code = r.amfiSchemeCode!; // ranked rows are verified Direct Growth schemes
+      const isin = amfi?.get(code)?.isin ?? null;
+      const held = await db.query(
+        `select 1 from instruments where id not like 'MFU:%' and (scheme_code = $1 or isin = $2)`, [code, isin]);
+      if (held.length > 0) continue;
+      await db.query(
+        `insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
+         values ($1, 'MF', $2, 'INR', $3, $4, $5::jsonb)
+         on conflict (id) do update set name = excluded.name, isin = coalesce(excluded.isin, instruments.isin),
+           metadata = instruments.metadata || excluded.metadata`,
+        [universeInstrumentId(code), r.name, isin, code, JSON.stringify({
+          indexChallenger: true, category, indexType: fundType, benchmark: r.benchmarkName, asOf: r.asOf, source: r.source,
+        })]);
+    }
+  }
 }
 
 /** Per fund type, the rows of its latest `as_of`: a failed US listing never blanks a fresh Next 50. */
@@ -141,7 +186,11 @@ export interface IndexFundChoice {
   reason: string | null;
 }
 
-const BENCHMARK: Record<IndexFundType, { re: RegExp; label: string }> = {
+export const BENCHMARK: Record<IndexFundType, { re: RegExp; label: string }> = {
+  // Anchored: Nifty 500, Next 50, Equal Weight, Value 20 and Shariah are other indices. Live
+  // 2026-10-28 every nifty-50-index-funds fund reported "Nifty 50 TR INR". An unlisted spelling
+  // shows as "tracks X, not Nifty 50" — visible, never silently ranked.
+  NIFTY50: { re: /^nifty 50(?: tr inr| tri| total return(?: index)?)?$/i, label: 'Nifty 50' },
   NEXT50: { re: /nifty next 50/i, label: 'Nifty Next 50' },
   US: { re: /s&p 500|nasdaq[- ]?100/i, label: 'S&P 500 or NASDAQ-100' },
 };
@@ -150,6 +199,7 @@ const CLOSED = 'closed to new SIPs on INDmoney';
 const NONE_OPEN: Record<IndexFundType, string> = {
   US: 'no eligible fund is open to SIPs (RBI overseas limit)',
   NEXT50: 'no eligible fund is open to SIPs',
+  NIFTY50: 'no eligible fund is open to SIPs',
 };
 const NONE_ELIGIBLE = 'no eligible fund — see Not proposed';
 
