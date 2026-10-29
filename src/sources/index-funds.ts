@@ -8,6 +8,7 @@ import { fetchMfDetails } from './indmoney.js';
 import { aumCroreToPaise, expensePctToBps } from '../domain/mf-metadata.js';
 import { universeInstrumentId } from '../domain/mf-universe.js';
 import { sipMoveFunds } from '../domain/owner-log.js';
+import { instrumentMeta } from '../domain/owner-sales.js';
 
 /**
  * Spec §8.1 / Decision 11: the new US and Nifty Next 50 index fund. The owner keeps the
@@ -145,10 +146,11 @@ async function registerIndexChallengers(db: Db, amfi: ReadonlyMap<string, Univer
         `insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
          values ($1, 'MF', $2, 'INR', $3, $4, $5::jsonb)
          on conflict (id) do update set name = excluded.name, isin = coalesce(excluded.isin, instruments.isin),
-           metadata = instruments.metadata || excluded.metadata`,
-        [universeInstrumentId(code), r.name, isin, code, JSON.stringify({
+           metadata = coalesce(${instrumentMeta('instruments')}, '{}'::jsonb) || excluded.metadata`,
+        // An object, not JSON.stringify: postgres-js stores a stringified param as a jsonb string.
+        [universeInstrumentId(code), r.name, isin, code, {
           indexChallenger: true, category, indexType: fundType, benchmark: r.benchmarkName, asOf: r.asOf, source: r.source,
-        })]);
+        }]);
     }
   }
 }

@@ -115,6 +115,19 @@ describe('choosing candidates', () => {
     await db.close();
   });
 
+  // Prod stored every MFU:* metadata as a jsonb string (2026-10-29); `string || object` is a jsonb array.
+  it('a rebuild over string-encoded metadata yields one object, never an array', async () => {
+    await db.query(`insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
+      values ('MFU:7', 'MF', 'Navi Nifty 50 Index Fund', 'INR', 'INF007A01019', '7', to_jsonb($1::text))`,
+      [JSON.stringify({ indexChallenger: true, category: 'Other Scheme - Index Funds', indexType: 'NIFTY50' })]);
+    await persistUniverse(db, candidatesIn([row('7', 'INF007A01019', MID)], [MID]));
+    const [m] = await db.query<{ t: string; metadata: Record<string, unknown> }>(
+      `select jsonb_typeof(metadata) t, metadata from instruments where id = 'MFU:7'`);
+    expect(m!.t).toBe('object');
+    expect(m!.metadata).toMatchObject({ indexChallenger: true, indexType: 'NIFTY50', universe: true, category: MID });
+    await db.close();
+  });
+
   it("a manual universe rebuild keeps a registered index challenger's index fields", async () => {
     await db.query(`insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
       values ('MFU:7', 'MF', 'Navi Nifty 50 Index Fund', 'INR', 'INF007A01019', '7', $1::jsonb)`,

@@ -28,6 +28,10 @@ export function fromMicro(m: bigint): string {
 export const auditPayload = (alias: string): string =>
   `(case when jsonb_typeof(${alias}.payload) = 'string' then (${alias}.payload #>> '{}')::jsonb else ${alias}.payload end)`;
 
+/** The same unwrap for `instruments.metadata`: every `MFU:*` row was written as a jsonb string on prod (2026-10-29). */
+export const instrumentMeta = (alias: string): string =>
+  `(case when jsonb_typeof(${alias}.metadata) = 'string' then (${alias}.metadata #>> '{}')::jsonb else ${alias}.metadata end)`;
+
 export interface LiveSale { instrumentId: string; soldOn: string; microUnits: bigint }
 
 /**

@@ -1,6 +1,7 @@
 import type { Db } from '../db/client.js';
 import { isDirectGrowth, type UniverseRow } from '../sources/amfi.js';
 import { heldFunds } from './mf-ranking.js';
+import { instrumentMeta } from './owner-sales.js';
 
 /**
  * The candidate universe for `mf_switch`: every Direct-plan growth fund AMFI lists in a
@@ -108,10 +109,11 @@ export async function persistUniverse(
     const rows = await db.query<{ id: string }>(
       `insert into instruments (id, kind, name, currency, isin, scheme_code, metadata)
        values ($1, 'MF', $2, 'INR', $3, $4, $5::jsonb)
-       on conflict (id) do update set name = excluded.name, metadata = instruments.metadata || excluded.metadata
+       on conflict (id) do update set name = excluded.name,
+         metadata = coalesce(${instrumentMeta('instruments')}, '{}'::jsonb) || excluded.metadata
        returning id`,
-      [c.instrumentId, c.name, c.isin, c.schemeCode,
-       JSON.stringify({ universe: true, category: c.category })],
+      // An object, not JSON.stringify: postgres-js stores a stringified param as a jsonb string.
+      [c.instrumentId, c.name, c.isin, c.schemeCode, { universe: true, category: c.category }],
     );
     created += rows.length;
   }
@@ -160,10 +162,10 @@ export async function stampHeldCategories(
     if (r.category === '') continue;
     const done = await db.query<{ id: string }>(
       `update instruments
-          set metadata = metadata || jsonb_build_object('amfiCategory', $1::text)
+          set metadata = coalesce(${instrumentMeta('instruments')}, '{}'::jsonb) || jsonb_build_object('amfiCategory', $1::text)
         where kind = 'MF' and id not like 'MFU:%'
           and (($2 <> '' and isin = $2) or ($3 <> '' and scheme_code = $3))
-          and coalesce(metadata->>'amfiCategory', '') <> $1
+          and coalesce(${instrumentMeta('instruments')}->>'amfiCategory', '') <> $1
         returning id`,
       [r.category, r.isin ?? '', r.schemeCode],
     );

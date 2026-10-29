@@ -69,6 +69,14 @@ describe('logSipMove', () => {
     expect(t!.reversible).toEqual({ entity: 'sip_move', entityId: id });
   });
 
+  // Production (postgres-js) stored `JSON.stringify(...)::jsonb` as a jsonb STRING, so every MFU:*
+  // row's metadata is `"{\"category\":…}"` and `metadata->>'category'` read null (2026-10-29).
+  it('reads the category and index type from string-encoded metadata, as prod stores it', async () => {
+    await db.query(`update instruments set metadata = to_jsonb(metadata::text) where id like 'MFU:%'`);
+    expect((await db.query<{ t: string }>(`select jsonb_typeof(metadata) t from instruments where id = $1`, [INVESCO]))[0]!.t).toBe('string');
+    await expect(move()).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
   it('reads the category from a canonical sibling, as heldFunds does', async () => {
     await db.query(`insert into instruments (id, kind, name, currency, canonical_id) values ('IND:HDFC-MID', 'MF', 'HDFC Mid Cap (INDmoney)', 'INR', 'MF:3097')`);
     await move({ fromInstrumentId: 'IND:HDFC-MID' });

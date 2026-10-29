@@ -3247,6 +3247,12 @@ off, cash 10%, max order ₹50k, M1 not completed (owner confirmed).
 - Real lots are exactly those with a pre-incident audit row (ingest / supersededLots /
   CLEANUP_CLOSED); the 7 fixture lots had none. Old ingest payloads are jsonb STRINGS.
 - `breaker_state` is stored as a jsonb string; `getBreakerState` parses either form.
+- **Never pass `JSON.stringify(x)` to a `::jsonb` param** — postgres-js stores it on Supabase as a
+  jsonb STRING (PGlite parses it, so tests miss it); pass the object. Legacy string rows stay: all 146
+  `MFU:*` `instruments.metadata` and 8 watchlist rows (found 2026-10-29 — `/log` Move-a-SIP showed no
+  funds). Read through `instrumentMeta(alias)` / `auditPayload(alias)` (`owner-sales.ts`); merge as
+  `coalesce(instrumentMeta('instruments'), '{}') || excluded.metadata` — `string || object` is an array.
+  A test reproduces prod with `to_jsonb(x::text)`.
 - Remaining owner step: `pnpm indmoney:login` (the test run overwrote the token).
 - The price history the tests overwrote (RPOWER, NIFTYBEES, NIFTY 500) is re-downloaded
   by a one-off refill, because backfill-prices skips any day that already has some rows.

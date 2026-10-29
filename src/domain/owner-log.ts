@@ -4,7 +4,7 @@ import { istDate, istMonth } from './sips.js';
 import { GROUPS, type ReversalEntity } from './reversals.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
 import { loadPositions } from './networth.js';
-import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
+import { fromMicro, heldAfterSales, instrumentMeta, loadLiveSales, toMicro } from './owner-sales.js';
 import { typeOf } from './fund-mix.js';
 import { FUND_TYPE_LABEL } from './fund-types.js';
 
@@ -339,12 +339,12 @@ export async function sipMoveFunds(
 ): Promise<{ id: string; name: string; canonicalId: string | null; category: string | null; indexType: SipIndexType | null }[]> {
   const rows = await db.query<{ id: string; name: string; canonicalId: string | null; category: string | null; metaIndexType: string | null }>(
     `select i.id, i.name, i.canonical_id "canonicalId",
-            coalesce(i.metadata->>'amfiCategory',
-                     (select s.metadata->>'amfiCategory' from instruments s
-                       where s.canonical_id = i.canonical_id and s.id <> i.id and s.metadata->>'amfiCategory' is not null
+            coalesce(${instrumentMeta('i')}->>'amfiCategory',
+                     (select ${instrumentMeta('s')}->>'amfiCategory' from instruments s
+                       where s.canonical_id = i.canonical_id and s.id <> i.id and ${instrumentMeta('s')}->>'amfiCategory' is not null
                        limit 1),
-                     case when i.id like 'MFU:%' then i.metadata->>'category' end) category,
-            i.metadata->>'indexType' "metaIndexType"
+                     case when i.id like 'MFU:%' then ${instrumentMeta('i')}->>'category' end) category,
+            ${instrumentMeta('i')}->>'indexType' "metaIndexType"
        from instruments i where i.id = any($1::text[])${lock ? ' for update of i' : ''}`,
     [ids]);
   return Promise.all(rows.map(async ({ metaIndexType, ...r }) => {
