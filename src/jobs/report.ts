@@ -1,5 +1,9 @@
 import { runAdvisor, type AdvisorBudget } from '../advisor/recommend.js';
 import { writeCommentary, type Fact } from '../advisor/commentary.js';
+import { runLumpSumAdvisor } from '../advisor/lump-sum.js';
+import { loadProposals } from '../advisor/proposals.js';
+import { allocateLumpSum, loadLumpSizingInput, lumpLimits, sizeLumpSum } from '../domain/lump-sizing.js';
+import { loadOpenLumpSums } from '../domain/lump-sums.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
@@ -152,6 +156,52 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   }
 }
 
+/** A lump sum's HOLD/WAIT/NO_ACTION/UNAVAILABLE is looked at again after this long. */
+const LUMP_READVISE_DAYS = 28;
+
+/**
+ * Batch B §3: advice for each open lump sum, at every weekly report (not held with the month's
+ * budget — the lump sum is on top of it). Skipped while its latest proposal is a BUY awaiting
+ * the owner or signed; re-advised when there is none, it was dismissed, or it was not a BUY and
+ * is older than 28 days — an unsigned HOLD/WAIT/UNAVAILABLE must not block it for ever.
+ * Returns the report lines ('' when nothing was advised).
+ */
+export async function lumpSumAdvice(
+  db: Db, asOf: string, generatedAt: string,
+  opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
+): Promise<string> {
+  const now = new Date(generatedAt);
+  // ponytail: last 500 LUMP_SUM proposals, filtered here — prod stores the payload as a jsonb
+  // string, so `payload->>'lumpSumId'` cannot be queried; page it if lump sums ever get that many.
+  const proposals = await loadProposals(db, 'LUMP_SUM', 500);
+  let lines = '';
+  for (const lump of await loadOpenLumpSums(db)) {
+    try {
+      const latest = proposals.find((p) => p.payload['lumpSumId'] === lump.id);
+      if (latest !== undefined && latest.status !== 'DISMISSED') {
+        if (latest.payload['decision'] === 'BUY') continue;
+        if (now.getTime() - Date.parse(latest.asOf) <= LUMP_READVISE_DAYS * 86_400_000) continue;
+      }
+      const input = await loadLumpSizingInput(db, lump.id, asOf, now);
+      const candidates = sizeLumpSum(input);
+      const limits = lumpLimits(input);
+      const remaining = formatInr(lump.remainingPaise as Paise);
+      const r = await runLumpSumAdvisor(db, {
+        lump: { id: lump.id, from: lump.from, remaining }, asOf, candidates, ...opts, now,
+        allocate: (ids) => allocateLumpSum(candidates, ids, input.remainingPaise, limits).map((p) => ({
+          candidateId: p.candidate.id, instrumentId: p.candidate.instrumentId, name: p.candidate.name, amountPaise: p.amountPaise, units: p.units,
+        })),
+      });
+      lines += `
+
+Lump sum ${remaining} (${lump.from}): ${r.decision}. Review it on the Advisor page.`;
+    } catch (error) {
+      console.error(`lump-sum advice failed for ${lump.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return lines;
+}
+
 /**
  * Has a weekly report already been delivered for this business date?
  *
@@ -194,8 +244,11 @@ if (isMainModule(import.meta.url)) {
   });
   const adviceLine = await monthlyAdvice(db, asOf, input.generatedAt,
     { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
+  // Batch B §3: lump-sum advice, every week. Escaped: "from" is the owner's free text.
+  const lumpLines = escapeMarkdown(await lumpSumAdvice(db, asOf, input.generatedAt,
+    { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL }));
   // Batch B §5: the monthly SIP block (first weekly report of the month). Escaped whole: it carries fund names and no markdown of its own.
-  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt)) + adviceLine;
+  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt)) + adviceLine + lumpLines;
 
   const digest = await buildDigestInput(db, input.generatedAt);
 

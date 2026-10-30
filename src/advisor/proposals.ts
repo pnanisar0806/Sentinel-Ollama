@@ -8,7 +8,7 @@ import type { Db } from '../db/client.js';
  * platform code.
  */
 
-type ProposalKind = 'ADVISE' | 'WATCHLIST_REVISION' | 'COMMENTARY' | 'RATING_REVIEW';
+type ProposalKind = 'ADVISE' | 'WATCHLIST_REVISION' | 'COMMENTARY' | 'RATING_REVIEW' | 'LUMP_SUM';
 type ProposalStatus = 'OPEN' | 'SIGNED' | 'DISMISSED';
 
 interface NewProposal {

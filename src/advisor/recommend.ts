@@ -30,7 +30,8 @@ const NEWS_LOOKBACK_DAYS = 90;
 const DEFER_WINDOW_DAYS = 30;
 const FORBIDDEN_NUMBERS = ['amountPaise', 'amount', 'units', 'quantity', 'price', 'pricePaise', 'size'];
 
-const PROMPT = [
+/** The rules every advisor prompt shares (ADVISE and the lump sum); each adds its own reply format. */
+export const ADVISOR_RULES = [
   'You advise one long-term Indian investor. Horizon: years. He does not trade.',
   'Rules that are not negotiable:',
   '- The default answer is HOLD or WAIT. A BUY or SELL must clear a bar to exist at all.',
@@ -43,6 +44,10 @@ const PROMPT = [
   'Funds come first: a FUND candidate is preferred; a stock is the exception.',
   'A stock BUY must also return "whyNotFund": why this stock and not a fund this month.',
   'Ask: would he be content holding this for five years, and what would have to be true for that to be wrong?',
+];
+
+const PROMPT = [
+  ...ADVISOR_RULES,
   'Reply with JSON only:',
   '{"decision":"BUY|SELL|HOLD|WAIT","candidateId":"<id or null>","timing":"this_month|next_review",',
   ' "horizonYears":<number >= 1>,"rationale":"<= 120 words","keyRisk":"...","falsification":"what would prove it wrong",',
@@ -68,7 +73,7 @@ export interface AdvisorBudget {
 
 type Part = { score: number | null; outOf: number };
 
-interface CandidateContext {
+export interface CandidateContext {
   candidate: { id: string; action: string; instrument: string; name: string; basis: string; constraints: string[] };
   vehicle: Candidate['vehicle'];
   /** A fund's type, the signed range for it and where it stands; null for a stock. */
@@ -79,7 +84,7 @@ interface CandidateContext {
   coverage: string;
 }
 
-async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: CandidateContext | null; excluded: string | null }> {
+export async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: CandidateContext | null; excluded: string | null }> {
   const candidate = { id: c.id, action: c.action, instrument: c.instrumentId, name: c.name, basis: c.basis, constraints: c.constraints };
   if (c.fund !== null) {
     // A fund files no company news, so the news gate does not apply; nor does a stock signal.
@@ -134,13 +139,13 @@ async function contextFor(db: Db, c: Candidate, now: Date): Promise<{ ctx: Candi
   };
 }
 
-interface ModelDecision {
+export interface ModelDecision {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'WAIT'; candidateId: string | null; timing: string; horizonYears: number;
   rationale: string; keyRisk: string; falsification: string; counterargument: string; evidenceIds: string[]; alternates: string[];
   whyNotFund: string | null;
 }
 
-function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecision {
+export function validateDecision(raw: unknown, shown: CandidateContext[]): ModelDecision {
   const d = raw as Record<string, unknown>;
   for (const k of FORBIDDEN_NUMBERS) if (k in d) throw new Error(`the model supplied "${k}"; sizes are the system's`);
   const decision = String(d['decision']);
@@ -184,14 +189,7 @@ export async function runAdvisor(
 ): Promise<{ proposalId: number; decision: Decision }> {
   const now = opts.now ?? new Date();
   const model = opts.model || TEXT_MODEL;
-  const shown: CandidateContext[] = [];
-  const excluded: string[] = opts.candidates.filter((c) => c.status !== 'ELIGIBLE').map((c) => `${c.name}: ${c.withheldReason}`);
-  for (const c of opts.candidates.filter((x) => x.status === 'ELIGIBLE')) {
-    const { ctx, excluded: why } = await contextFor(db, c, now);
-    if (ctx) shown.push(ctx); else excluded.push(why!);
-  }
-  // Funds first: the model reads fund candidates before any stock (stable within each).
-  shown.sort((a, b) => Number(a.vehicle === 'STOCK') - Number(b.vehicle === 'STOCK'));
+  const { shown, excluded } = await showCandidates(db, opts.candidates, now);
   // The budget goes into the snapshot exactly as sent, so a replay sees what the model saw.
   const budget = opts.budget ? { budget: opts.budget } : {};
   const snapshot = { asOf: opts.asOf, shown, excluded, ...budget };
@@ -206,40 +204,15 @@ export async function runAdvisor(
   if (shown.length === 0) return save('NO_ACTION', { reason: 'no candidate is eligible for advice this cycle', excluded }, null);
   if (!opts.apiKey) return save('UNAVAILABLE', { reason: 'no model key configured', excluded }, null);
 
-  // Two attempts: free models occasionally return malformed JSON. Each attempt is logged.
-  let decided: ModelDecision | null = null;
-  let lastFailure = '';
-  for (let attempt = 1; attempt <= 2 && decided === null; attempt++) {
-    const started = Date.now();
-    let outcome: 'ok' | 'unavailable' | 'invalid' | 'error' = 'ok';
-    let error: string | null = null;
-    let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
-    try {
-      const res = await (opts.fetchImpl ?? fetch)(OPENROUTER_CHAT_URL, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, messages: [{ role: 'system', content: PROMPT }, { role: 'user', content: JSON.stringify({ asOf: opts.asOf, candidates: shown, ...budget }) }] }),
-      });
-      if (!res.ok) { outcome = 'unavailable'; error = `HTTP ${res.status}`; }
-      else {
-        const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; usage?: typeof usage };
-        usage = body.usage;
-        try { decided = validateDecision(firstJson(body.choices?.[0]?.message?.content ?? ''), shown); }
-        catch (e) { outcome = 'invalid'; error = e instanceof Error ? e.message : String(e); }
-      }
-    } catch (e) { outcome = 'error'; error = e instanceof Error ? e.message : String(e); }
-    await recordLlmCall(db, {
-      seam: 'advise', model, latencyMs: Date.now() - started, outcome,
-      promptTokens: usage?.prompt_tokens ?? null, completionTokens: usage?.completion_tokens ?? null, error,
-    });
-    if (decided === null) lastFailure = `model ${outcome}: ${error}`;
-  }
-  if (!decided) return save('UNAVAILABLE', { reason: lastFailure, excluded }, model);
+  const { decided, failure } = await callModel(db, {
+    apiKey: opts.apiKey, model, fetchImpl: opts.fetchImpl, seam: 'advise', system: PROMPT,
+    user: JSON.stringify({ asOf: opts.asOf, candidates: shown, ...budget }),
+  }, (raw) => validateDecision(raw, shown));
+  if (!decided) return save('UNAVAILABLE', { reason: failure, excluded }, model);
 
-  const chosen = decided.candidateId ? opts.candidates.find((c) => c.id === decided!.candidateId) : undefined;
-  const chosenCtx = decided.candidateId ? shown.find((s) => s.candidate.id === decided!.candidateId) : undefined;
-  const recent = new Date(now.getTime() - DEFER_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
-  const adverse = chosenCtx?.news.filter((n) => n.polarity === 'NEGATIVE' && n.materiality !== 'LOW' && n.publishedAt >= recent) ?? [];
+  const chosen = decided.candidateId ? opts.candidates.find((c) => c.id === decided.candidateId) : undefined;
+  const chosenCtx = decided.candidateId ? shown.find((s) => s.candidate.id === decided.candidateId) : undefined;
+  const adverse = chosenCtx ? adverseNews(chosenCtx, now) : [];
   const base = {
     candidateId: decided.candidateId, instrumentId: chosen?.instrumentId ?? null, name: chosen?.name ?? null,
     timing: decided.timing, horizonYears: decided.horizonYears, rationale: decided.rationale, keyRisk: decided.keyRisk,
@@ -255,4 +228,62 @@ export async function runAdvisor(
     return save(decided.decision, { ...base, amountPaise: chosen!.amountPaise?.toString() ?? null, units: chosen!.units, ...whyNotFund }, model, decided.evidenceIds);
   }
   return save(decided.decision, base, model, decided.evidenceIds);
+}
+
+/** What the model is shown — funds first, stable within each — and why the rest are not. */
+export async function showCandidates(db: Db, candidates: Candidate[], now: Date): Promise<{ shown: CandidateContext[]; excluded: string[] }> {
+  const shown: CandidateContext[] = [];
+  const excluded: string[] = candidates.filter((c) => c.status !== 'ELIGIBLE').map((c) => `${c.name}: ${c.withheldReason}`);
+  for (const c of candidates.filter((x) => x.status === 'ELIGIBLE')) {
+    const { ctx, excluded: why } = await contextFor(db, c, now);
+    if (ctx) shown.push(ctx); else excluded.push(why!);
+  }
+  shown.sort((a, b) => Number(a.vehicle === 'STOCK') - Number(b.vehicle === 'STOCK'));
+  return { shown, excluded };
+}
+
+/** Recent material negative news on a candidate: it may defer a BUY, never start one. */
+export function adverseNews(ctx: CandidateContext, now: Date): CandidateContext['news'] {
+  const recent = new Date(now.getTime() - DEFER_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
+  return ctx.news.filter((n) => n.polarity === 'NEGATIVE' && n.materiality !== 'LOW' && n.publishedAt >= recent);
+}
+
+/**
+ * The model call, twice: free models occasionally return malformed JSON. Each attempt is
+ * logged to llm_calls under `seam`. `validate` throws to reject a reply; a reply rejected
+ * twice, or a failed call, returns `decided: null` and why.
+ */
+export async function callModel<T>(
+  db: Db,
+  o: { apiKey: string; model: string; fetchImpl?: typeof fetch | undefined; seam: string; system: string; user: string },
+  validate: (raw: unknown) => T,
+): Promise<{ decided: T | null; failure: string }> {
+  let decided: T | null = null;
+  let failure = '';
+  for (let attempt = 1; attempt <= 2 && decided === null; attempt++) {
+    const started = Date.now();
+    let outcome: 'ok' | 'unavailable' | 'invalid' | 'error' = 'ok';
+    let error: string | null = null;
+    let usage: { prompt_tokens?: number; completion_tokens?: number } | undefined;
+    try {
+      const res = await (o.fetchImpl ?? fetch)(OPENROUTER_CHAT_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${o.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: o.model, messages: [{ role: 'system', content: o.system }, { role: 'user', content: o.user }] }),
+      });
+      if (!res.ok) { outcome = 'unavailable'; error = `HTTP ${res.status}`; }
+      else {
+        const body = (await res.json()) as { choices?: { message?: { content?: string } }[]; usage?: typeof usage };
+        usage = body.usage;
+        try { decided = validate(firstJson(body.choices?.[0]?.message?.content ?? '')); }
+        catch (e) { outcome = 'invalid'; error = e instanceof Error ? e.message : String(e); }
+      }
+    } catch (e) { outcome = 'error'; error = e instanceof Error ? e.message : String(e); }
+    await recordLlmCall(db, {
+      seam: o.seam, model: o.model, latencyMs: Date.now() - started, outcome,
+      promptTokens: usage?.prompt_tokens ?? null, completionTokens: usage?.completion_tokens ?? null, error,
+    });
+    if (decided === null) failure = `model ${outcome}: ${error}`;
+  }
+  return { decided, failure };
 }
