@@ -13,13 +13,13 @@ import { loadFreeEnvelope, loadSipCommitment, type FreeEnvelope } from './sips.j
 const ROUND_PAISE = 10_000n; // ₹100
 
 export type SipSuggestions =
-  | { rows: SipSuggestion[]; currentPaise: bigint; suggestedPaise: bigint; budgetPaise: bigint; capped: boolean }
+  | { rows: SipSuggestion[]; currentPaise: bigint; suggestedPaise: bigint; budgetPaise: bigint; setAsidePaise: bigint; capped: boolean }
   | { rows: null; reason: string };
 
 /**
  * /funds "Suggested SIPs" (Piece 3 Task 9; batch B §5): the live SIPs re-split toward the signed mix, never
  * below a current SIP, never into a fund the switch check says to leave (owner, 2026-10-28), and the total
- * never above `monthly_budget_paise` (owner, 2026-10-30).
+ * never above `monthly_budget_paise` (owner, 2026-10-30) less the goal set-aside, which is never invested.
  * A SIP is typed by its own ISIN first, then by its instrument. An unknown SIP total withholds
  * the whole suggestion with the envelope's reason — never computed from a null read as 0.
  * A logged SIP move (fund switch §3) stops its "from" SIP (dropped even while the feed still lists
@@ -74,15 +74,16 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   c.sips.forEach((s, i) => leave(s.instrumentId, feed[i]!));
   for (const h of leavers.length === 0 ? [] : types.flatMap((t) => actual.byType[t].holdings)) leave(h.instrumentId, await fundAliases(d, h.instrumentId));
   const budgetPaise = await railPaise(d, 'monthly_budget_paise');
+  const setAsidePaise = await railPaise(d, 'goal_setaside_monthly_paise');
   const { rows, capped } = capToBudget(neverCut(suggestSips({
     sips, ranges: signed.ranges,
     actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
     heldByType: Object.fromEntries(types.map((t) => [t, actual.byType[t].holdings])) as Record<FundType, ActualMix['byType'][FundType]['holdings']>,
     newFundNames: Object.fromEntries(choices.flatMap((x) => (x.top ? [[x.fundType, x.top.name]] : []))),
     leaving,
-  })), budgetPaise);
+  })), investablePaise(budgetPaise, setAsidePaise));
   return {
-    rows, capped, budgetPaise,
+    rows, capped, budgetPaise, setAsidePaise,
     currentPaise: sips.reduce((a, s) => a + s.amountPaise, 0n),
     suggestedPaise: rows.reduce((a, r) => a + r.suggestedPaise, 0n),
   };
@@ -111,9 +112,29 @@ export function capToBudget(rows: SipSuggestion[], budgetPaise: bigint): { rows:
   };
 }
 
-/** Batch B §6: the tactical cap binds when it is below the free money (budget − SIPs). Unknown SIPs: no warning. */
-export function tacticalCapBinds(e: Pick<FreeEnvelope, 'budgetPaise' | 'tacticalPaise' | 'sipTotalPaise'>): { capPaise: bigint; freePaise: bigint } | null {
+/** What the SIP card may fill: the budget less the goal set-aside (CLAUDE.md: the set-aside is never invested). */
+const investablePaise = (budgetPaise: bigint, setAsidePaise: bigint): bigint =>
+  (budgetPaise > setAsidePaise ? budgetPaise - setAsidePaise : 0n);
+
+/** The SIP card's cap, named: the plain budget, or what is invested once the set-aside is taken out. */
+export function sipCapLabel(budgetPaise: bigint, setAsidePaise: bigint): string {
+  const inr = (p: bigint) => formatInr(p as Paise);
+  return setAsidePaise > 0n
+    ? `the ${inr(investablePaise(budgetPaise, setAsidePaise))} you invest each month (budget ${inr(budgetPaise)} less ${inr(setAsidePaise)} set aside for house and emergency)`
+    : `the ${inr(budgetPaise)} budget`;
+}
+
+/** Batch B §5: the SIP card's cap sentence; when current SIPs alone fill the cap, it says no increase is suggested. */
+export function sipCapSentence(s: { currentPaise: bigint; budgetPaise: bigint; setAsidePaise: bigint; capped: boolean }): string {
+  const label = sipCapLabel(s.budgetPaise, s.setAsidePaise);
+  return s.currentPaise >= investablePaise(s.budgetPaise, s.setAsidePaise)
+    ? `Current SIPs already use ${label}; no increase is suggested.`
+    : `No SIP is ever suggested below its current amount, and increases are capped so the suggested total stays within ${label}${s.capped ? ' — this month they were scaled down to fit' : ''}.`;
+}
+
+/** Batch B §6: the tactical cap binds when it is below the free money (budget − SIPs − set-aside). Unknown SIPs: no warning. */
+export function tacticalCapBinds(e: Pick<FreeEnvelope, 'budgetPaise' | 'tacticalPaise' | 'sipTotalPaise' | 'setAsidePaise'>): { capPaise: bigint; freePaise: bigint } | null {
   if (e.sipTotalPaise === null) return null;
-  const freePaise = e.budgetPaise - e.sipTotalPaise;
+  const freePaise = e.budgetPaise - e.sipTotalPaise - e.setAsidePaise;
   return e.tacticalPaise < freePaise ? { capPaise: e.tacticalPaise, freePaise } : null;
 }

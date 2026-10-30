@@ -6,7 +6,7 @@ import { parseMfSips } from '../../src/sources/indmoney.js';
 import { istDate, istMonth, persistSipSnapshot } from '../../src/domain/sips.js';
 import { approveMix, proposeMix, type SipSuggestion } from '../../src/domain/fund-mix.js';
 import { logSipMove } from '../../src/domain/owner-log.js';
-import { capToBudget, loadSipSuggestions, tacticalCapBinds } from '../../src/domain/sip-advice.js';
+import { capToBudget, loadSipSuggestions, sipCapLabel, sipCapSentence, tacticalCapBinds } from '../../src/domain/sip-advice.js';
 
 /** Batch B §5/§6: the SIP card never suggests a total above the monthly budget; the tactical-cap warning. */
 const R = (rupees: number) => BigInt(rupees) * 100n;
@@ -45,14 +45,45 @@ describe('capToBudget', () => {
     for (const r of out.rows) expect(r.suggestedPaise).toBe(r.currentPaise);
     expect(out.rows[1]!.reason).toBe('r; no increase — current SIPs already use the ₹50,000 budget');
   });
+
+  it('flat rows already over the cap: capped, and the card copy says no increase is suggested', () => {
+    const rows = [row(40_000, 40_000, 0), row(12_000, 12_000, 1)];
+    const out = capToBudget(rows, R(50_000));
+    expect(out).toEqual({ rows, capped: true });
+    const text = sipCapSentence({ currentPaise: R(52_000), budgetPaise: R(50_000), setAsidePaise: 0n, capped: out.capped });
+    expect(text).toBe('Current SIPs already use the ₹50,000 budget; no increase is suggested.');
+    expect(text).not.toMatch(/stays within/);
+  });
+});
+
+describe('SIP card copy (batch B §5; set-aside ruling)', () => {
+  it('names the budget, or the investable amount when a set-aside exists', () => {
+    expect(sipCapLabel(R(50_000), 0n)).toBe('the ₹50,000 budget');
+    expect(sipCapLabel(R(50_000), R(10_000)))
+      .toBe('the ₹40,000 you invest each month (budget ₹50,000 less ₹10,000 set aside for house and emergency)');
+    expect(sipCapSentence({ currentPaise: R(30_254), budgetPaise: R(50_000), setAsidePaise: 0n, capped: false }))
+      .toBe('No SIP is ever suggested below its current amount, and increases are capped so the suggested total stays within the ₹50,000 budget.');
+    expect(sipCapSentence({ currentPaise: R(30_254), budgetPaise: R(50_000), setAsidePaise: R(10_000), capped: true }))
+      .toMatch(/stays within the ₹40,000 you invest each month .* — this month they were scaled down to fit\.$/);
+    expect(sipCapSentence({ currentPaise: R(45_000), budgetPaise: R(50_000), setAsidePaise: R(10_000), capped: true }))
+      .toMatch(/^Current SIPs already use the ₹40,000 you invest each month/);
+  });
 });
 
 describe('tacticalCapBinds', () => {
   it('binds only when the cap is below budget − SIPs', () => {
-    expect(tacticalCapBinds({ budgetPaise: R(50_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000) })).toBeNull();
-    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000) }))
+    expect(tacticalCapBinds({ budgetPaise: R(50_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000), setAsidePaise: 0n })).toBeNull();
+    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000), setAsidePaise: 0n }))
       .toEqual({ capPaise: 5_000_000n, freePaise: 6_974_600n });
-    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: null, tacticalPaise: R(50_000) })).toBeNull();
+    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: null, tacticalPaise: R(50_000), setAsidePaise: 0n })).toBeNull();
+  });
+
+  it('free money excludes the goal set-aside', () => {
+    // budget ₹1,00,000 − SIPs ₹30,254 − set-aside ₹10,000 = ₹59,746 free; cap ₹50,000 still binds.
+    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000), setAsidePaise: R(10_000) }))
+      .toEqual({ capPaise: 5_000_000n, freePaise: 5_974_600n });
+    // set-aside ₹25,000 leaves ₹44,746 free: the ₹50,000 cap no longer binds.
+    expect(tacticalCapBinds({ budgetPaise: R(100_000), sipTotalPaise: R(30_254), tacticalPaise: R(50_000), setAsidePaise: R(25_000) })).toBeNull();
   });
 });
 
@@ -87,7 +118,21 @@ describe('loadSipSuggestions', () => {
       ['SMALL', 'IND:1005544', 225_100n, 300_000n, false],
       ['US', null, 0n, 300_000n, false],
     ]);
-    expect(r).toMatchObject({ currentPaise: 3_025_400n, suggestedPaise: 3_830_200n, budgetPaise: 5_000_000n, capped: false });
+    expect(r).toMatchObject({ currentPaise: 3_025_400n, suggestedPaise: 3_830_200n, budgetPaise: 5_000_000n, setAsidePaise: 0n, capped: false });
+
+    // Set-aside ruling: the SIP card stays within budget − set-aside (₹50,000 default budget rail).
+    const setAside = (v: number) => d.query(`insert into settings_rails (key, value) values ('goal_setaside_monthly_paise', $1::jsonb)
+      on conflict (key) do update set value = excluded.value`, [JSON.stringify(v)]);
+    for (const [aside, cap] of [[1_000_000, 4_000_000n], [1_500_000, 3_500_000n]] as const) {
+      await setAside(aside);
+      const s = await loadSipSuggestions(d, now);
+      if (s.rows === null) throw new Error(s.reason);
+      expect(s).toMatchObject({ budgetPaise: 5_000_000n, setAsidePaise: BigInt(aside) });
+      expect(s.suggestedPaise <= cap).toBe(true);
+      for (const x of s.rows) expect(x.suggestedPaise >= x.currentPaise).toBe(true);
+    }
+    // ₹38,302 unscaled fits ₹40,000 but not ₹35,000: the second pass had to scale.
+    expect(await loadSipSuggestions(d, now)).toMatchObject({ capped: true });
     await d.close();
   });
 });

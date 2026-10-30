@@ -3,7 +3,7 @@ import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getSipSugg
 import { sipText, unitsText } from '@/lib/funds';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
-import { tacticalCapBinds } from '../../../src/domain/sip-advice';
+import { sipCapLabel, sipCapSentence, tacticalCapBinds } from '../../../src/domain/sip-advice';
 import { formatInr, type Paise } from '../../../src/money/paise';
 import { INDEX_SWITCH_MIN_BPS } from '../../../src/domain/index-switch';
 import { FUND_TYPE_LABEL, midBps } from '../../../src/domain/fund-mix';
@@ -148,7 +148,7 @@ export default async function FundsPage() {
 
       <Card
         title="Suggested SIPs"
-        aside={`toward the signed mix · never cuts a SIP · within the ${formatInr(sips.budgetPaise as Paise)} budget`}
+        aside={`toward the signed mix · never cuts a SIP · within ${sipCapLabel(sips.budgetPaise, sips.setAsidePaise)}`}
       >
         {suggested.rows === null ? (
           <Notice tone="amber">No suggestion: {suggested.reason}.</Notice>
@@ -173,10 +173,7 @@ export default async function FundsPage() {
             <p className="muted">
               Today&apos;s SIPs total <Money p={suggested.currentPaise as never} />
               {suggested.rows.some((s) => s.logged) ? ', counting SIP moves logged on /log that the feed does not show yet' : ''};
-              suggested <Money p={suggested.suggestedPaise as never} />. No SIP is ever suggested below its
-              current amount, and increases are capped so the suggested total stays within the{' '}
-              <Money p={suggested.budgetPaise as never} /> monthly budget
-              {suggested.capped ? ' — this month they were scaled down to fit' : ''}. A fund the switch
+              suggested <Money p={suggested.suggestedPaise as never} />. {sipCapSentence(suggested)} A fund the switch
               check says to leave gets no new money. Change SIPs in INDmoney; the next sync shows them here.
             </p>
           </>
