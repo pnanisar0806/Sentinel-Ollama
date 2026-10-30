@@ -11,7 +11,8 @@ import { FUND_TYPE_LABEL } from './fund-types.js';
 /**
  * The owner's sign-off on lump-sum advice (batch B §3, Task 6) — `signAdvice`'s pattern, part
  * by part. Signing is not approving: each part becomes an ordinary recommendation linked to the
- * lump sum (FR-12's monthly cap and the stock repeat-buy hold apply to each) and an approval
+ * lump sum (the stock repeat-buy hold applies to each; FR-12's monthly cap does not — owner,
+ * 2026-10-31: the lump sum is not the month's) and an approval
  * request. Its orders spend the lump sum, never the month (`loadMonthSpend`, `checkRails`).
  *
  * The split is re-allocated at signing, in the advisor's order, against fresh sizing and what
@@ -43,13 +44,15 @@ export async function signLumpSum(
   if (decision !== 'BUY') throw new Error(`lump-sum advice ${proposalId} is ${decision}: nothing to sign`);
 
   // Matched by instrument, not candidate id: a candidate's id hashes the sizing date, so it
-  // would never match on the day after the report. The amounts are what must not have moved.
+  // would never match on the day after the report. The amounts are what must not have moved —
+  // except a part bought in whole units, matched on its units: the daily price sync moves its
+  // rupee amount, and the recommendation takes the fresh one.
   const stored = d['parts'] as StoredPart[];
   const fresh = stored.map((s) => opts.candidates.find((c) => c.instrumentId === s.instrumentId && c.status === 'ELIGIBLE'));
   const parts = allocateLumpSum(opts.candidates, fresh.flatMap((c) => (c ? [c.id] : [])), lump.remainingPaise, opts.limits);
   const total = parts.reduce((s, x) => s + x.amountPaise, 0n);
   const same = parts.length === stored.length
-    && parts.every((x, i) => x.candidate.instrumentId === stored[i]!.instrumentId && x.amountPaise.toString() === stored[i]!.amountPaise);
+    && parts.every((x, i) => x.candidate.instrumentId === stored[i]!.instrumentId && (stored[i]!.units !== null ? x.units === stored[i]!.units : x.amountPaise.toString() === stored[i]!.amountPaise));
   // A part never exceeds what is left of the lump sum (allocateLumpSum caps at it; checked, not assumed).
   if (!same || total > lump.remainingPaise) {
     // Closed, so the weekly report re-advises it: an open BUY would block re-advice for ever.
@@ -97,7 +100,12 @@ export async function signLumpSum(
     recommendationIds.push(persisted.id);
     await benchmarkSigned(db, persisted.id, c.instrumentId, createdOn);
   }
-  if (recommendationIds.length === 0) throw new Error(`not signed: ${refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`);
+  if (recommendationIds.length === 0) {
+    const why = `not signed: ${refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`;
+    // Nothing persisted: closed as the stale path is, so the weekly report re-advises it.
+    await decideProposal(db, proposalId, 'DISMISSED', why);
+    throw new Error(why);
+  }
 
   const drafted = await draftPendingOrders(db, now);
   const asked = drafted.drafted.filter((o) => recommendationIds.includes(Number(o.recommendationId))).length;

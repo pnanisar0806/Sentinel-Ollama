@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { openDb } from '../../src/db/client.js';
+import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { parseMfSips, type SipRow } from '../../src/sources/indmoney.js';
 import { istDate, istMonth, persistSipSnapshot } from '../../src/domain/sips.js';
@@ -197,6 +197,7 @@ describe('monthly SIP block', () => {
     // 45% but under ₹1,000: not due.
     expect(sipDueLines([row(2_000, 2_900)], [])).toEqual([]);
     expect(sipDueLines([{ ...row(0, 3_000), fundType: 'US', instrumentId: null, fundName: 'Motilal Oswal S&P 500' }], [])).toEqual(['Start a US index SIP: Motilal Oswal S&P 500, ₹3,000']);
+    expect(sipDueLines([{ ...row(0, 3_000), fundType: null, instrumentId: null, fundName: 'Mystery Fund' }], [])).toEqual(['Start a SIP (type unknown): Mystery Fund, ₹3,000']);
     const move = { instrumentId: 'IND:3097', name: 'HDFC Mid Cap', category: 'Mid Cap', isIndex: false, units: { kind: 'keep', why: '' },
       sip: { kind: 'move', amountPaise: R(3_001), toId: 'X', toName: 'Invesco India Mid Cap', why: 'better 5y return' } } as const;
     expect(sipDueLines([], [move, { ...move, sip: { kind: 'keep', amountPaise: R(3_001) } }])).toEqual(['Move the HDFC Mid Cap SIP to Invesco India Mid Cap: better 5y return']);
@@ -222,6 +223,16 @@ describe('monthly SIP block', () => {
     [JSON.stringify({ kind: 'sip', month: '2026-10', sinceIso: '2026-10-04T03:00:00.000Z' })]);
     await persistSipSnapshot(d, november, NOV);
     expect(await monthlySipBlock(d, '2026-11-01', '2026-11-01T06:00:00.000Z')).toContain('new SIP: Edelweiss');
+    await d.close();
+  });
+
+  it('a DB error reading whether the month is done fails soft: the weekly report still sends', async () => {
+    const d = await openDb();
+    const broken: Db = {
+      query: async (sql, params) => { if (sql.includes("'monthly_review'")) throw new Error('db down'); return d.query(sql, params); },
+      exec: (sql) => d.exec(sql), withTransaction: (fn) => d.withTransaction(fn), close: () => d.close(),
+    } as Db;
+    expect(await monthlySipBlock(broken, '2026-11-01', '2026-11-01T06:00:00.000Z')).toBe('\n\nSIPs: could not be read this week; the next weekly report retries.');
     await d.close();
   });
 });

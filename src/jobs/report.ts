@@ -121,8 +121,8 @@ export async function monthlyAdvice(
   opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
 ): Promise<string> {
   const month = asOf.slice(0, 7);
-  if (await monthlyReviewDone(db, 'advice', month)) return '';
   try {
+    if (await monthlyReviewDone(db, 'advice', month)) return '';
     // Goal plan §12 Q4: wait for this month's budget, up to the 7th (IST). Held like the
     // SIP hold below: the month is not recorded, so the next weekly run tries again.
     const budgetMonth = await loadBudgetMonth(db, generatedAt);

@@ -290,18 +290,19 @@ export async function isPaperMode(db: Db): Promise<boolean> {
 export async function gateRecommendation(
   db: Db,
   rec: Recommendation,
-  opts: { override?: OverrideEvent } = {},
+  opts: { override?: OverrideEvent; lumpSumId?: string } = {},
 ): Promise<GateResult> {
   const month = monthOf(rec.createdOn);
   // A maturity routing is a dated event with pre-approved routing (IPS §3.9), not a new
   // idea: it neither counts toward the cap nor is refused by it (owner, 2026-09-26).
+  // Likewise a lump-sum part (batch B §3): that money is not the month's (owner, 2026-10-31).
   const [{ n } = { n: '0' }] = await db.query<{ n: string }>(
     `select count(*) as n from recommendations
-      where suppressed = false and kind <> 'maturity_routing'
+      where suppressed = false and kind <> 'maturity_routing' and lump_sum_id is null
         and to_char(created_on, 'YYYY-MM') = $1`,
     [month],
   );
-  if (rec.kind !== 'maturity_routing' && Number(n) >= MAX_RECS_PER_MONTH) {
+  if (rec.kind !== 'maturity_routing' && opts.lumpSumId === undefined && Number(n) >= MAX_RECS_PER_MONTH) {
     return {
       allowed: false,
       reason: `FR-12: ${month} already carries ${n} recommendations, the cap is ${MAX_RECS_PER_MONTH}`,

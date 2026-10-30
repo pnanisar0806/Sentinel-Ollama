@@ -196,7 +196,7 @@ export function sipDueLines(rows: SipSuggestion[], moves: FundMove[]): string[] 
   const lines = moves.flatMap((f) => (f.sip.kind === 'move' ? [`Move the ${f.name} SIP to ${f.sip.toName}: ${f.sip.why}`] : []));
   for (const r of rows) {
     if (r.currentPaise === 0n) {
-      if (r.suggestedPaise > 0n) lines.push(`Start a ${r.fundType ? FUND_TYPE_LABEL[r.fundType] : 'type unknown'} SIP: ${r.fundName}, ${inr(r.suggestedPaise)}`);
+      if (r.suggestedPaise > 0n) lines.push(`Start a ${r.fundType ? `${FUND_TYPE_LABEL[r.fundType]} SIP` : 'SIP (type unknown)'}: ${r.fundName}, ${inr(r.suggestedPaise)}`);
       continue;
     }
     const gap = r.suggestedPaise > r.currentPaise ? r.suggestedPaise - r.currentPaise : r.currentPaise - r.suggestedPaise;
@@ -221,8 +221,8 @@ export async function sipAdviceDue(db: Db, nowIso: string): Promise<Lines> {
  */
 export async function monthlySipBlock(db: Db, asOf: string, generatedAt: string): Promise<string> {
   const month = asOf.slice(0, 7);
-  if (await monthlyReviewDone(db, 'sip', month)) return '';
   try {
+    if (await monthlyReviewDone(db, 'sip', month)) return '';
     // The previous block's clock. Read through auditPayload: on prod the payload is a jsonb string.
     const [prev] = await db.query<{ since: string | null }>(
       `select ${auditPayload('a')}->>'sinceIso' since from audit_log a

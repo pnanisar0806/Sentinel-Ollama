@@ -142,14 +142,67 @@ describe('signing a lump-sum split', () => {
     expect((await loadProposals(db, 'LUMP_SUM'))[0]!.status).toBe('SIGNED');
   });
 
-  it('every part refused leaves the advice open and says why', async () => {
+  it('every part refused closes the advice and says why, so the weekly report re-advises it', async () => {
     await db.query(
       `insert into recommendations (created_on, kind, intent, primary_rec, alternates, ips_clause_refs, engine_evidence, source)
        values ('2026-08-27', 'satellite', 'add satellite equity exposure', $1, '[]', '[]', '{}', 'advisor')`,
       [JSON.stringify({ intent: 'add satellite equity exposure', instrumentId: 'NSE:BAJAJ-AUTO', action: 'BUY', amountPaise: '100', thesis: 't', ipsClauseRefs: ['3.4'], falsification: null })]);
     const id = await advise(lumpId, { parts: [{ candidateId: 'c-bajaj', instrumentId: 'NSE:BAJAJ-AUTO', name: 'Bajaj Auto', amountPaise: '4512400', units: '4', basis: 'b' }] });
     await expect(signLumpSum(db, id, { candidates: [bajaj()], limits, now: NOW })).rejects.toThrow(/^not signed: Bajaj Auto: FR-12/);
-    expect((await loadProposals(db, 'LUMP_SUM'))[0]!.status).toBe('OPEN');
+    expect((await loadProposals(db, 'LUMP_SUM'))[0]!.status).toBe('DISMISSED');
+  });
+
+  it('every part a duplicate closes the advice too', async () => {
+    // Both parts persisted by an earlier sign that crashed before drafting.
+    for (const [kind, intent, instrumentId] of [['rebalance', fundIntent('FLEXI'), 'MF:PPFC'], ['satellite', 'add satellite equity exposure', 'NSE:BAJAJ-AUTO']] as const) {
+      await persistRecommendation(db, buildRecommendation({
+        kind, createdOn: NOW.toISOString().slice(0, 10),
+        primary: { intent, instrumentId, action: 'BUY', amountPaise: '100000', thesis: 'earlier', ipsClauseRefs: ['3.4'], falsification: null },
+      }), { lumpSumId: lumpId });
+    }
+    const id = await advise(lumpId);
+    await expect(signLumpSum(db, id, { candidates: [ppfc(), bajaj()], limits, now: NOW })).rejects.toThrow(/^not signed: .*already recommended this month/);
+    expect((await loadProposals(db, 'LUMP_SUM'))[0]!.status).toBe('DISMISSED');
+  });
+
+  it('an exchange-traded part signs at the fresh price when its units have not moved', async () => {
+    // Advised at ₹24.08 a unit; the daily sync has since moved gold to ₹24.18. Same 103 units.
+    const gold = (pricePaise: bigint): Candidate => ({
+      id: `c-gold-${pricePaise}`, action: 'BUY', instrumentId: 'NSE:GOLDBEES', name: 'Gold ETF', status: 'ELIGIBLE', withheldReason: null,
+      amountPaise: 250_000n, units: String(250_000n / pricePaise), pricePaise, quoteAsOf: '2026-10-29', basis: 'gold room', constraints: [],
+      policyVersion: 'lump-v1', vehicle: 'FUND', fund: null,
+    });
+    const id = await advise(lumpId, { parts: [{ candidateId: 'c-gold-2408', instrumentId: 'NSE:GOLDBEES', name: 'Gold ETF', amountPaise: (103n * 2408n).toString(), units: '103', basis: 'gold room' }] });
+    const r = await signLumpSum(db, id, { candidates: [gold(2418n)], limits: { ...limits, goldRoomPaise: 100_000_000n }, now: NOW });
+    expect(r.recommendationIds).toHaveLength(1);
+    const [row] = await db.query<{ primary_rec: string }>(`select primary_rec from recommendations where id = $1`, [r.recommendationIds[0]]);
+    expect(JSON.parse(row!.primary_rec).amountPaise).toBe((103n * 2418n).toString());
+  });
+
+  it('an exchange-traded part whose units moved is still stale', async () => {
+    const id = await advise(lumpId, { parts: [{ candidateId: 'c-bajaj', instrumentId: 'NSE:BAJAJ-AUTO', name: 'Bajaj Auto', amountPaise: '4512400', units: '4', basis: 'b' }] });
+    // The price fell enough that the same ceiling now buys 5 units.
+    await expect(signLumpSum(db, id, { candidates: [bajaj({ pricePaise: 900_000n })], limits, now: NOW })).rejects.toThrow(/size has changed/);
+  });
+
+  // Owner ruling 2026-10-31: lump-sum parts are not the month's ideas — FR-12's monthly cap neither counts nor refuses them.
+  const monthlyRec = (instrumentId: string) => persistRecommendation(db, buildRecommendation({
+    kind: 'satellite', createdOn: NOW.toISOString().slice(0, 10),
+    primary: { intent: 'add satellite equity exposure', instrumentId, action: 'BUY', amountPaise: '100000', thesis: 'the month', ipsClauseRefs: ['3.4'], falsification: null },
+  }));
+
+  it('a month already at the FR-12 cap still accepts a lump-sum part', async () => {
+    for (const x of ['NSE:M1', 'NSE:M2', 'NSE:M3', 'NSE:M4']) expect((await monthlyRec(x)).id).not.toBeNull();
+    expect((await monthlyRec('NSE:M5')).reason).toMatch(/cap is 4/);
+    const r = await signLumpSum(db, await advise(lumpId), { candidates: [ppfc(), bajaj()], limits, now: NOW });
+    expect(r.refused).toEqual([]);
+    expect(r.recommendationIds).toHaveLength(2);
+  });
+
+  it('lump-sum parts do not use up the FR-12 monthly cap', async () => {
+    await signLumpSum(db, await advise(lumpId), { candidates: [ppfc(), bajaj()], limits, now: NOW });
+    for (const x of ['NSE:M1', 'NSE:M2', 'NSE:M3', 'NSE:M4']) expect((await monthlyRec(x)).id).not.toBeNull();
+    expect((await monthlyRec('NSE:M5')).reason).toMatch(/already carries 4 recommendations/);
   });
 
   it('a reversed lump sum cannot be signed', async () => {

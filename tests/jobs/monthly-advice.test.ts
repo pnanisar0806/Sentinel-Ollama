@@ -24,6 +24,15 @@ const advised = async () => (await db.query(`select 1 from advisor_proposals whe
 beforeEach(async () => { db = await openDb(); await runMigrations(db); await installIps(db); calls = 0; });
 
 describe('monthlyAdvice', () => {
+  it('a DB error reading whether the month is done fails soft: no line, the weekly report still sends', async () => {
+    const broken = {
+      query: async (sql: string, params?: unknown[]) => { if (sql.includes("'monthly_review'")) throw new Error('db down'); return db.query(sql, params); },
+      exec: (sql: string) => db.exec(sql), withTransaction: db.withTransaction.bind(db), close: () => db.close(),
+    } as Db;
+    expect(await monthlyAdvice(broken, AS_OF, NOW, { apiKey: 'k', model: undefined, fetchImpl })).toBe('');
+    await db.close();
+  });
+
   it('no SIP snapshot: the advisor is held, not called, and the month stays open', async () => {
     const line = await monthlyAdvice(db, AS_OF, NOW, { apiKey: 'k', model: undefined, fetchImpl });
     expect(calls).toBe(0);
