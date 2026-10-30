@@ -3380,8 +3380,8 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   Reversing the lump returns that spend to its month.
 - `loadSizingInput.reservedPaise` includes every open lump's remaining, so the monthly plan never spends it.
 - `checkRails` checks a lump-sum order against the lump's remaining (`LUMP_SUM_EXCEEDED`), not the month envelope.
-- Lump-sum recommendations neither count toward nor are blocked by FR-12's monthly recommendation cap (controller
-  ruling 2026-10-31, pending owner OK); the repeat-buy hold still applies.
+- Lump-sum recommendations neither count toward nor are blocked by FR-12's monthly recommendation cap (owner-approved
+  2026-10-31); the repeat-buy hold still applies.
 - Weekly job re-advises a lump: none / DISMISSED / UNAVAILABLE → now; HOLD/WAIT/NO_ACTION/SIGNED BUY → after 28 days;
   OPEN BUY blocks.
 - SIP card cap = `monthly_budget_paise − goal_setaside_monthly_paise` (a rail, not goal status). SIP news/advice is
