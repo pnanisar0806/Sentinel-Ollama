@@ -12,10 +12,10 @@ MEMORY.md; the code map lives in index.md.
         First verify prod constraint names `log_reversals_entity_check` (0039) and
         `index_fund_candidates_fund_type_check` (0040); null any `expense_ratio_bps = 0` rows from before
         `expensePctToBps(0)` → null, or confirm loaders read only the latest listing.
-  - [ ] **Right after deploy, before the owner opens /funds:** run the MF sync and the index job
-        (`pnpm sync`) so legacy `expense_ratio_bps = 0` rows are superseded and index challengers are
-        registered as `MFU:<scheme>` instruments.
-  - [ ] **After deploy, owner:** log HDFC Mid Cap → Invesco India Mid Cap, ₹3,001 from 2026-11, on /log.
+  - [x] Sync run 2026-10-30 green after hotfix `ef1d816` (prod `MFU:*`/watchlist metadata was a jsonb
+        string; now unwrapped on read, merged safely on write). Nifty 50 challengers registered: `/funds`
+        says move ICICI Nifty 50 → Navi Nifty 50 (0.10% vs 0.24%).
+  - [x] HDFC Mid Cap → Invesco India Mid Cap, ₹3,001 from 2026-11, logged on prod /log 2026-10-30; `/funds` shows it.
   - [x] Invesco India Mid Cap Direct Growth `INF205K01MV6` (AMFI 120403) typed MID in `FUND_TYPE_BY_ISIN`, 2026-10-29.
   - [x] ~~Fix wave: index challengers not loggable~~ — fix wave 2026-10-29 (`fix-wave-report.md`): the index
         job registers them; /log and `logSipMove` require the same index.
