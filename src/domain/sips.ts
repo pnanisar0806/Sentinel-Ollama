@@ -255,7 +255,29 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
  * Orders that no longer represent deployed or committed money. Everything else — a draft, a
  * pending approval, a filled order — has the budget spoken for.
  */
-const RELEASED_STATUSES = ['REJECTED', 'EXPIRED', 'CANCELLED', 'BROKER_REJECTED', 'ABANDONED'];
+export const RELEASED_STATUSES = ['REJECTED', 'EXPIRED', 'CANCELLED', 'BROKER_REJECTED', 'ABANDONED'];
+
+/**
+ * SQL over an `order_intents o`: its amount is the latest revision's quantity (a modify writes
+ * `order_revisions`, never `order_intents`; `createOrder` writes paise into `quantity`).
+ */
+export const ORDER_PAISE_SQL = `coalesce((
+              select r.quantity from order_revisions r
+               where r.order_intent_id = o.id order by r.revision_number desc limit 1
+            ), o.quantity)`;
+
+/**
+ * SQL over an `order_intents o`: true unless its latest status is in the text[] param `$n`
+ * (pass RELEASED_STATUSES). The tie-break (`t.id`) matches `getCurrentStatus` in orders.ts.
+ */
+export const orderHeldSql = (n: number) => `coalesce((
+              select t.to_status from order_transitions t
+               where t.order_intent_id = o.id order by t.at desc, t.id desc limit 1
+            ), 'DRAFT') <> all($${n}::text[])`;
+
+/** SQL: `col` names a lump sum that is not reversed (batch B §3). Its spending is not the month's. */
+export const liveLumpSql = (col: string) =>
+  `(${col} is not null and not exists (select 1 from log_reversals x where x.entity = 'lump_sum' and x.entity_id = ${col}::text))`;
 
 export interface MonthSpend { ordersPaise: bigint; ownerPaise: bigint; totalPaise: bigint }
 
@@ -276,29 +298,24 @@ export interface MonthSpend { ordersPaise: bigint; ownerPaise: bigint; totalPais
 export async function loadMonthSpend(db: Db, nowIso: string, excludeOrderIntentId?: string): Promise<MonthSpend> {
   const month = istMonth(nowIso); // throws on an unparseable clock: fail closed, never 0
   const [from, to] = istMonthBounds(month);
-  // An order's amount is its latest revision's quantity (a modify writes `order_revisions`,
-  // never `order_intents`). `excludeOrderIntentId` leaves out the order being re-gated, so a
-  // modify or resurface is measured once, at its new amount, not on top of itself. The status
-  // tie-break (`t.id`) matches `getCurrentStatus` in orders.ts so gate and state agree.
+  // `excludeOrderIntentId` leaves out the order being re-gated, so a modify or resurface is
+  // measured once, at its new amount, not on top of itself. Spending from an open lump sum
+  // (a linked purchase, an order on a lump-sum recommendation) is the lump sum's, not the month's.
   const [o] = await db.query<{ total: string }>(
-    `select coalesce(sum(coalesce((
-              select r.quantity from order_revisions r
-               where r.order_intent_id = o.id order by r.revision_number desc limit 1
-            ), o.quantity)), 0)::text as total
-       from order_intents o
+    `select coalesce(sum(${ORDER_PAISE_SQL}), 0)::text as total
+       from order_intents o join recommendations rec on rec.id = o.recommendation_id
       where o.intent = 'BUY'
         and o.as_of >= $1::timestamptz and o.as_of < $2::timestamptz
         and ($4::uuid is null or o.id <> $4::uuid)
-        and coalesce((
-              select t.to_status from order_transitions t
-               where t.order_intent_id = o.id order by t.at desc, t.id desc limit 1
-            ), 'DRAFT') <> all($3::text[])`,
+        and ${orderHeldSql(3)}
+        and not ${liveLumpSql('rec.lump_sum_id')}`,
     [from, to, RELEASED_STATUSES, excludeOrderIntentId ?? null],
   );
   const [p] = await db.query<{ total: string }>(
     `select coalesce(sum(amount_paise), 0)::text as total from owner_purchases p
       where bought_on >= $1::date and bought_on < ($1::date + interval '1 month')
-        and not exists (select 1 from log_reversals r where r.entity = 'owner_purchase' and r.entity_id = p.id::text)`,
+        and not exists (select 1 from log_reversals r where r.entity = 'owner_purchase' and r.entity_id = p.id::text)
+        and not ${liveLumpSql('p.lump_sum_id')}`,
     [`${month}-01`],
   );
   // `sum` of a numeric column is a decimal string; money is whole paise.

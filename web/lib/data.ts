@@ -34,6 +34,7 @@ import { humanize, sentence } from './plain';
 import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.js';
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadActiveSipMoves, loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
+import { loadOpenLumpSums, type LumpSum } from '../../src/domain/lump-sums.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
@@ -843,6 +844,8 @@ export interface LogData {
   spLabels: { label: string; balancePaise: bigint }[];
   /** Bank cash not already set aside in B3 or SP; null when no bank balance is known. */
   idleBankCashPaise: bigint | null;
+  /** Lump sums received with money left: what a purchase can say it was paid from. */
+  openLumpSums: LumpSum[];
 }
 
 const SELLABLE_KINDS = ['EQUITY', 'ETF', 'MF', 'GOLD', 'RSU'];
@@ -877,6 +880,7 @@ export async function getLog(): Promise<LogData> {
     pots: names.map((b) => ({ id: b.id, name: b.name, balancePaise: balances.get(b.id) ?? null })),
     spLabels: await loadSpLabels(d),
     idleBankCashPaise: idleBankCash(positions, balances),
+    openLumpSums: await loadOpenLumpSums(d),
   };
 }
 

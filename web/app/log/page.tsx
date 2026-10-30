@@ -10,13 +10,13 @@ export const dynamic = 'force-dynamic';
 
 const KIND_TONE: Record<string, Tone> = {
   Goal: 'green', Purchase: 'indigo', Bond: 'amber', Milestone: 'indigo', Note: 'gray', RSU: 'indigo',
-  Earmark: 'green', Spend: 'amber', Sale: 'indigo', SIP: 'indigo', 'SIP move': 'indigo',
+  Earmark: 'green', Spend: 'amber', Sale: 'indigo', SIP: 'indigo', 'SIP move': 'indigo', 'Lump sum': 'green',
 };
 
 const inr = (p: bigint) => formatInr(p as Paise);
 
 export default async function LogPage() {
-  const { timeline, buckets, openMilestones, bonds, holdings, sellable, pots, spLabels, idleBankCashPaise } = await getLog();
+  const { timeline, buckets, openMilestones, bonds, holdings, sellable, pots, spLabels, idleBankCashPaise, openLumpSums } = await getLog();
   const sipMoves = await getSipMoveOptions();
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
 
@@ -36,6 +36,7 @@ export default async function LogPage() {
               spLabels={spLabels.map((l) => ({ label: l.label, held: inr(l.balancePaise) }))}
               idleCash={idleBankCashPaise === null ? 'unknown' : inr(idleBankCashPaise)}
               sipMoves={sipMoves}
+              lumpSums={openLumpSums.map((l) => ({ id: l.id, label: `${l.from} · ${inr(l.remainingPaise)} left` }))}
             />
           </Card>
         </div>
@@ -49,6 +50,7 @@ export default async function LogPage() {
               <li>A buy you made yourself: log it under <em>Purchase outside Sentinel</em> so it counts against the month; your holdings update from the daily sync.</li>
               <li>A sale or redemption you made yourself: <em>A sale I made</em>. A fund switch is a sale plus a purchase.</li>
               <li>A monthly SIP moved to another fund in the same category: <em>Move a SIP</em>.</li>
+              <li>Money you want invested on top of the month, like bond interest: <em>Money received</em>. A buy paid from it says so under <em>Purchase outside Sentinel</em>.</li>
               <li>A wrong entry: <em>Reverse</em> it on the timeline below, then log the right one.</li>
             </ul>
           </Card>

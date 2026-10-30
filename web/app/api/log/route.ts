@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
 import {
-  completeMilestone, logEarmark, logGoalMove, logNote, logPurchase, logSale, logSipMove, logSpend, type EarmarkEnd, type GoalMoveKind,
+  completeMilestone, logEarmark, logGoalMove, logLumpSum, logNote, logPurchase, logSale, logSipMove, logSpend, type EarmarkEnd, type GoalMoveKind,
 } from '../../../../src/domain/owner-log';
 import { reverseEntry, type ReversalEntity } from '../../../../src/domain/reversals';
 import { loadGoalTracker } from '../../../../src/domain/goal-plan';
@@ -20,7 +20,8 @@ type Body =
   | { action: 'milestone'; id: string; on: string }
   | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string }
   | { action: 'note'; on: string; text: string }
-  | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string }
+  | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string; lumpSumId?: string }
+  | { action: 'lump_sum'; on: string; rupees: string; from: string; note?: string }
   | { action: 'sale'; on: string; instrumentId: string; units?: string; rupees: string; destination?: string; label?: string; note?: string }
   | { action: 'spend'; on: string; rupees: string; purpose: string; from: 'B2' | 'B3' | 'B4' | 'SP' | 'BANK'; label?: string; note?: string }
   | { action: 'earmark'; on: string; rupees: string; from: EarmarkEnd; to: EarmarkEnd; label?: string; expectedOn?: string; note?: string }
@@ -77,9 +78,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await logPurchase(d, {
           boughtOn: body.on, description: body.description ?? '', amountPaise: paise(body.rupees ?? ''),
           instrumentId: body.instrumentId || null, units: units(body.units), note: body.note ?? '',
+          ...(body.lumpSumId ? { lumpSumId: body.lumpSumId } : {}),
         });
-        return NextResponse.json({ ok: true, message: 'Purchase recorded against that month’s budget. Holdings and allocation update separately through the daily holdings sync.' });
+        return NextResponse.json({ ok: true, message: `Purchase recorded against ${body.lumpSumId ? 'that lump sum, not the month’s budget' : 'that month’s budget'}. Holdings and allocation update separately through the daily holdings sync.` });
       }
+      case 'lump_sum':
+        await logLumpSum(d, { receivedOn: body.on, amountPaise: paise(body.rupees ?? ''), from: body.from ?? '', note: body.note ?? '' });
+        return NextResponse.json({ ok: true, message: 'Money received recorded. It is in addition to the monthly budget.' });
       case 'sale': {
         const u = units(body.units);
         const destination = (body.destination || null) as 'B2' | 'B3' | 'B4' | 'SP' | null;
