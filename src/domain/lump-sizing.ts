@@ -2,10 +2,10 @@ import { createHash } from 'node:crypto';
 import type { Db } from '../db/client.js';
 import { chooseIndexFund, loadIndexFundRows, type IndexFundType } from '../sources/index-funds.js';
 import { IPS_BANDS } from './allocation.js';
-import { loadActualMix, loadFundCandidates, loadSignedMix, typeOf } from './fund-mix.js';
+import { fundAliases, loadActualMix, loadFundCandidates, loadSignedMix, sameFund, typeOf } from './fund-mix.js';
 import { loadFundMoves } from './fund-moves.js';
 import { FUND_TYPE_LABEL, byGap, midBps, type FundType } from './fund-types.js';
-import { loadLumpSum } from './lump-sums.js';
+import { loadLumpSum, openLumpSumPaise } from './lump-sums.js';
 import { universeInstrumentId } from './mf-universe.js';
 import { EXCHANGE_TRADED, freshQuote, stocksWait, type Candidate, type SizingInput } from './sizing.js';
 import { loadSizingInput } from './sizing-input.js';
@@ -38,8 +38,18 @@ export interface LumpSizingInput {
   sizing: SizingInput;
   /** All held equity funds, the base the fund-type shares are of. */
   fundTotalPaise: bigint;
+  /** Held value per fund type (the numerator of its share), for the exact room to its max. */
+  typeValuePaise: Partial<Record<FundType, bigint>>;
   newFunds: NewFund[];
-  gold: { instrumentId: string; name: string; kind: string; actualBps: number; maxBps: number; portfolioPaise: bigint } | null;
+  /** `goldPaise` is every held GOLD instrument; `actualBps` (floored) is for display only. */
+  gold: { instrumentId: string; name: string; kind: string; actualBps: number; maxBps: number; portfolioPaise: bigint; goldPaise: bigint } | null;
+}
+
+/** Limits the picks share; `allocateLumpSum` spends them down across parts. */
+export interface LumpLimits {
+  freeCashPaise: bigint;
+  typeRoomPaise: Partial<Record<FundType, bigint>>;
+  goldRoomPaise: bigint | null;
 }
 
 const INDEX_TYPES: IndexFundType[] = ['NIFTY50', 'NEXT50', 'US'];
@@ -51,25 +61,38 @@ export async function loadLumpSizingInput(db: Db, lumpSumId: string, asOf: strin
   const base = await loadSizingInput(db, asOf, now);
   const funds = await loadFundCandidates(db, asOf, { upToMax: true });
   // loadSizingInput reserves every open lump sum, this one included; it is the money being sized.
-  const self = lump.remainingPaise > 0n ? lump.remainingPaise : 0n;
-  const sizing: SizingInput = { ...base, funds, reservedPaise: base.reservedPaise - self };
+  const otherLumps = await openLumpSumPaise(db, lumpSumId);
+  const sizing: SizingInput = { ...base, funds, reservedPaise: base.reservedPaise - await openLumpSumPaise(db) + otherLumps };
 
   const mix = await loadActualMix(db);
   const signed = await loadSignedMix(db);
   const newFunds: NewFund[] = [];
   if (signed !== null) {
     const range = new Map(signed.ranges.map((r) => [r.type, r]));
-    const add = (instrumentId: string, name: string, t: FundType, why: string): void => {
+    /** A held copy of the fund, by alias or scheme code: its own verdict ("kept, not topped up", …) stands. */
+    const heldCopy = async (instrumentId: string, t: FundType): Promise<boolean> => {
+      const held = mix.byType[t].holdings.map((h) => h.instrumentId);
+      if (held.length === 0) return false;
+      const own = await fundAliases(db, instrumentId);
+      for (const h of held) if (sameFund(own, await fundAliases(db, h))) return true;
+      if (!instrumentId.startsWith('MFU:')) return false;
+      const bySchemeCode = await db.query(
+        `select 1 from instruments a join instruments b on b.id = a.id or (a.canonical_id is not null and b.canonical_id = a.canonical_id)
+          where a.id = any($1::text[]) and b.scheme_code = $2 limit 1`, [held, instrumentId.slice(4)]);
+      return bySchemeCode.length > 0;
+    };
+    const add = async (instrumentId: string, name: string, t: FundType, why: string): Promise<void> => {
       const r = range.get(t);
       if (r === undefined || !r.newMoney) return;
       if (funds.buys.some((b) => b.instrumentId === instrumentId) || newFunds.some((f) => f.instrumentId === instrumentId)) return;
+      if (await heldCopy(instrumentId, t)) return;
       newFunds.push({ instrumentId, name, fundType: t, why, actualBps: mix.byType[t].shareBps, minBps: r.minBps, midBps: midBps(r), maxBps: r.maxBps });
     };
     // The /funds switch check's pick for a held fund: same category, so the held fund's type.
     for (const m of (await loadFundMoves(db, asOf)).moves) {
       if (m.units.kind !== 'move') continue;
       const t = (await typeOf(db, m.instrumentId))?.type;
-      if (t !== undefined) add(m.units.toId, m.units.toName, t, `the switch check's pick over ${m.name}: ${m.units.why}`);
+      if (t !== undefined) await add(m.units.toId, m.units.toName, t, `the switch check's pick over ${m.name}: ${m.units.why}`);
     }
     // An index type no held fund can top up (e.g. Junior BeES and VOO are kept, never topped up).
     const { rows } = await loadIndexFundRows(db);
@@ -77,7 +100,7 @@ export async function loadLumpSizingInput(db: Db, lumpSumId: string, asOf: strin
       if (mix.byType[t].holdings.some((h) => h.topUp)) continue;
       const top = chooseIndexFund(rows, t).top;
       // A ranked row is always a verified AMFI Direct Growth scheme (`chooseIndexFund`).
-      if (top !== null) add(universeInstrumentId(top.amfiSchemeCode!), top.name, t, `the index fund chooser's pick for ${FUND_TYPE_LABEL[t]}`);
+      if (top !== null) await add(universeInstrumentId(top.amfiSchemeCode!), top.name, t, `the index fund chooser's pick for ${FUND_TYPE_LABEL[t]}`);
     }
   }
 
@@ -87,15 +110,14 @@ export async function loadLumpSizingInput(db: Db, lumpSumId: string, asOf: strin
   const goldTotal = [...goldValue.values()].reduce((a, b) => a + b, 0n);
   const largest = [...goldValue].sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : a[0].localeCompare(b[0])))[0];
   let gold: LumpSizingInput['gold'] = null;
-  if (largest !== undefined && sizing.portfolioPaise > 0n) {
+  if (largest !== undefined && goldTotal * 10_000n < BigInt(GOLD_MAX_BPS) * sizing.portfolioPaise) {
     const actualBps = Number((goldTotal * 10_000n) / sizing.portfolioPaise);
-    if (actualBps < GOLD_MAX_BPS) {
-      const [i] = await db.query<{ name: string }>(`select name from instruments where id = $1`, [largest[0]]);
-      gold = { instrumentId: largest[0], name: i?.name ?? largest[0], kind: 'GOLD', actualBps, maxBps: GOLD_MAX_BPS, portfolioPaise: sizing.portfolioPaise };
-    }
+    const [i] = await db.query<{ name: string }>(`select name from instruments where id = $1`, [largest[0]]);
+    gold = { instrumentId: largest[0], name: i?.name ?? largest[0], kind: 'GOLD', actualBps, maxBps: GOLD_MAX_BPS, portfolioPaise: sizing.portfolioPaise, goldPaise: goldTotal };
   }
 
-  return { lumpSumId, remainingPaise: lump.remainingPaise, sizing, fundTotalPaise: mix.totalPaise, newFunds, gold };
+  const typeValuePaise = Object.fromEntries(Object.entries(mix.byType).map(([t, v]) => [t, v.valuePaise])) as Record<FundType, bigint>;
+  return { lumpSumId, remainingPaise: lump.remainingPaise, sizing, fundTotalPaise: mix.totalPaise, typeValuePaise, newFunds, gold };
 }
 
 const min = (...xs: bigint[]): bigint => xs.reduce((m, x) => (x < m ? x : m));
@@ -107,6 +129,27 @@ function withLumpId(lumpSumId: string, asOf: string, c: Omit<Candidate, 'id' | '
   return { ...c, id: createHash('sha256').update(key).digest('hex').slice(0, 16), policyVersion: LUMP_POLICY };
 }
 
+/**
+ * Room to a fund type's max in paise: `max × fundTotal − held`, from the exact held value, never
+ * the floored share. Conservative: buying grows the fund total too, so the true room is a little larger.
+ */
+const typeRoom = (i: LumpSizingInput, t: FundType, maxBps: number): bigint =>
+  (BigInt(maxBps) * i.fundTotalPaise) / 10_000n - (i.typeValuePaise[t] ?? 0n);
+/** Room to gold's band max: bought from bank cash, which is already in the portfolio, so the base does not grow. */
+const goldRoom = (g: NonNullable<LumpSizingInput['gold']>): bigint => (BigInt(g.maxBps) * g.portfolioPaise) / 10_000n - g.goldPaise;
+
+/** Pure. What the picks share: free cash, each fund type's room to its max, gold's room. */
+export function lumpLimits(i: LumpSizingInput): LumpLimits {
+  const s = i.sizing;
+  const typeRoomPaise: LumpLimits['typeRoomPaise'] = {};
+  for (const f of [...s.funds.buys, ...i.newFunds]) typeRoomPaise[f.fundType] = typeRoom(i, f.fundType, f.maxBps);
+  return {
+    freeCashPaise: s.cashAvailablePaise === null ? 0n : s.cashAvailablePaise - s.reservedPaise,
+    typeRoomPaise,
+    goldRoomPaise: i.gold === null ? null : goldRoom(i.gold),
+  };
+}
+
 /** Pure. Every destination's ceiling is `min(left of the lump sum, max order, free cash, its headroom)`. */
 export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
   const s = i.sizing;
@@ -114,7 +157,6 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
   const cash = s.cashAvailablePaise === null ? null : s.cashAvailablePaise - s.reservedPaise;
   const schemeCap = (s.portfolioPaise * BigInt(Math.round(s.singleSchemeCapPct * 100))) / 10_000n;
   const stockCap = (s.portfolioPaise * BigInt(Math.round(s.singleStockCapPct * 100))) / 10_000n;
-  const typeRoom = (maxBps: number, actualBps: number) => (BigInt(maxBps - actualBps) * i.fundTotalPaise) / 10_000n;
 
   /**
    * `full` is why there is no headroom; `heldPaise` (funds only) is checked against the
@@ -150,17 +192,17 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
   for (const f of [...s.funds.buys].sort(byGap)) {
     size({ instrumentId: f.instrumentId, name: f.name, vehicle: 'FUND',
       fund: { fundType: f.fundType, actualBps: f.actualBps, midBps: f.midBps, minBps: f.minBps, maxBps: f.maxBps, quality: f.quality } },
-    f.kind, typeRoom(f.maxBps, f.actualBps), `${FUND_TYPE_LABEL[f.fundType]} room to its max`, `${FUND_TYPE_LABEL[f.fundType]} is at its range max`, f.heldPaise);
+    f.kind, typeRoom(i, f.fundType, f.maxBps), `${FUND_TYPE_LABEL[f.fundType]} room to its max`, `${FUND_TYPE_LABEL[f.fundType]} is at its range max`, f.heldPaise);
   }
   for (const f of i.newFunds) {
     size({ instrumentId: f.instrumentId, name: f.name, vehicle: 'FUND',
       fund: { fundType: f.fundType, actualBps: f.actualBps, midBps: f.midBps, minBps: f.minBps, maxBps: f.maxBps, quality: f.why } },
-    'MF', typeRoom(f.maxBps, f.actualBps), `${FUND_TYPE_LABEL[f.fundType]} room to its max`, `${FUND_TYPE_LABEL[f.fundType]} is at its range max`, 0n);
+    'MF', typeRoom(i, f.fundType, f.maxBps), `${FUND_TYPE_LABEL[f.fundType]} room to its max`, `${FUND_TYPE_LABEL[f.fundType]} is at its range max`, 0n);
   }
   if (i.gold !== null) {
     const g = i.gold;
     size({ instrumentId: g.instrumentId, name: g.name, vehicle: 'FUND', fund: null },
-      g.kind, (BigInt(g.maxBps - g.actualBps) * g.portfolioPaise) / 10_000n, `gold room to its ${g.maxBps / 100}% band max`, 'gold is at its IPS band max');
+      g.kind, goldRoom(g), `gold room to its ${g.maxBps / 100}% band max`, 'gold is at its IPS band max');
   }
   const wait = stocksWait(s.funds);
   const holding = new Map<string, bigint>(); // one per instrument, summed across accounts
@@ -176,18 +218,30 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
  * Pure. Walks the advisor's picks in order; each part is `min(its ceiling, what is left)`,
  * floored to whole units for an exchange-traded pick. A part with 0 units is dropped and its
  * money stays for the next pick. Unknown, WITHHELD and repeated ids are skipped. Never a ₹0 part.
+ *
+ * With `limits` (`lumpLimits`), picks also share them: the total never exceeds free cash, two
+ * funds of one type never exceed that type's room together, and gold never its room. Gold is the
+ * one lump-sum candidate with vehicle FUND and no `fund`. A stock's cap is per instrument already.
  */
-export function allocateLumpSum(candidates: Candidate[], chosenIds: string[], remainingPaise: bigint): { candidate: Candidate; amountPaise: bigint; units: string | null }[] {
+export function allocateLumpSum(
+  candidates: Candidate[], chosenIds: string[], remainingPaise: bigint, limits?: LumpLimits,
+): { candidate: Candidate; amountPaise: bigint; units: string | null }[] {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const out: { candidate: Candidate; amountPaise: bigint; units: string | null }[] = [];
   const used = new Set<string>();
-  let left = remainingPaise;
+  const typeRoom = { ...limits?.typeRoomPaise };
+  let goldRoom = limits?.goldRoomPaise ?? null;
+  let left = limits === undefined ? remainingPaise : min(remainingPaise, limits.freeCashPaise);
   for (const id of chosenIds) {
     if (left <= 0n) break;
     const c = byId.get(id);
     if (c === undefined || c.status !== 'ELIGIBLE' || c.amountPaise === null || used.has(id)) continue;
     used.add(id);
+    const t = c.fund?.fundType;
+    const isGold = c.vehicle === 'FUND' && c.fund === null;
     let amount = min(c.amountPaise, left);
+    if (limits !== undefined && t !== undefined) amount = min(amount, typeRoom[t] ?? 0n);
+    if (limits !== undefined && isGold) amount = min(amount, goldRoom ?? 0n);
     let units: string | null = null;
     if (c.pricePaise !== null) {
       const n = amount / c.pricePaise;
@@ -197,6 +251,8 @@ export function allocateLumpSum(candidates: Candidate[], chosenIds: string[], re
     if (amount <= 0n) continue;
     out.push({ candidate: c, amountPaise: amount, units });
     left -= amount;
+    if (t !== undefined && typeRoom[t] !== undefined) typeRoom[t] -= amount;
+    if (isGold && goldRoom !== null) goldRoom -= amount;
   }
   return out;
 }

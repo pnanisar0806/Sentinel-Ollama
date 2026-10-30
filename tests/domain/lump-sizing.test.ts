@@ -4,7 +4,7 @@ import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import type { SwitchCandidate } from '../../src/domain/mf-switch.js';
 import type { Candidate, SizingInput } from '../../src/domain/sizing.js';
-import type { LumpSizingInput } from '../../src/domain/lump-sizing.js';
+import type { LumpLimits, LumpSizingInput } from '../../src/domain/lump-sizing.js';
 
 /**
  * Batch B §3, Task 4: a lump sum is sized against every eligible destination independently —
@@ -14,7 +14,7 @@ const switches: SwitchCandidate[] = [];
 vi.mock('../../src/domain/mf-switch.js', () => ({ evaluateSwitches: vi.fn(async () => switches) }));
 
 const { approveMix, loadFundCandidates } = await import('../../src/domain/fund-mix.js');
-const { allocateLumpSum, loadLumpSizingInput, sizeLumpSum } = await import('../../src/domain/lump-sizing.js');
+const { allocateLumpSum, loadLumpSizingInput, lumpLimits, sizeLumpSum } = await import('../../src/domain/lump-sizing.js');
 const { loadSizingInput } = await import('../../src/domain/sizing-input.js');
 const { logLumpSum } = await import('../../src/domain/owner-log.js');
 
@@ -110,11 +110,29 @@ describe('loadLumpSizingInput + sizeLumpSum', () => {
     // Stocks still wait on the midpoints, not the maxima.
     expect(lump.typesBelowMidpoint).toEqual(monthly.typesBelowMidpoint);
   });
+
+  it('a chooser pick the owner already holds is not a new fund: "kept, not topped up" stands', async () => {
+    const [snap] = await db.query<{ id: string }>(`insert into snapshots (business_date, source) values (date '2026-10-20', 'indmoney') returning id`);
+    // Junior BeES's ISIN types it NEXT50, kept, never topped up; it is AMFI scheme 149000.
+    await db.query(`insert into instruments (id, kind, name, currency, isin, scheme_code) values ('IND:N50', 'MF', 'Next 50 held', 'INR', 'INF732E01045', '149000')`);
+    await db.query(`insert into holdings (snapshot_id, instrument_id, account, quantity, value_paise, source, as_of)
+      values ($1, 'IND:N50', 'indmoney', 1, 10000000, 'indmoney', timestamptz '2026-10-20T12:00:00Z')`, [snap!.id]);
+    await approveMix(db, { band: '15+' }, NOW);
+    const chooserTop = (code: string, asOf: string) => db.query(
+      `insert into index_fund_candidates (fund_type, indmoney_fund_id, name, benchmark_name, amfi_scheme_code,
+         expense_ratio_bps, aum_paise, sip_allowed, as_of, source)
+       values ('NEXT50', $1, 'A Next 50 Index Fund', 'Nifty Next 50 TR INR', $1, 20, 1000000000000, true, $2, 'indmoney-mcp')`, [code, asOf]);
+    await chooserTop('149000', '2026-10-29');
+    const { id } = await logLumpSum(db, { receivedOn: '2026-10-28', amountPaise: LUMP, from: 'Edelweiss bond interest' }, NOW);
+    expect((await loadLumpSizingInput(db, id, AS_OF, new Date(NOW))).newFunds).toEqual([]);
+    await chooserTop('150000', AS_OF); // the next day's listing ranks a different scheme: a new fund
+    expect((await loadLumpSizingInput(db, id, AS_OF, new Date(NOW))).newFunds.map((f) => f.instrumentId)).toEqual(['MFU:150000']);
+  });
 });
 
 describe('sizeLumpSum (pure)', () => {
   const input = (over: Partial<SizingInput> = {}): LumpSizingInput => ({
-    lumpSumId: '7', remainingPaise: LUMP, fundTotalPaise: 100_000_000n, newFunds: [], gold: null,
+    lumpSumId: '7', remainingPaise: LUMP, fundTotalPaise: 100_000_000n, typeValuePaise: {}, newFunds: [], gold: null,
     sizing: {
       asOf: AS_OF, tacticalBudgetPaise: 0n, envelopeReason: null, maxOrderPaise: 10_000_000n, cashAvailablePaise: 20_000_000n,
       reservedPaise: 0n, portfolioPaise: 1_000_000_000n, singleStockCapPct: 10, holdings: [],
@@ -135,6 +153,32 @@ describe('sizeLumpSum (pure)', () => {
     const [c] = sizeLumpSum(input({ holdings: [held, held] }));
     expect(c).toMatchObject({ status: 'ELIGIBLE', units: '1', amountPaise: 100_000n, vehicle: 'STOCK' });
   });
+
+  // Room comes from exact paise, never a floored share: 19.0005% floors to 19.00%, which would
+  // overstate the room by ₹0.50 here (and by up to fundTotal / 10 000 in general).
+  const mid = { instrumentId: 'MF:MID', name: 'Mid', kind: 'MF', fundType: 'MID' as const, gapBps: -400, actualBps: 1900, midBps: 1500,
+    minBps: 1000, maxBps: 2000, heldPaise: 19_000_050n, quality: 'rank 1 of 9' };
+  const tight = (): LumpSizingInput => ({
+    ...input({ buys: [], funds: { approved: true, buys: [mid], typesBelowMidpoint: [], excluded: [] },
+      quotes: new Map([['NSE:G', { pricePaise: 100n, asOf: AS_OF }]]) }),
+    typeValuePaise: { MID: 19_000_050n },
+    gold: { instrumentId: 'NSE:G', name: 'Gold ETF', kind: 'GOLD', actualBps: 990, maxBps: 1000, portfolioPaise: 1_000_000_000n, goldPaise: 99_000_050n },
+  });
+
+  it("a fund's room to its type max binds below the lump sum", () => {
+    const c = sizeLumpSum(tight()).find((x) => x.instrumentId === 'MF:MID');
+    expect(c).toMatchObject({ status: 'ELIGIBLE', amountPaise: 999_950n }); // 20% of ₹10L − ₹1,90,000.50
+  });
+
+  it("gold's room to its 10% band max binds below the lump sum", () => {
+    const c = sizeLumpSum(tight()).find((x) => x.instrumentId === 'NSE:G');
+    expect(c).toMatchObject({ status: 'ELIGIBLE', units: '9999', amountPaise: 999_900n }); // room ₹9,999.50 at ₹1 a unit
+  });
+
+  it("lumpLimits: free cash, each type's room and gold's room", () => {
+    expect(lumpLimits({ ...tight(), sizing: { ...tight().sizing, reservedPaise: 5_000_000n } }))
+      .toEqual({ freeCashPaise: 15_000_000n, typeRoomPaise: { MID: 999_950n }, goldRoomPaise: 999_950n });
+  });
 });
 
 /** Hand-built candidates: the allocator is pure. */
@@ -144,7 +188,8 @@ const cand = (over: Partial<Candidate> & Pick<Candidate, 'id' | 'instrumentId'>)
 });
 
 describe('allocateLumpSum', () => {
-  const invesco = cand({ id: 'inv', instrumentId: 'MFU:120505', amountPaise: 1_500_000n });
+  const invesco = cand({ id: 'inv', instrumentId: 'MFU:120505', amountPaise: 1_500_000n,
+    fund: { fundType: 'MID', actualBps: 1500, midBps: 1500, minBps: 1000, maxBps: 2000, quality: '' } });
   const gold = (price: bigint) => cand({ id: 'gold', instrumentId: 'NSE:GOLDBEES', amountPaise: (LUMP / price) * price, units: String(LUMP / price), pricePaise: price, quoteAsOf: AS_OF });
 
   it("allocates in the model's order and stops when spent", () => {
@@ -165,6 +210,25 @@ describe('allocateLumpSum', () => {
     // Its money stays for the next pick.
     const next = allocateLumpSum([gold(600_000n), invesco, cand({ id: 'n50', instrumentId: 'MFU:149000' })], ['inv', 'gold', 'n50'], LUMP);
     expect(next.map((p) => [p.candidate.id, p.amountPaise])).toEqual([['inv', 1_500_000n], ['n50', 569_100n]]);
+  });
+
+  const midFund = (id: string) => cand({ id, instrumentId: `MF:${id}`, fund: { fundType: 'MID', actualBps: 1500, midBps: 1500, minBps: 1000, maxBps: 2000, quality: '' } });
+  const limits = (over: Partial<LumpLimits> = {}): LumpLimits => ({ freeCashPaise: 100_000_000n, typeRoomPaise: { MID: 1_500_000n }, goldRoomPaise: 300_000n, ...over });
+  const n50 = (id: string) => cand({ id, instrumentId: `MFU:${id}`, fund: { fundType: 'NEXT50', actualBps: 0, midBps: 500, minBps: 0, maxBps: 1000, quality: '' } });
+
+  it('with limits, two picks of one type never exceed its room together', () => {
+    const parts = allocateLumpSum([midFund('a'), midFund('b'), invesco], ['a', 'b'], LUMP, limits());
+    expect(parts.map((p) => [p.candidate.id, p.amountPaise])).toEqual([['a', 1_500_000n]]);
+    // Without limits each is sized alone, as before.
+    expect(allocateLumpSum([midFund('a'), midFund('b')], ['a', 'b'], LUMP).map((p) => p.amountPaise)).toEqual([LUMP]);
+  });
+
+  it('with limits, free cash below the lump sum caps the total, and gold its room', () => {
+    const parts = allocateLumpSum([gold(2408n), n50('n50')], ['gold', 'n50'], LUMP, limits({ freeCashPaise: 1_000_000n, typeRoomPaise: { NEXT50: LUMP } }));
+    // Gold: room ₹3,000 → 124 units (₹2,985.92); then the Next 50 fund gets the rest of ₹10,000 of free cash.
+    expect(parts.map((p) => [p.candidate.id, p.amountPaise, p.units])).toEqual([
+      ['gold', 124n * 2408n, '124'], ['n50', 1_000_000n - 124n * 2408n, null]]);
+    expect(parts.reduce((s, p) => s + p.amountPaise, 0n)).toBe(1_000_000n);
   });
 
   it('skips unknown, withheld and repeated ids', () => {
