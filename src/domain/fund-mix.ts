@@ -439,8 +439,10 @@ const bpsText = (bps: number) => `${bps / 100}%`;
  * Midpoints are the raw range midpoints, as /funds shows them: they sum to 97.5%, so every
  * type can sit at or above its midpoint at once — normalised ones sum to 100% and would
  * hold stocks back forever. Never a sale: an overweight type simply gets no candidate.
+ * `upToMax` (lump sums, batch B §3): a fund is a buy while its type is below the range max
+ * rather than the midpoint; `typesBelowMidpoint` and every other exclusion are unchanged.
  */
-export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCandidates> {
+export async function loadFundCandidates(db: Db, asOf: string, opts: { upToMax?: boolean } = {}): Promise<FundCandidates> {
   const signed = await loadSignedMix(db);
   if (signed === null) return { approved: false, buys: [], typesBelowMidpoint: [], excluded: [] };
   const mix = await loadActualMix(db);
@@ -468,7 +470,9 @@ export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCand
       }
       if (r === undefined || !r.newMoney) { out('0% new money'); continue; }
       if (!h.topUp) { out('kept, not topped up'); continue; }
-      if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
+      if (opts.upToMax) {
+        if (actualBps >= r.maxBps) { out(`at or above max (${bpsText(actualBps)} vs ${bpsText(r.maxBps)})`); continue; }
+      } else if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
       // The /funds switch check (active and index, fund switch §4) is the one verdict on leaving a fund.
       leaving ??= new Map((await loadFundMoves(db, asOf)).moves.flatMap((f) => (f.units.kind === 'move' ? [[f.instrumentId, f.units.toName] as const] : [])));
       const pick = leaving.get(h.instrumentId);
