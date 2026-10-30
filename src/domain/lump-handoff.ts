@@ -92,8 +92,10 @@ export async function signLumpSum(
     });
     const persisted = await persistRecommendation(db, rec, { lumpSumId });
     if (persisted.id === null) { refused.push({ name: c.name, reason: persisted.reason ?? 'refused' }); continue; }
+    // The same part from this lump sum is already a recommendation this month: not signed again.
+    if (persisted.duplicate) { refused.push({ name: c.name, reason: 'already recommended this month' }); continue; }
     recommendationIds.push(persisted.id);
-    if (!persisted.duplicate) await benchmarkSigned(db, persisted.id, c.instrumentId, createdOn);
+    await benchmarkSigned(db, persisted.id, c.instrumentId, createdOn);
   }
   if (recommendationIds.length === 0) throw new Error(`not signed: ${refused.map((r) => `${r.name}: ${r.reason}`).join('; ')}`);
 

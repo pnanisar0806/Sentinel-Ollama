@@ -186,10 +186,14 @@ describe('lumpSumAdvice in the weekly report', () => {
     expect(await count()).toBe(1);
   });
 
-  it('a signed BUY is left alone', async () => {
-    await decideProposal(db, await prior(id, 'BUY', '2026-09-01T00:00:00Z'), 'SIGNED', '');
+  it('a signed BUY with money left (a part refused at signing) is re-advised once older than 28 days', async () => {
+    // Its orders already reduce what is left; the refused part's money is still open.
+    await decideProposal(db, await prior(id, 'BUY', '2026-10-10T00:00:00Z'), 'SIGNED', 'refused: Bajaj Auto (FR-12)');
     expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toBe('');
     expect(await count()).toBe(1);
+    await decideProposal(db, await prior(id, 'BUY', '2026-10-01T00:00:00Z'), 'SIGNED', 'refused: Bajaj Auto (FR-12)');
+    expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toMatch(/Lump sum ₹20,691/);
+    expect(await count()).toBe(3);
   });
 
   it('a HOLD/WAIT/NO_ACTION is re-advised only once it is older than 28 days', async () => {

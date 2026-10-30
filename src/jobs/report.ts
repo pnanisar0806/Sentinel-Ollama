@@ -156,14 +156,15 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   }
 }
 
-/** A lump sum's HOLD/WAIT/NO_ACTION is looked at again after this long. */
+/** A lump sum's signed BUY or HOLD/WAIT/NO_ACTION is looked at again after this long. */
 const LUMP_READVISE_DAYS = 28;
 
 /**
  * Batch B §3: advice for each open lump sum, at every weekly report (not held with the month's
  * budget — the lump sum is on top of it). Skipped while its latest proposal is a BUY awaiting
- * the owner or signed, or a HOLD/WAIT/NO_ACTION 28 days old or less; re-advised when there is
- * none, it was dismissed, or it is older. UNAVAILABLE is not a decision: re-advised at the next
+ * the owner, or a signed BUY or HOLD/WAIT/NO_ACTION 28 days old or less; re-advised when there is
+ * none, it was dismissed, or it is older. A lump sum still open after a signed BUY has money left
+ * (a part refused at signing, an order released): its held orders already reduce what is left. UNAVAILABLE is not a decision: re-advised at the next
  * report whatever its age or status. Returns the report lines ('' when nothing was advised, or
  * on any failure — logged; the weekly report never fails for this, as `monthlyAdvice`).
  */
@@ -182,7 +183,7 @@ export async function lumpSumAdvice(
         const latest = proposals.find((p) => p.payload['lumpSumId'] === lump.id);
         if (latest !== undefined && latest.status !== 'DISMISSED') {
           const decision = latest.payload['decision'];
-          if (decision === 'BUY') continue;
+          if (decision === 'BUY' && latest.status === 'OPEN') continue;
           if (decision !== 'UNAVAILABLE' && now.getTime() - Date.parse(latest.asOf) <= LUMP_READVISE_DAYS * 86_400_000) continue;
         }
         const input = await loadLumpSizingInput(db, lump.id, asOf, now);

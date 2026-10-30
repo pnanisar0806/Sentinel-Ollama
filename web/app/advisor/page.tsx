@@ -111,7 +111,7 @@ function LumpSumCard({ lumpSums }: { lumpSums: AdvisorData['lumpSums'] }) {
   return (
     <Card title="Lump sum" aside="on top of the monthly budget · you sign, then approve">
       {lumpSums.length === 0
-        ? <Notice>No lump sum logged — log one on <Link href="/log">Log what I did</Link> → Money received</Notice>
+        ? <Notice>No lump sum money left — log one on <Link href="/log">Log what I did</Link> → Money received</Notice>
         : lumpSums.map(({ lump, proposal }) => {
           const p = proposal?.payload ?? {};
           const d = DECISION[str(p['decision'])] ?? { tone: 'gray' as Tone, label: str(p['decision']) };

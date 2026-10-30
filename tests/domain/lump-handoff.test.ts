@@ -97,6 +97,18 @@ describe('signing a lump-sum split', () => {
     expect(await db.query(`select 1 from order_intents where recommendation_id = any($1::int[])`, [r.recommendationIds])).toHaveLength(2);
   });
 
+  it('a part already recommended this month from the same lump sum is refused, not reported as signed', async () => {
+    // A part persisted by an earlier sign that crashed before drafting: same lump sum, kind, intent, instrument.
+    const earlier = await persistRecommendation(db, buildRecommendation({
+      kind: 'rebalance', createdOn: NOW.toISOString().slice(0, 10),
+      primary: { intent: fundIntent('FLEXI'), instrumentId: 'MF:PPFC', action: 'BUY', amountPaise: '100000', thesis: 'earlier', ipsClauseRefs: ['3.4'], falsification: null },
+    }), { lumpSumId: lumpId });
+    const r = await signLumpSum(db, await advise(lumpId), { candidates: [ppfc(), bajaj()], limits, now: NOW });
+    expect(r.recommendationIds).not.toContain(earlier.id);
+    expect(r.recommendationIds).toHaveLength(1);
+    expect(r.refused).toEqual([{ name: 'Parag Parikh Flexi Cap Direct', reason: 'already recommended this month' }]);
+  });
+
   it('a stale size refuses the whole split', async () => {
     const id = await advise(lumpId);
     // Fresh sizing gives the fund a smaller ceiling than when the advice was given.
