@@ -20,8 +20,8 @@ MEMORY.md; the code map lives in index.md.
   - [x] ~~Fix wave: index challengers not loggable~~ — fix wave 2026-10-29 (`fix-wave-report.md`): the index
         job registers them; /log and `logSipMove` require the same index.
   - [ ] Known gap: ETFs (e.g. Nifty 50 ETFs) are not switch-checked; only mutual funds (`/funds` says so).
-      **Then batch B** — ask its 5 questions at brainstorm start (SIP-total raise, where shown, lump
-      sums, budget raise incl. ₹50k tactical cap, which SIP changes).
+      **Batch B** — spec `2026-10-30-batch-b-design.md` approved; plan `plans/2026-10-30-batch-b.md` (6 tasks,
+      waves T1∥T2, T3∥T4, T5, T6). Next: owner reviews plan, then subagent-driven execution.
 - [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
       applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
       `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:
