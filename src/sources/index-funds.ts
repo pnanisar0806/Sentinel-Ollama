@@ -122,8 +122,9 @@ export async function recordIndexFundCandidates(
  *
  * `metadata.category` is the AMFI category `logSipMove` reads on the held fund of the same index:
  * AMFI files index funds under more than one heading, so the peer's own heading could refuse a
- * like-for-like move. The real gate is `metadata.indexType`, which `logSipMove` also checks. No
- * held fund of that index with a category: nothing to register, as no move from it can be logged.
+ * like-for-like move. The real gate is `metadata.indexType`, which `logSipMove` also checks.
+ * Batch B §3: a lump sum may open an index type no held fund tracks, so with no held fund of that
+ * index the picks are registered under the ranked row's own AMFI category (left unset if AMFI was not read).
  */
 async function registerIndexChallengers(db: Db, amfi: ReadonlyMap<string, UniverseRow> | null): Promise<void> {
   const { rows } = await loadIndexFundRows(db);
@@ -133,12 +134,12 @@ async function registerIndexChallengers(db: Db, amfi: ReadonlyMap<string, Univer
     if (f.category !== null && f.indexType !== null && !categoryOf.has(f.indexType)) categoryOf.set(f.indexType, f.category);
   }
   for (const fundType of Object.keys(INDEX_FUND_SLUGS) as IndexFundType[]) {
-    const category = categoryOf.get(fundType);
     const choice = chooseIndexFund(rows, fundType);
-    if (category === undefined || choice.top === null) continue;
+    if (choice.top === null) continue;
     for (const r of [choice.top, ...choice.alternatives]) {
       const code = r.amfiSchemeCode!; // ranked rows are verified Direct Growth schemes
       const isin = amfi?.get(code)?.isin ?? null;
+      const category = categoryOf.get(fundType) ?? (amfi?.get(code)?.category || null);
       const held = await db.query(
         `select 1 from instruments where id not like 'MFU:%' and (scheme_code = $1 or isin = $2)`, [code, isin]);
       if (held.length > 0) continue;
@@ -149,7 +150,8 @@ async function registerIndexChallengers(db: Db, amfi: ReadonlyMap<string, Univer
            metadata = coalesce(${instrumentMeta('instruments')}, '{}'::jsonb) || excluded.metadata`,
         // An object, not JSON.stringify: postgres-js stores a stringified param as a jsonb string.
         [universeInstrumentId(code), r.name, isin, code, {
-          indexChallenger: true, category, indexType: fundType, benchmark: r.benchmarkName, asOf: r.asOf, source: r.source,
+          // An unknown category is left out, so the merge keeps one stored on an earlier day.
+          indexChallenger: true, ...(category === null ? {} : { category }), indexType: fundType, benchmark: r.benchmarkName, asOf: r.asOf, source: r.source,
         }]);
     }
   }

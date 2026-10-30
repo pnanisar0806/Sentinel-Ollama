@@ -20,8 +20,16 @@ MEMORY.md; the code map lives in index.md.
   - [x] ~~Fix wave: index challengers not loggable~~ — fix wave 2026-10-29 (`fix-wave-report.md`): the index
         job registers them; /log and `logSipMove` require the same index.
   - [ ] Known gap: ETFs (e.g. Nifty 50 ETFs) are not switch-checked; only mutual funds (`/funds` says so).
-      **Then batch B** — ask its 5 questions at brainstorm start (SIP-total raise, where shown, lump
-      sums, budget raise incl. ₹50k tactical cap, which SIP changes).
+- [ ] **BATCH B BUILT 2026-10-31** on `feat/batch-b` (local, not pushed; 12 commits from `8dab40b`, final review +
+      fix wave clean; 1631 tests). Lump sums (/log Money received → weekly advice → sign split on /advisor),
+      SIP card capped at budget − set-aside, tactical-cap warning, monthly SIP block in the weekly report. Ship:
+  - [x] Owner OK'd 2026-10-31: lump-sum parts are outside the 4-a-month recommendation cap.
+  - [x] 0041 applied to prod 2026-10-31 via Supabase MCP (constraint names verified; in `schema_migrations`; 2 triggers, RLS on).
+  - [ ] Squash `feat/batch-b` onto main; push (Vercel deploys).
+  - [ ] Owner logs ₹20,691 Edelweiss interest on /log → Money received; advice after Sunday's weekly report.
+  - [ ] Browser-check /log, /funds, Overview, /advisor.
+  - Deferred (fix wave): SIP month recorded before Telegram send; leftover-lump threshold; sign not atomic.
+  - [ ] Known gap: ETFs not switch-checked (next after batch B).
 - [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
       applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
       `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:

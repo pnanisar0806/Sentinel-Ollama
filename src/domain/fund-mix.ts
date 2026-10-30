@@ -191,7 +191,9 @@ const newFundLabel = (t: FundType, names: Partial<Record<FundType, string>>): st
 
 /**
  * Decision 10: the typed SIP total re-split toward the signed mix. Never a sale: every
- * amount is ≥ ₹0 and the total is unchanged. Untyped SIPs keep their amount.
+ * amount is ≥ ₹0 and the total is unchanged here — but only here: `neverCut` then raises any
+ * cut back to its current amount, so the shown total can grow, and `capToBudget`
+ * (sip-advice.ts) caps it at the monthly budget. Untyped SIPs keep their amount.
  * Weights: mid + max(0, mid − actual) bps, 0 for a no-new-money type; non-core (MID, SMALL,
  * LARGE_ACTIVE) capped at 30% with core scaled up. Within a type: pro rata to its top-uppable
  * SIPs, else the largest held top-uppable fund, else a new-fund row. Each row is floored to
@@ -266,9 +268,9 @@ export function suggestSips(i: {
 }
 
 /**
- * Owner, 2026-10-28: a SIP is never suggested below its current amount. Until batch B sizes
- * additions against the free money, the re-split's cuts are shown as "kept" and only its
- * additions stand, so the suggested total can exceed today's.
+ * Owner, 2026-10-28: a SIP is never suggested below its current amount. The re-split's cuts are
+ * shown as "kept" and only its additions stand, so the suggested total can exceed today's;
+ * `capToBudget` (sip-advice.ts, batch B §5) then scales the additions to the monthly budget.
  */
 export function neverCut(rows: SipSuggestion[]): SipSuggestion[] {
   return rows.map((r) => (r.suggestedPaise >= r.currentPaise ? r
@@ -437,8 +439,10 @@ const bpsText = (bps: number) => `${bps / 100}%`;
  * Midpoints are the raw range midpoints, as /funds shows them: they sum to 97.5%, so every
  * type can sit at or above its midpoint at once — normalised ones sum to 100% and would
  * hold stocks back forever. Never a sale: an overweight type simply gets no candidate.
+ * `upToMax` (lump sums, batch B §3): a fund is a buy while its type is below the range max
+ * rather than the midpoint; `typesBelowMidpoint` and every other exclusion are unchanged.
  */
-export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCandidates> {
+export async function loadFundCandidates(db: Db, asOf: string, opts: { upToMax?: boolean } = {}): Promise<FundCandidates> {
   const signed = await loadSignedMix(db);
   if (signed === null) return { approved: false, buys: [], typesBelowMidpoint: [], excluded: [] };
   const mix = await loadActualMix(db);
@@ -466,7 +470,9 @@ export async function loadFundCandidates(db: Db, asOf: string): Promise<FundCand
       }
       if (r === undefined || !r.newMoney) { out('0% new money'); continue; }
       if (!h.topUp) { out('kept, not topped up'); continue; }
-      if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
+      if (opts.upToMax) {
+        if (actualBps >= r.maxBps) { out(`at or above max (${bpsText(actualBps)} vs ${bpsText(r.maxBps)})`); continue; }
+      } else if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
       // The /funds switch check (active and index, fund switch §4) is the one verdict on leaving a fund.
       leaving ??= new Map((await loadFundMoves(db, asOf)).moves.flatMap((f) => (f.units.kind === 'move' ? [[f.instrumentId, f.units.toName] as const] : [])));
       const pick = leaving.get(h.instrumentId);

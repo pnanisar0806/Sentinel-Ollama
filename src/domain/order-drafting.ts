@@ -36,6 +36,7 @@ interface Row {
   primary_rec: string;
   alternates: string;
   engine_evidence: string;
+  lump_sum_id: string | null;
 }
 
 const isoDate = (v: string | Date): string =>
@@ -67,13 +68,16 @@ export function notActionableReason(primary: RecLeg): string | null {
   return null;
 }
 
-/** One logical action: two recommendations for the same thing are one approval. */
-const actionKey = (kind: string, p: RecLeg): string => `${kind}|${p.action}|${p.instrumentId ?? ''}`;
+/**
+ * One logical action: two recommendations for the same thing are one approval. A lump-sum
+ * part (batch B §3) is its own action: a month's top-up of the same fund does not absorb it.
+ */
+const actionKey = (kind: string, p: RecLeg, lumpSumId: string | null): string => `${kind}|${p.action}|${p.instrumentId ?? ''}|${lumpSumId ?? ''}`;
 
 export async function draftPendingOrders(db: Db, now: Date = new Date()): Promise<DraftReport> {
   const since = new Date(now.getTime() - DRAFT_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
   const rows = await db.query<Row>(
-    `select r.id, r.created_on, r.kind, r.primary_rec, r.alternates, r.engine_evidence
+    `select r.id, r.created_on, r.kind, r.primary_rec, r.alternates, r.engine_evidence, r.lump_sum_id::text
        from recommendations r
       where r.suppressed = false
         and r.created_on >= $1
@@ -85,13 +89,13 @@ export async function draftPendingOrders(db: Db, now: Date = new Date()): Promis
   // Actions that already have an order, from any recommendation in the window. The
   // weekly report once ran twice on one day and wrote every recommendation twice;
   // without this each would have become its own approval request.
-  const ordered = await db.query<{ kind: string; primary_rec: string }>(
-    `select r.kind, r.primary_rec from recommendations r
+  const ordered = await db.query<{ kind: string; primary_rec: string; lump_sum_id: string | null }>(
+    `select r.kind, r.primary_rec, r.lump_sum_id::text from recommendations r
       where r.created_on >= $1
         and exists (select 1 from order_intents o where o.recommendation_id = r.id)`,
     [since],
   );
-  const taken = new Set(ordered.map((o) => actionKey(o.kind, JSON.parse(o.primary_rec) as RecLeg)));
+  const taken = new Set(ordered.map((o) => actionKey(o.kind, JSON.parse(o.primary_rec) as RecLeg, o.lump_sum_id)));
 
   const report: DraftReport = { drafted: [], refused: [], notActionable: [], duplicates: [] };
   for (const row of rows) {
@@ -111,7 +115,7 @@ export async function draftPendingOrders(db: Db, now: Date = new Date()): Promis
       continue;
     }
 
-    const key = actionKey(rec.kind, rec.primary);
+    const key = actionKey(rec.kind, rec.primary, row.lump_sum_id);
     if (taken.has(key)) { report.duplicates.push(recommendationId); continue; }
 
     try {

@@ -132,7 +132,7 @@ describe('recordIndexFundCandidates', () => {
     await recordIndexFundCandidates(db, client, '2026-10-26', deps);
     await recordIndexFundCandidates(db, client, '2026-10-27', deps);
     const rows = await db.query<{ id: string; name: string; isin: string | null; scheme_code: string; metadata: Record<string, unknown> }>(
-      `select id, name, isin, scheme_code, metadata from instruments where id like 'MFU:%' order by id`);
+      `select id, name, isin, scheme_code, metadata from instruments where id like 'MFU:%' and metadata->>'indexType' = 'NIFTY50' order by id`);
     expect(rows).toEqual([{
       id: universeInstrumentId('DG1039539'), name: 'Navi Nifty 50 Index Fund', isin: 'INFDG1039539', scheme_code: 'DG1039539',
       metadata: { indexChallenger: true, category: IDX, indexType: 'NIFTY50', benchmark: 'Nifty 50 TR INR', asOf: '2026-10-27', source: 'indmoney-mcp' },
@@ -140,6 +140,20 @@ describe('recordIndexFundCandidates', () => {
     await expect(logSipMove(db, {
       on: '2026-10-27', fromInstrumentId: 'MF:ICICI-N50', toInstrumentId: 'MFU:DG1039539', amountPaise: 1_400_100n, firstMonth: '2026-11', note: '',
     }, '2026-10-27T12:00:00Z')).resolves.toMatchObject({ id: expect.any(String) });
+  });
+
+  // Batch B §3: a lump sum may go to an index fund of a type no held fund tracks, so the
+  // chooser's picks are instruments even then, filed under their own AMFI category.
+  it('registers the Next 50 top and alternatives when no Next 50 fund is held, with the AMFI category of the ranked row', async () => {
+    const IDX = 'Other Scheme - Index Funds';
+    const deps = { amfiUniverse: async () => universe.map((u) => ({ ...u, isin: `INF${u.schemeCode}`, category: IDX })), amfiNavOn: navOn() };
+    await recordIndexFundCandidates(db, client, '2026-10-26', deps);
+    const rows = await db.query<{ id: string; name: string; metadata: Record<string, unknown> }>(
+      `select id, name, metadata from instruments where id like 'MFU:%' and metadata->>'indexType' = 'NEXT50' order by id`);
+    const c = chooseIndexFund((await loadIndexFundRows(db)).rows, 'NEXT50');
+    expect(rows.map((r) => r.name).sort()).toEqual([c.top!, ...c.alternatives].map((r) => r.name).sort());
+    expect(rows.map((r) => r.metadata['category'])).toEqual([IDX, IDX, IDX]);
+    expect(rows[0]!.metadata).toMatchObject({ indexChallenger: true, indexType: 'NEXT50', source: 'indmoney-mcp' });
   });
 
   it('a fund with no AMFI Direct Growth match is stored with a null scheme code and not proposed', async () => {

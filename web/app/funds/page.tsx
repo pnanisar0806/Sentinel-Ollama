@@ -1,7 +1,10 @@
+import Link from 'next/link';
 import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
 import { sipText, unitsText } from '@/lib/funds';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
+import { sipCapLabel, sipCapSentence, tacticalCapBinds } from '../../../src/domain/sip-advice';
+import { formatInr, type Paise } from '../../../src/money/paise';
 import { INDEX_SWITCH_MIN_BPS } from '../../../src/domain/index-switch';
 import { FUND_TYPE_LABEL, midBps } from '../../../src/domain/fund-mix';
 import { ASSUMPTIONS } from '../../../src/config/assumptions';
@@ -26,6 +29,7 @@ export default async function FundsPage() {
   const sipUnknown = fundMoves.moves.map((m) => m.sip).find((x) => x.kind === 'unknown');
   const sips = await getSips();
   const suggested = await getSipSuggestions();
+  const capBinds = tacticalCapBinds(sips);
   const indexFunds = await getIndexFundChoices();
   // Ranking rows carry the position id, which for an INDmoney fund is IND:<fund_id> — the
   // same id the SIP sync writes, so no canonical/sibling mapping is needed.
@@ -142,7 +146,10 @@ export default async function FundsPage() {
         ) : null}
       </Card>
 
-      <Card title="Suggested SIPs" aside="toward the signed mix · never cuts a SIP">
+      <Card
+        title="Suggested SIPs"
+        aside={`toward the signed mix · never cuts a SIP · within ${sipCapLabel(sips.budgetPaise, sips.setAsidePaise)}`}
+      >
         {suggested.rows === null ? (
           <Notice tone="amber">No suggestion: {suggested.reason}.</Notice>
         ) : (
@@ -164,15 +171,18 @@ export default async function FundsPage() {
               ]}
             />
             <p className="muted">
-              Today&apos;s SIPs total <Money p={suggested.totalPaise as never} />
-              {suggested.rows.some((s) => s.logged) ? ', counting SIP moves logged on /log that the feed does not show yet' : ''}. No SIP is ever
-              suggested below its current amount, so the suggested total can be higher; the increases
-              would come from your monthly free money, which these amounts are not yet checked
-              against. A fund the switch check says to leave gets no new money. Change SIPs in
-              INDmoney; the next sync shows them here.
+              Today&apos;s SIPs total <Money p={suggested.currentPaise as never} />
+              {suggested.rows.some((s) => s.logged) ? ', counting SIP moves logged on /log that the feed does not show yet' : ''};
+              suggested <Money p={suggested.suggestedPaise as never} />. {sipCapSentence(suggested)} A fund the switch
+              check says to leave gets no new money. Change SIPs in INDmoney; the next sync shows them here.
             </p>
           </>
         )}
+        {capBinds ? (
+          <Notice tone="amber">
+            Tactical cap {formatInr(capBinds.capPaise as Paise)} is now below your free money {formatInr(capBinds.freePaise as Paise)} — raise it on <Link href="/cleanup">Cleanup</Link>?
+          </Notice>
+        ) : null}
       </Card>
 
       {indexFunds.choices.map((c) => {

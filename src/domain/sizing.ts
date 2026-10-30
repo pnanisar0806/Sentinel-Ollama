@@ -23,7 +23,8 @@ export const TRANCHE_USED = 'this month\'s tactical budget is already used by a 
 const QUOTE_MAX_AGE_DAYS = 5;
 
 type Kind = 'EQUITY' | 'ETF' | 'MF' | 'BOND' | 'GOLD' | string;
-const EXCHANGE_TRADED = new Set(['EQUITY', 'ETF', 'GOLD']);
+/** Bought in whole units at the last close; everything else (MF) by amount at NAV. */
+export const EXCHANGE_TRADED = new Set(['EQUITY', 'ETF', 'GOLD']);
 
 export interface SizingInput {
   asOf: string;
@@ -69,6 +70,22 @@ export interface Candidate {
 const days = (a: string, b: string): number => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
 const min = (...xs: bigint[]): bigint => xs.reduce((m, x) => (x < m ? x : m));
 
+/** The last close if it is fresh enough to size an order, else why not. */
+export function freshQuote(input: Pick<SizingInput, 'quotes' | 'asOf'>, id: string): { pricePaise: bigint; asOf: string } | string {
+  const q = input.quotes.get(id);
+  if (!q) return 'no price on record';
+  if (days(q.asOf, input.asOf) > QUOTE_MAX_AGE_DAYS) return `price is stale (last close ${q.asOf})`;
+  return q;
+}
+
+/** Stocks wait while no fund mix is signed or any fund type is below its midpoint; null = they may buy. */
+export function stocksWait(funds: FundCandidates): string | null {
+  return !funds.approved ? 'no approved fund mix yet — approve it on /funds'
+    : funds.typesBelowMidpoint.length > 0
+      ? `not this month — a fund is below target (${funds.typesBelowMidpoint.map((t) => FUND_TYPE_LABEL[t]).join(', ')})`
+      : null;
+}
+
 function withId(c: Omit<Candidate, 'id' | 'policyVersion'>, asOf: string): Candidate {
   const key = JSON.stringify([c.action, c.instrumentId, String(c.amountPaise), c.units, asOf, SIZING_POLICY]);
   return { ...c, id: createHash('sha256').update(key).digest('hex').slice(0, 16), policyVersion: SIZING_POLICY };
@@ -85,12 +102,7 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
   let budget = min(input.tacticalBudgetPaise, input.maxOrderPaise);
   let cashLeft = cash;
 
-  const quoteFor = (id: string): { pricePaise: bigint; asOf: string } | string => {
-    const q = input.quotes.get(id);
-    if (!q) return 'no price on record';
-    if (days(q.asOf, input.asOf) > QUOTE_MAX_AGE_DAYS) return `price is stale (last close ${q.asOf})`;
-    return q;
-  };
+  const quoteFor = (id: string) => freshQuote(input, id);
 
   const withholder = (base: BuyBase) => (reason: string, basis = '') =>
     out.push(withId({ ...base, status: 'WITHHELD', withheldReason: reason, basis }, input.asOf));
@@ -131,15 +143,12 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
       `min(monthly tranche ₹${budget / 100n}, free cash ₹${cashLeft / 100n}); ${FUND_TYPE_LABEL[f.fundType]} ${f.actualBps / 100}% vs midpoint ${f.midBps / 100}%`);
   }
 
-  const stocksWait = !input.funds.approved ? 'no approved fund mix yet — approve it on /funds'
-    : input.funds.typesBelowMidpoint.length > 0
-      ? `not this month — a fund is below target (${input.funds.typesBelowMidpoint.map((t) => FUND_TYPE_LABEL[t]).join(', ')})`
-      : null;
+  const wait = stocksWait(input.funds);
   for (const b of [...input.buys].sort((x, y) => y.score - x.score || x.instrumentId.localeCompare(y.instrumentId))) {
     const base: BuyBase = { action: 'BUY', instrumentId: b.instrumentId, name: b.name, amountPaise: null, units: null, pricePaise: null, quoteAsOf: null,
       constraints: [], vehicle: 'STOCK', fund: null };
     const withhold = withholder(base);
-    if (stocksWait !== null) { withhold(stocksWait); continue; }
+    if (wait !== null) { withhold(wait); continue; }
     if (cashLeft === null) { withhold('cash available cannot be established'); continue; }
     const blocked = noTranche();
     if (blocked !== null) { withhold(blocked); continue; }

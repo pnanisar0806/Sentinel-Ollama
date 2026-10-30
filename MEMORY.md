@@ -3372,3 +3372,17 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   as they come); the ₹50k monthly budget and its yearly raises go to FI. The goal tracker counts
   **projected future RSU vests (after withholding) toward the house**; house money sits in
   debt/arbitrage (IPS: no equity within 7 years of purchase). Not a firm commitment by the owner.
+
+## Lump sums — accounting contract (batch B, 2026-10-31)
+
+- A lump sum (`lump_sums`, /log "Money received") is money outside the month: purchases (`owner_purchases.lump_sum_id`)
+  and orders from recommendations with `recommendations.lump_sum_id` count against the lump, never `loadMonthSpend`.
+  Reversing the lump returns that spend to its month.
+- `loadSizingInput.reservedPaise` includes every open lump's remaining, so the monthly plan never spends it.
+- `checkRails` checks a lump-sum order against the lump's remaining (`LUMP_SUM_EXCEEDED`), not the month envelope.
+- Lump-sum recommendations neither count toward nor are blocked by FR-12's monthly recommendation cap (owner-approved
+  2026-10-31); the repeat-buy hold still applies.
+- Weekly job re-advises a lump: none / DISMISSED / UNAVAILABLE → now; HOLD/WAIT/NO_ACTION/SIGNED BUY → after 28 days;
+  OPEN BUY blocks.
+- SIP card cap = `monthly_budget_paise − goal_setaside_monthly_paise` (a rail, not goal status). SIP news/advice is
+  monthly (owner): first weekly report of the IST month, `monthly_review` kind `sip`.

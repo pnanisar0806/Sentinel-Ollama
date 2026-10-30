@@ -7,6 +7,7 @@ import { loadPositions } from './networth.js';
 import { fromMicro, heldAfterSales, instrumentMeta, loadLiveSales, toMicro } from './owner-sales.js';
 import { typeOf } from './fund-mix.js';
 import { FUND_TYPE_LABEL } from './fund-types.js';
+import { loadLumpSum } from './lump-sums.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -287,11 +288,12 @@ export async function logSale(
 
 /**
  * A purchase the owner made outside Sentinel (SIP gaps Task 2). It counts against the IST
- * month of `boughtOn` in what remains to invest. `units` is kept as exact decimal text.
+ * month of `boughtOn` in what remains to invest — unless paid from an open lump sum
+ * (`lumpSumId`, batch B §3), when it counts against that instead. `units` is kept as exact decimal text.
  */
 export async function logPurchase(
   db: Db,
-  p: { boughtOn: string; description: string; amountPaise: bigint; instrumentId?: string | null; units?: string | null; note?: string },
+  p: { boughtOn: string; description: string; amountPaise: bigint; instrumentId?: string | null; units?: string | null; note?: string; lumpSumId?: string },
   now = new Date().toISOString(),
 ): Promise<void> {
   if (p.amountPaise <= 0n) throw new Error('the amount must be positive');
@@ -300,16 +302,47 @@ export async function logPurchase(
   if (description === '') throw new Error('a purchase needs a description');
   if (description.length > 200) throw new Error('a description is limited to 200 characters');
   const note = (p.note ?? '').trim();
+  const lumpSumId = p.lumpSumId?.trim() || null;
   await db.withTransaction(async (tx) => {
+    if (lumpSumId !== null) {
+      // Row lock: two purchases against one lump sum serialise on what is left.
+      // ponytail: a concurrent lump-sum reversal does not take this lock; it only returns money to the month.
+      await tx.query(`select id from lump_sums where id::text = $1 for update`, [lumpSumId]);
+      const lump = await loadLumpSum(tx, lumpSumId);
+      if (!lump) throw new Error(`no open lump sum ${lumpSumId}`);
+      if (p.amountPaise > lump.remainingPaise) throw new Error(`more than the ${formatInr(lump.remainingPaise as Paise)} left of this lump sum`);
+    }
     const [row] = await tx.query<{ id: string }>(
-      `insert into owner_purchases (bought_on, instrument_id, description, amount_paise, units, note, as_of, source)
-       values ($1, $2, $3, $4, $5, $6, $7, 'owner-web') returning id::text`,
-      [p.boughtOn, p.instrumentId ?? null, description, p.amountPaise.toString(), p.units ?? null, note, now],
+      `insert into owner_purchases (bought_on, instrument_id, description, amount_paise, units, note, lump_sum_id, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'owner-web') returning id::text`,
+      [p.boughtOn, p.instrumentId ?? null, description, p.amountPaise.toString(), p.units ?? null, note, lumpSumId, now],
     );
     await audit(tx, 'owner_purchase', row!.id, 'LOGGED', {
       on: p.boughtOn, amountPaise: p.amountPaise.toString(), description,
-      instrumentId: p.instrumentId ?? null, units: p.units ?? null, note, rowId: row!.id, source: 'owner-web',
+      instrumentId: p.instrumentId ?? null, units: p.units ?? null, note, lumpSumId, rowId: row!.id, source: 'owner-web',
     });
+  });
+}
+
+/** Money received that the owner wants invested on top of the month (batch B §3); see lump-sums.ts. */
+export async function logLumpSum(
+  db: Db, e: { receivedOn: string; amountPaise: bigint; from: string; note?: string }, now = new Date().toISOString(),
+): Promise<{ id: string }> {
+  if (e.amountPaise <= 0n) throw new Error('the amount must be positive');
+  const from = e.from.trim();
+  if (from === '') throw new Error('say where the money came from');
+  if (from.length > 200) throw new Error('keep it under 200 characters');
+  assertDate(e.receivedOn, now);
+  const note = e.note?.trim() || null;
+  return db.withTransaction(async (tx) => {
+    const [row] = await tx.query<{ id: string }>(
+      `insert into lump_sums (received_on, amount_paise, from_text, note, as_of, source)
+       values ($1, $2, $3, $4, $5, 'owner-web') returning id::text`,
+      [e.receivedOn, e.amountPaise.toString(), from, note, now]);
+    await audit(tx, 'lump_sum', row!.id, 'LOGGED', {
+      on: e.receivedOn, amountPaise: e.amountPaise.toString(), from, note, rowId: row!.id, source: 'owner-web',
+    });
+    return { id: row!.id };
   });
 }
 
@@ -481,6 +514,7 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       const month = y && mo ? `${MONTHS[Number(mo) - 1] ?? mo} ${y}` : 'unknown month';
       return { kind: 'SIP move', summary: `SIP moved: ${String(p['fromName'] ?? '')} → ${String(p['toName'] ?? '')}, ${money(p['amountPaise'])}/month from ${month}` };
     }
+    case 'lump_sum/LOGGED': return { kind: 'Lump sum', summary: `Money received: ${money(p['amountPaise'])} from ${String(p['from'] ?? '')}` };
     case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
     case 'owner_note/NOTE': return { kind: 'Note', summary: String(p['text'] ?? '') };
@@ -496,7 +530,7 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
       where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
-        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move')
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'lump_sum')
       order by at desc, id desc limit $1`,
     [limit],
   );

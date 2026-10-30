@@ -23,7 +23,7 @@ export const midBps = (r: RangeRow): number => (r.minBps + r.maxBps) / 2;
 
 export interface FundBuy {
   instrumentId: string; name: string; kind: string; fundType: FundType;
-  /** midpoint − actual share of the type, in bps; > 0 for every buy. */
+  /** midpoint − actual share of the type, in bps; > 0 for every buy except an `upToMax` one. */
   gapBps: number;
   /** The type's actual share and its signed midpoint (raw, not normalised), in bps. */
   actualBps: number; midBps: number;

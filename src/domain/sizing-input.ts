@@ -8,13 +8,16 @@ import { loadFundCandidates } from './fund-mix.js';
 import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
 import type { SizingInput } from './sizing.js';
 import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
+import { openLumpSumPaise } from './lump-sums.js';
 
 /**
  * Reads what `sizeCandidates` needs from the database (Phase 2.5 Task 4). Read-only.
  *
  * Cash available is bank cash (the CASH asset class) minus the emergency fund's funded
  * balance and Planned spending (SP) — neither is ever spent on a trade. Open BUY
- * requests reserve their amount until they are done, abandoned, rejected or expired.
+ * requests reserve their amount until they are done, abandoned, rejected or expired, and
+ * what is left of every open lump sum is reserved too: the monthly plan never spends it
+ * (batch B §3).
  */
 const OPEN = ['PENDING_APPROVAL', 'MODIFIED', 'ACKNOWLEDGED', 'AWAITING_MANUAL_EXECUTION', 'DEFERRED'];
 
@@ -77,7 +80,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
     envelopeReason: envelope.reason,
     maxOrderPaise: await railPaise(db, 'max_order_paise'),
     cashAvailablePaise: cash,
-    reservedPaise: BigInt(reserved?.n ?? '0'),
+    reservedPaise: BigInt(reserved?.n ?? '0') + await openLumpSumPaise(db),
     portfolioPaise: portfolio,
     singleStockCapPct: Number(await railPaise(db, 'single_stock_cap_pct')),
     holdings: positions.map((p) => ({

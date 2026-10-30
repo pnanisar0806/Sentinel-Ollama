@@ -39,7 +39,7 @@ describe('getSipSuggestions', () => {
     const r = await getSipSuggestions();
     if (r.rows === null) throw new Error(r.reason);
     const total = live.reduce((a, s) => a + s.amountPaise, 0n);
-    expect(r.totalPaise).toBe(total);
+    expect(r.currentPaise).toBe(total);
     for (const s of r.rows) expect(s.suggestedPaise >= s.currentPaise).toBe(true);
     expect(r.rows.reduce((a, s) => a + s.currentPaise, 0n)).toBe(total);
   });
@@ -76,8 +76,8 @@ describe('getSipSuggestions', () => {
       expect.objectContaining({ fundType: 'MID', instrumentId: INVESCO, currentPaise: 300_100n, logged: true }),
     ]);
     expect(r.rows.filter((s) => s.instrumentId === 'IND:3097' || s.instrumentId === 'MF:HDFC-MIDCAP' || s.fundName.includes('HDFC'))).toEqual([]);
-    expect(r.totalPaise).toBe(liveTotal + 300_100n);
-    expect(r.rows.reduce((a, s) => a + s.currentPaise, 0n)).toBe(r.totalPaise);
+    expect(r.currentPaise).toBe(liveTotal + 300_100n);
+    expect(r.rows.reduce((a, s) => a + s.currentPaise, 0n)).toBe(r.currentPaise);
     for (const s of r.rows.filter((x) => !x.fundName.includes('Invesco'))) expect(s.logged).toBe(false);
   });
 
@@ -89,7 +89,7 @@ describe('getSipSuggestions', () => {
       expect.objectContaining({ fundType: 'MID', instrumentId: 'IND:9999', currentPaise: 350_000n, logged: false }),
     ]);
     expect(r.rows.filter((s) => s.fundName.includes('HDFC'))).toEqual([]);
-    expect(r.totalPaise).toBe(liveTotal + 350_000n);
+    expect(r.currentPaise).toBe(liveTotal + 350_000n);
   });
 
   it('after the move is reversed: no logged Invesco row', async () => {

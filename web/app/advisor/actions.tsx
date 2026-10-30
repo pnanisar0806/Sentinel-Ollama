@@ -9,8 +9,12 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
   return { ok: res.ok, text: json.message ?? json.error ?? `failed (${res.status})` };
 }
 
-/** Sign or dismiss one piece of advice. Signing a BUY creates an approval request, not an order. */
-export function AdviceActions({ id, decision }: { id: number; decision: string }) {
+/**
+ * Sign or dismiss one piece of advice. Signing a BUY creates an approval request, not an order.
+ * `lump`: lump-sum advice (batch B §3), where a BUY may be a split with one request per part.
+ */
+export function AdviceActions({ id, decision, lump = false }: { id: number; decision: string; lump?: boolean }) {
+  const kind = lump ? '_lump' : '';
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -26,7 +30,7 @@ export function AdviceActions({ id, decision }: { id: number; decision: string }
   return (
     <div className="form" style={{ gap: 10 }}>
       <div className="btn-row">
-        <button className="btn btn-primary" disabled={busy} onClick={() => run({ action: 'sign', proposalId: id })}>
+        <button className="btn btn-primary" disabled={busy} onClick={() => run({ action: `sign${kind}`, proposalId: id })}>
           {actionable ? 'Sign — send to Approvals' : `Accept ${decision.toLowerCase()}`}
         </button>
         <button className="btn" disabled={busy} onClick={() => setDismissing(!dismissing)}>Dismiss</button>
@@ -34,11 +38,11 @@ export function AdviceActions({ id, decision }: { id: number; decision: string }
       {dismissing && (
         <div className="form-row">
           <div className="field">
-            <label htmlFor={`why-${id}`}>Why dismiss it?</label>
-            <input id={`why-${id}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. not convinced by the valuation" />
+            <label htmlFor={`why${kind}-${id}`}>Why dismiss it?</label>
+            <input id={`why${kind}-${id}`} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. not convinced by the valuation" />
           </div>
           <div className="field" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn btn-danger" disabled={busy || reason.trim() === ''} onClick={() => run({ action: 'dismiss', proposalId: id, reason })}>Confirm dismiss</button>
+            <button className="btn btn-danger" disabled={busy || reason.trim() === ''} onClick={() => run({ action: `dismiss${kind}`, proposalId: id, reason })}>Confirm dismiss</button>
           </div>
         </div>
       )}

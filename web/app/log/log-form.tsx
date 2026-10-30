@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'milestone' | 'note';
+type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
@@ -13,6 +13,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'purchase', label: 'Purchase outside Sentinel' },
   { id: 'sip_move', label: 'Move a SIP' },
   { id: 'bond', label: 'Bond matured' },
+  { id: 'lump_sum', label: 'Money received' },
   { id: 'milestone', label: 'Milestone done' },
   { id: 'note', label: 'Anything else' },
 ];
@@ -38,7 +39,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -49,6 +50,8 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   spLabels: Label[];
   idleCash: string;
   sipMoves: SipMoveOptions;
+  /** Open lump sums, labelled `from · ₹remaining left` by the page. */
+  lumpSums: { id: string; label: string }[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('goal');
@@ -291,8 +294,9 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
               SIP instalments are already counted in the SIP commitment: never log them here.
               It updates the monthly budget immediately. Holdings and the allocation bar update from
               the daily holdings sync, not from this form; the IPS target bands never change.
-              Only log buys paid from this month&apos;s budget. A buy funded by a maturity, an RSU vest or a
-              redemption is not logged here.
+              A buy paid from money you logged under <em>Money received</em> says so below: it then counts against
+              that, not the month. Otherwise only log buys paid from this month&apos;s budget. A buy funded by a
+              maturity, an RSU vest or a redemption you did not log as money received is not logged here.
             </p>
             <div className="form-row">
               <div className="field">
@@ -316,6 +320,15 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
               </div>
               {date}
             </div>
+            {lumpSums.length > 0 ? (
+              <div className="field">
+                <label htmlFor="lumpSumId">Paid from a lump sum</label>
+                <select id="lumpSumId" name="lumpSumId" defaultValue="">
+                  <option value="">— no, this month&apos;s budget —</option>
+                  {lumpSums.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                </select>
+              </div>
+            ) : null}
             {note}
           </>
         )}
@@ -389,6 +402,31 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
               {note}
             </>
           ))}
+
+        {tab === 'lump_sum' && (
+          <>
+            <p className="dim">
+              Money that reached your bank and that you want invested, like bond interest. It is in addition to the
+              monthly budget: buys paid from it do not use up the month. A sale or bond redemption you logged is not
+              this; log it here too only if you want that money invested.
+            </p>
+            <div className="form-row">
+              <div className="field">
+                <label htmlFor="rupees">Amount (₹)</label>
+                <input id="rupees" name="rupees" inputMode="decimal" placeholder="20691" required />
+              </div>
+              <div className="field">
+                <label htmlFor="from">Where it came from</label>
+                <input id="from" name="from" maxLength={200} required placeholder="Edelweiss bond interest" />
+              </div>
+              <div className="field">
+                <label htmlFor="on">Date received</label>
+                <input id="on" name="on" type="date" max={today} defaultValue={today} required />
+              </div>
+            </div>
+            {note}
+          </>
+        )}
 
         {tab === 'milestone' && (milestones.length === 0
           ? <p className="dim">Every milestone is already complete.</p>

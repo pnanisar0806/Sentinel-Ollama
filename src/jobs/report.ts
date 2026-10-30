@@ -1,8 +1,13 @@
 import { runAdvisor, type AdvisorBudget } from '../advisor/recommend.js';
 import { writeCommentary, type Fact } from '../advisor/commentary.js';
+import { runLumpSumAdvisor } from '../advisor/lump-sum.js';
+import { loadProposals } from '../advisor/proposals.js';
+import { allocateLumpSum, loadLumpSizingInput, lumpLimits, sizeLumpSum } from '../domain/lump-sizing.js';
+import { loadOpenLumpSums } from '../domain/lump-sums.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
+import { monthlySipBlock } from '../domain/sip-advice.js';
 import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
@@ -12,7 +17,7 @@ import { buildReportInput, composeReport, REDEMPTION_HORIZON_DAYS } from '../not
 import { listRedemptionsUntil } from '../domain/redemptions.js';
 import { maturityRoutingRec } from '../domain/maturities.js';
 import { announceMaturity, type Recommendation } from '../domain/recommendations.js';
-import { Telegram } from '../notify/telegram.js';
+import { escapeMarkdown, Telegram } from '../notify/telegram.js';
 import { isMainModule } from '../util/main-module.js';
 import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
 import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
@@ -116,8 +121,8 @@ export async function monthlyAdvice(
   opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
 ): Promise<string> {
   const month = asOf.slice(0, 7);
-  if (await monthlyReviewDone(db, 'advice', month)) return '';
   try {
+    if (await monthlyReviewDone(db, 'advice', month)) return '';
     // Goal plan §12 Q4: wait for this month's budget, up to the 7th (IST). Held like the
     // SIP hold below: the month is not recorded, so the next weekly run tries again.
     const budgetMonth = await loadBudgetMonth(db, generatedAt);
@@ -147,6 +152,60 @@ Advisor (${month}): held — ${envelope.reason ?? 'SIP data unknown'}. It runs a
 Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advisor page.`;
   } catch (error) {
     console.error(`advisor failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
+}
+
+/** A lump sum's signed BUY or HOLD/WAIT/NO_ACTION is looked at again after this long. */
+const LUMP_READVISE_DAYS = 28;
+
+/**
+ * Batch B §3: advice for each open lump sum, at every weekly report (not held with the month's
+ * budget — the lump sum is on top of it). Skipped while its latest proposal is a BUY awaiting
+ * the owner, or a signed BUY or HOLD/WAIT/NO_ACTION 28 days old or less; re-advised when there is
+ * none, it was dismissed, or it is older. A lump sum still open after a signed BUY has money left
+ * (a part refused at signing, an order released): its held orders already reduce what is left. UNAVAILABLE is not a decision: re-advised at the next
+ * report whatever its age or status. Returns the report lines ('' when nothing was advised, or
+ * on any failure — logged; the weekly report never fails for this, as `monthlyAdvice`).
+ */
+export async function lumpSumAdvice(
+  db: Db, asOf: string, generatedAt: string,
+  opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
+): Promise<string> {
+  try {
+    const now = new Date(generatedAt);
+    // ponytail: last 500 LUMP_SUM proposals, filtered here — prod stores the payload as a jsonb
+    // string, so `payload->>'lumpSumId'` cannot be queried; page it if lump sums ever get that many.
+    const proposals = await loadProposals(db, 'LUMP_SUM', 500);
+    let lines = '';
+    for (const lump of await loadOpenLumpSums(db)) {
+      try {
+        const latest = proposals.find((p) => p.payload['lumpSumId'] === lump.id);
+        if (latest !== undefined && latest.status !== 'DISMISSED') {
+          const decision = latest.payload['decision'];
+          if (decision === 'BUY' && latest.status === 'OPEN') continue;
+          if (decision !== 'UNAVAILABLE' && now.getTime() - Date.parse(latest.asOf) <= LUMP_READVISE_DAYS * 86_400_000) continue;
+        }
+        const input = await loadLumpSizingInput(db, lump.id, asOf, now);
+        const candidates = sizeLumpSum(input);
+        const limits = lumpLimits(input);
+        const remaining = formatInr(lump.remainingPaise as Paise);
+        const r = await runLumpSumAdvisor(db, {
+          lump: { id: lump.id, from: lump.from, remaining }, asOf, candidates, ...opts, now,
+          allocate: (ids) => allocateLumpSum(candidates, ids, input.remainingPaise, limits).map((p) => ({
+            candidateId: p.candidate.id, instrumentId: p.candidate.instrumentId, name: p.candidate.name, amountPaise: p.amountPaise, units: p.units,
+          })),
+        });
+        lines += `
+
+Lump sum ${remaining} (${lump.from}): ${r.decision}. Review it on the Advisor page.`;
+      } catch (error) {
+        console.error(`lump-sum advice failed for ${lump.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return lines;
+  } catch (error) {
+    console.error(`lump-sum advice failed: ${error instanceof Error ? error.message : String(error)}`);
     return '';
   }
 }
@@ -193,7 +252,11 @@ if (isMainModule(import.meta.url)) {
   });
   const adviceLine = await monthlyAdvice(db, asOf, input.generatedAt,
     { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
-  const text = composeReport(input) + adviceLine;
+  // Batch B §3: lump-sum advice, every week. Escaped: "from" is the owner's free text.
+  const lumpLines = escapeMarkdown(await lumpSumAdvice(db, asOf, input.generatedAt,
+    { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL }));
+  // Batch B §5: the monthly SIP block (first weekly report of the month). Escaped whole: it carries fund names and no markdown of its own.
+  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt)) + adviceLine + lumpLines;
 
   const digest = await buildDigestInput(db, input.generatedAt);
 

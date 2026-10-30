@@ -9,7 +9,7 @@ import { snapshotBenchmark } from './scoring.js';
 import { BANDS } from './engine.js';
 import { FUND_TYPE_LABEL, type FundType } from './fund-types.js';
 
-const fundIntent = (t: FundType) => `top up ${FUND_TYPE_LABEL[t]} toward the approved fund mix`;
+export const fundIntent = (t: FundType) => `top up ${FUND_TYPE_LABEL[t]} toward the approved fund mix`;
 
 /**
  * The owner's sign-off on advice (Phase 2.5 Task 6) — outside src/advisor/, which may not
@@ -101,17 +101,23 @@ export async function signAdvice(
   });
   const persisted = await persistRecommendation(db, rec);
   if (persisted.id === null) throw new Error(`not signed: ${persisted.reason}`);
-  // §13: capture the point of comparison when the call is made, so signed advice is
-  // scored like any other recommendation. Conviction is the signal band at signing.
-  const [sig] = await db.query<{ composite: string }>(
-    `select composite::text from signal_scores where instrument_id = $1 order by score_date desc limit 1`, [fresh.instrumentId]);
-  const composite = sig ? Number(sig.composite) : null;
-  const conviction = composite === null ? 'UNSCORED' : composite >= BANDS.high ? 'HIGH' : composite >= BANDS.medium ? 'MEDIUM' : 'WATCH';
-  await snapshotBenchmark(db, { recommendationId: persisted.id, instrumentId: fresh.instrumentId, asOf: createdOn, conviction });
+  await benchmarkSigned(db, persisted.id, fresh.instrumentId, createdOn);
   const drafted = await draftPendingOrders(db, now);
   const asked = drafted.drafted.some((o) => Number(o.recommendationId) === persisted.id);
   await decideProposal(db, proposalId, 'SIGNED', `recommendation #${persisted.id}`);
   return { recommendationId: persisted.id, approvalRequested: asked, note: `recommendation #${persisted.id}` };
+}
+
+/**
+ * §13: capture the point of comparison when the call is made, so signed advice is scored like
+ * any other recommendation. Conviction is the signal band at signing.
+ */
+export async function benchmarkSigned(db: Db, recommendationId: number, instrumentId: string, asOf: string): Promise<void> {
+  const [sig] = await db.query<{ composite: string }>(
+    `select composite::text from signal_scores where instrument_id = $1 order by score_date desc limit 1`, [instrumentId]);
+  const composite = sig ? Number(sig.composite) : null;
+  const conviction = composite === null ? 'UNSCORED' : composite >= BANDS.high ? 'HIGH' : composite >= BANDS.medium ? 'MEDIUM' : 'WATCH';
+  await snapshotBenchmark(db, { recommendationId, instrumentId, asOf, conviction });
 }
 
 export async function dismissAdvice(db: Db, proposalId: number, reason: string): Promise<void> {
