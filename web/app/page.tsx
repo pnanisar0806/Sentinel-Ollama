@@ -4,6 +4,7 @@ import { getGoals, getInvestmentControls, getOverview, getPlannedSpending, getSi
 import { plannedSpendingLine } from '../lib/log';
 import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
+import { tacticalCapBinds } from '../../src/domain/sip-advice.js';
 import { AllocationBar, Badge, Card, ClassChip, DataTable, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
 
 export const dynamic = 'force-dynamic';
@@ -17,6 +18,7 @@ export default async function OverviewPage() {
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
+  const capBinds = tacticalCapBinds(sips);
 
   return (
     <>
@@ -70,6 +72,11 @@ export default async function OverviewPage() {
                 : sips.rows.length === 0
                   ? <Notice>INDmoney reports no active SIPs (as of {sips.asOf.slice(0, 10)}).</Notice>
                   : null}
+            {capBinds ? (
+              <Notice tone="amber">
+                Tactical cap {formatInr(capBinds.capPaise as Paise)} is now below your free money {formatInr(capBinds.freePaise as Paise)} — raise it on <Link href="/cleanup">Cleanup</Link>?
+              </Notice>
+            ) : null}
             <div className="stat-grid">
               <Stat label="Budget" value={<Money p={sips.budgetPaise as Paise} />} accent="sky" />
               <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + recorded payments" accent="violet" />

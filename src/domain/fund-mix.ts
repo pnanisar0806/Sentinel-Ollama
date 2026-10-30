@@ -191,7 +191,9 @@ const newFundLabel = (t: FundType, names: Partial<Record<FundType, string>>): st
 
 /**
  * Decision 10: the typed SIP total re-split toward the signed mix. Never a sale: every
- * amount is ≥ ₹0 and the total is unchanged. Untyped SIPs keep their amount.
+ * amount is ≥ ₹0 and the total is unchanged here — but only here: `neverCut` then raises any
+ * cut back to its current amount, so the shown total can grow, and `capToBudget`
+ * (sip-advice.ts) caps it at the monthly budget. Untyped SIPs keep their amount.
  * Weights: mid + max(0, mid − actual) bps, 0 for a no-new-money type; non-core (MID, SMALL,
  * LARGE_ACTIVE) capped at 30% with core scaled up. Within a type: pro rata to its top-uppable
  * SIPs, else the largest held top-uppable fund, else a new-fund row. Each row is floored to
@@ -266,9 +268,9 @@ export function suggestSips(i: {
 }
 
 /**
- * Owner, 2026-10-28: a SIP is never suggested below its current amount. Until batch B sizes
- * additions against the free money, the re-split's cuts are shown as "kept" and only its
- * additions stand, so the suggested total can exceed today's.
+ * Owner, 2026-10-28: a SIP is never suggested below its current amount. The re-split's cuts are
+ * shown as "kept" and only its additions stand, so the suggested total can exceed today's;
+ * `capToBudget` (sip-advice.ts, batch B §5) then scales the additions to the monthly budget.
  */
 export function neverCut(rows: SipSuggestion[]): SipSuggestion[] {
   return rows.map((r) => (r.suggestedPaise >= r.currentPaise ? r
