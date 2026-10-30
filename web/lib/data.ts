@@ -884,6 +884,8 @@ export interface AdvisorData {
   /** The goal plan beside the normal plan (spec §5). Null with a reason when it cannot load. */
   goalPlan: { tracker: GoalTracker; plan: GoalPlan } | null;
   goalPlanReason: string | null;
+  /** Every open lump sum with its latest advice (batch B §3); null until the weekly report advises it. */
+  lumpSums: { lump: LumpSum; proposal: StoredProposal | null }[];
 }
 
 /** /advisor: the model's advice, the watchlist revision, material news, commentary, track record. */
@@ -905,8 +907,11 @@ export async function getAdvisor(): Promise<AdvisorData> {
   let goalPlan: AdvisorData['goalPlan'] = null;
   let goalPlanReason: string | null = null;
   try { goalPlan = await loadGoalPlan(d, new Date().toISOString()); } catch (e) { goalPlanReason = why(e); }
+  // ponytail: last 500 LUMP_SUM proposals filtered here, as the weekly report does (payload is a jsonb string in prod).
+  const lumpAdvice = await loadProposals(d, 'LUMP_SUM', 500);
   return {
     goalPlan, goalPlanReason,
+    lumpSums: (await loadOpenLumpSums(d)).map((lump) => ({ lump, proposal: lumpAdvice.find((p) => p.payload['lumpSumId'] === lump.id) ?? null })),
     advice: await loadProposals(d, 'ADVISE', 12),
     revision: revision ? { ...revision, decided } : null,
     commentary: (await loadProposals(d, 'COMMENTARY', 1))[0] ?? null,

@@ -4,6 +4,10 @@ import { signAdvice, dismissAdvice } from '../../../../src/domain/advisor-handof
 import { decideWatchlistLine } from '../../../../src/domain/watchlist-signoff';
 import { loadSizingInput } from '../../../../src/domain/sizing-input';
 import { sizeCandidates } from '../../../../src/domain/sizing';
+import { signLumpSum, dismissLumpSum } from '../../../../src/domain/lump-handoff';
+import { loadLumpSizingInput, lumpLimits, sizeLumpSum } from '../../../../src/domain/lump-sizing';
+import { loadLumpSum } from '../../../../src/domain/lump-sums';
+import { loadProposals } from '../../../../src/advisor/proposals';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +18,9 @@ export const dynamic = 'force-dynamic';
 type Body =
   | { action: 'sign'; proposalId: number }
   | { action: 'dismiss'; proposalId: number; reason: string }
-  | { action: 'watchlist'; proposalId: number; line: number; accept: boolean };
+  | { action: 'watchlist'; proposalId: number; line: number; accept: boolean }
+  | { action: 'sign_lump'; proposalId: number }
+  | { action: 'dismiss_lump'; proposalId: number; reason: string };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const body = await request.json().catch(() => null) as Body | null;
@@ -34,6 +40,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'watchlist':
         await decideWatchlistLine(d, Number(body.proposalId), Number(body.line), Boolean(body.accept), today);
         return NextResponse.json({ ok: true, message: body.accept ? 'Applied.' : 'Declined.' });
+      case 'sign_lump': {
+        const id = Number(body.proposalId);
+        const p = (await loadProposals(d, 'LUMP_SUM', 500)).find((x) => x.id === id);
+        const lumpId = String(p?.payload['lumpSumId'] ?? '');
+        // Sized only when the lump sum is live; signLumpSum refuses the rest with its own reason.
+        const input = p && await loadLumpSum(d, lumpId) ? await loadLumpSizingInput(d, lumpId, today) : null;
+        const r = await signLumpSum(d, id, input
+          ? { candidates: sizeLumpSum(input), limits: lumpLimits(input) }
+          : { candidates: [], limits: { freeCashPaise: 0n, typeRoomPaise: {}, goldRoomPaise: null } });
+        return NextResponse.json({ ok: true, message: `Signed: ${r.note}.${r.recommendationIds.length > 0 ? ' Approve them on Approvals.' : ''}` });
+      }
+      case 'dismiss_lump':
+        await dismissLumpSum(d, Number(body.proposalId), body.reason ?? '');
+        return NextResponse.json({ ok: true, message: 'Dismissed. It is re-advised at the next weekly report.' });
       default:
         return NextResponse.json({ error: 'unknown action' }, { status: 400 });
     }

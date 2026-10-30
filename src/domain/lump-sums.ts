@@ -14,18 +14,19 @@ export interface LumpSum {
 }
 
 /** Every lump sum not reversed, with what its linked purchases and held orders spent; oldest first. */
-async function loadLive(db: Db, id?: string): Promise<LumpSum[]> {
+async function loadLive(db: Db, id?: string, excludeOrderIntentId?: string): Promise<LumpSum[]> {
   const rows = await db.query<{ id: string; received_on: string; amount_paise: string; from_text: string; note: string | null; spent: string }>(
     `select l.id::text, l.received_on::text, l.amount_paise::text, l.from_text, l.note,
             (coalesce((select sum(p.amount_paise) from owner_purchases p
                         where p.lump_sum_id = l.id
                           and not exists (select 1 from log_reversals r where r.entity = 'owner_purchase' and r.entity_id = p.id::text)), 0)
            + coalesce((select sum(${ORDER_PAISE_SQL}) from order_intents o join recommendations rec on rec.id = o.recommendation_id
-                        where rec.lump_sum_id = l.id and o.intent = 'BUY' and ${orderHeldSql(1)}), 0))::bigint::text spent
+                        where rec.lump_sum_id = l.id and o.intent = 'BUY' and ${orderHeldSql(1)}
+                          and ($3::uuid is null or o.id <> $3::uuid)), 0))::bigint::text spent
        from lump_sums l
       where ${liveLumpSql('l.id')} and ($2::text is null or l.id::text = $2)
       order by l.received_on, l.as_of`,
-    [RELEASED_STATUSES, id ?? null]);
+    [RELEASED_STATUSES, id ?? null, excludeOrderIntentId ?? null]);
   return rows.map((r) => {
     const amountPaise = BigInt(r.amount_paise);
     const spentPaise = BigInt(r.spent);
@@ -38,9 +39,12 @@ export async function loadOpenLumpSums(db: Db): Promise<LumpSum[]> {
   return (await loadLive(db)).filter((l) => l.remainingPaise > 0n);
 }
 
-/** One lump sum; null if missing or reversed. */
-export async function loadLumpSum(db: Db, id: string): Promise<LumpSum | null> {
-  return (await loadLive(db, id))[0] ?? null;
+/**
+ * One lump sum; null if missing or reversed. `excludeOrderIntentId` leaves out the order being
+ * re-gated (a modify), so it is measured once, at its new amount (as `loadMonthSpend`).
+ */
+export async function loadLumpSum(db: Db, id: string, excludeOrderIntentId?: string): Promise<LumpSum | null> {
+  return (await loadLive(db, id, excludeOrderIntentId))[0] ?? null;
 }
 
 /** What is left over every open lump sum, optionally leaving one out. */

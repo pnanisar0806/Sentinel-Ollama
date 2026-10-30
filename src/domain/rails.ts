@@ -7,6 +7,7 @@ import type { Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
 import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
 import { loadFreeEnvelope } from './sips.js';
+import { loadLumpSum } from './lump-sums.js';
 import { loadBucketBalances } from './bucket-balances.js';
 import { isFundTopUp, monthsBetween } from './repeat-buy-hold.js';
 
@@ -97,7 +98,20 @@ export async function checkRails(
   // month's spend (Sentinel BUY orders + purchases the owner logged outside Sentinel). An
   // unknown SIP commitment refuses every BUY: guessing zero SIPs would let the owner deploy
   // the whole budget on top of them.
-  if (recommendation.primary.action === 'BUY') {
+  // A part of a lump sum (batch B §3) is on top of the month: it is measured against what is
+  // left of the lump sum instead, so a revised-up order cannot spend more than is left. A
+  // reversed lump sum's orders are the month's again (`loadMonthSpend`), and gated as such.
+  const [link] = opts.forRecommendationId === undefined ? [] : await db.query<{ lump_sum_id: string | null }>(
+    `select lump_sum_id::text from recommendations where id = $1`, [opts.forRecommendationId]);
+  const lump = link?.lump_sum_id ? await loadLumpSum(db, link.lump_sum_id, opts.excludeOrderIntentId) : null;
+  if (recommendation.primary.action === 'BUY' && lump !== null) {
+    if (amountPaise > lump.remainingPaise) {
+      violations.push({
+        code: 'LUMP_SUM_EXCEEDED',
+        detail: `This order of ${formatInr(paise(amountPaise))} is more than the ${formatInr(paise(lump.remainingPaise))} left of the lump sum from ${lump.from}`,
+      });
+    }
+  } else if (recommendation.primary.action === 'BUY') {
     const env = await loadFreeEnvelope(db, new Date().toISOString(), opts.excludeOrderIntentId);
     if (env.envelopePaise === null) {
       violations.push({ code: 'TACTICAL_BUDGET_EXCEEDED', detail: env.reason ?? 'SIP commitment unknown' });

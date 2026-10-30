@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, getFundCandidates, getInvestmentControls, getSips, getStockChecks } from '../../lib/data';
+import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getSips, getStockChecks } from '../../lib/data';
 import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import { rupees } from '../../lib/format';
@@ -103,6 +103,50 @@ async function FundCandidatesCard() {
   );
 }
 
+type LumpPart = { candidateId: string; instrumentId: string; name: string; amountPaise: string; units: string | null; basis: string | null };
+
+/** Batch B §3: each open lump sum and its latest advice, on top of the month's plan. */
+function LumpSumCard({ lumpSums }: { lumpSums: AdvisorData['lumpSums'] }) {
+  const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+  return (
+    <Card title="Lump sum" aside="on top of the monthly budget · you sign, then approve">
+      {lumpSums.length === 0
+        ? <Notice>No lump sum logged — log one on <Link href="/log">Log what I did</Link> → Money received</Notice>
+        : lumpSums.map(({ lump, proposal }) => {
+          const p = proposal?.payload ?? {};
+          const d = DECISION[str(p['decision'])] ?? { tone: 'gray' as Tone, label: str(p['decision']) };
+          const parts = (p['parts'] as LumpPart[] | undefined) ?? [];
+          return (
+            <div key={lump.id} style={{ marginBottom: 16 }}>
+              <p style={{ margin: 0 }}>
+                <strong>{lump.from}</strong> · received {lump.receivedOn} · <span className="tnum"><Money p={lump.amountPaise as never} /></span>
+                {' '}· left <strong className="tnum"><Money p={lump.remainingPaise as never} /></strong>
+              </p>
+              {proposal === null ? <Notice>Advice appears after Sunday&apos;s weekly report.</Notice> : <>
+                <div style={{ marginTop: 10 }}><Badge tone={d.tone}>{d.label}</Badge> <span className="dim">{proposal.asOf.slice(0, 10)} · {proposal.status.toLowerCase()}</span></div>
+                {p['reason'] ? <p className="dim">{str(p['reason'])}</p> : null}
+                {p['rationale'] ? <><div className="option-label" style={{ marginTop: 12 }}>Why</div><p style={{ margin: 0 }}>{str(p['rationale'])}</p></> : null}
+                {p['falsification'] ? <><div className="option-label" style={{ marginTop: 12 }}>What would prove it wrong</div><p className="option-kill" style={{ margin: 0 }}>{str(p['falsification'])}</p></> : null}
+                {parts.length > 0 && <div style={{ marginTop: 12 }}><DataTable
+                  rows={parts.map((x) => ({ key: x.candidateId, x }))}
+                  cols={[
+                    { label: 'Fund', value: ({ x }) => x.name },
+                    { label: 'Amount', align: 'right', value: ({ x }) => <span className="tnum">{rupees(x.amountPaise)}</span> },
+                    { label: 'Units', align: 'right', value: ({ x }) => x.units === null ? <span className="dim">—</span> : <span className="tnum">{x.units}</span> },
+                    { label: 'Why', value: ({ x }) => <span className="dim">{x.basis ?? '—'}</span> },
+                  ]}
+                /></div>}
+                {proposal.status === 'OPEN' && p['decision'] !== 'NO_ACTION' && p['decision'] !== 'UNAVAILABLE'
+                  ? <div style={{ marginTop: 14 }}><AdviceActions id={proposal.id} decision={str(p['decision'])} lump /></div>
+                  : proposal.note ? <p className="muted">{proposal.status.toLowerCase()}: {proposal.note}</p> : null}
+              </>}
+            </div>
+          );
+        })}
+    </Card>
+  );
+}
+
 const IPS_EQUITY_CEILING_PCT = 60;
 const WAIT = 'waits 48 hours';
 
@@ -199,7 +243,7 @@ function GoalPlanCard({ tracker, plan, names, sips, equityShare, blocks }: {
 }
 
 export default async function AdvisorPage() {
-  const { advice, revision, commentary, news, calibration, names, goalPlan, goalPlanReason } = await getAdvisor();
+  const { advice, revision, commentary, news, calibration, names, goalPlan, goalPlanReason, lumpSums } = await getAdvisor();
   const sips = await getSips();
   const blocks = pendingBlocks((await getInvestmentControls()).pending);
   const equityShare = (await getDigest()).drift.find((d) => d.assetClass === 'EQUITY')?.actual ?? null;
@@ -216,6 +260,10 @@ export default async function AdvisorPage() {
       />
 
       <div className="bento">
+        <div className="span-12">
+          <LumpSumCard lumpSums={lumpSums} />
+        </div>
+
         <div className="span-6">
           {latest === null ? (
             <Card title="This month's advice"><Notice>No advice yet. It runs in the first weekly report of each month.</Notice></Card>
