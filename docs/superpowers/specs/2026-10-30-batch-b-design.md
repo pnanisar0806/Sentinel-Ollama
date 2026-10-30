@@ -1,4 +1,4 @@
-# Batch B: lump sums, SIP changes from the feed, SIP advice in the weekly report, budget raise — design
+# Batch B: lump sums, SIP changes from the feed, monthly SIP advice, budget raise — design
 
 Status: owner-approved 2026-10-30; builder-checked. Follows the fund switch (`2026-10-29-fund-switch-design.md`,
 shipped). Batch A is `2026-10-22-log-batch-a-design.md`; its §"no effect" note on sale and bond
@@ -15,8 +15,7 @@ Four owner situations Sentinel cannot handle today:
    every active SIP's fund, amount, start date and step-up (`src/sources/indmoney.ts`,
    `src/domain/sips.ts`), so Sentinel should notice changes itself rather than ask the owner to log
    them. Owner: log only what Sentinel cannot see for itself.
-3. **SIP advice is only on `/funds`.** The owner wants it also as one line in the weekly report when a
-   change is due.
+3. **SIP advice is only on `/funds`.** The owner wants it also in the report, once a month (SIPs are monthly).
 4. **Salary hike.** Hikes vary (mostly 15–20%). After one, the owner raises the ₹50,000 monthly budget
    (SIPs + everything else) himself. The tactical cap (₹50,000, non-SIP buys only) is left alone; it
    does not bind today (budget − SIPs = ₹19,746) and the owner only wants to hear about it when it does.
@@ -38,8 +37,7 @@ Four owner situations Sentinel cannot handle today:
 - A lump sum pushed into one name, or into anything on short-term price evidence. CLAUDE.md "invests
   for the long term" applies unchanged; "keep it in the bank for now" is a valid answer when nothing
   clears the bar, and says why.
-- The weekly report nagging: a SIP line every week for a change the owner has already declined is
-  noise. (See §5 for what "due" means.)
+- SIP advice weekly: SIPs are monthly, so it is said once a month (§5).
 - An unknown shown as ₹0 or as a guessed number (a new fund with no known type, a stopped SIP with
   no known destination).
 - The goal-status firewall breached: lump-sum advice is normal plan and never reads goal status.
@@ -83,19 +81,19 @@ index fund chooser or the switch check's challengers), gold, a stock if the stoc
 
 ## 4. SIP changes from the feed
 
-Every week, Sentinel compares the active SIP feed now against the previous weekly report's view and
-lists what changed in the weekly report:
+Once a month (§5), Sentinel compares the active SIP feed now against last month's view and lists what
+changed:
 - new SIP (fund, amount) — e.g. "new SIP: Edelweiss Nifty Next 50, ₹2,000";
 - amount changed (old → new; a step-up is labelled as one when it matches the recorded step-up);
-- SIP gone — if a logged SIP move covers it, "moved to <fund> (logged)"; otherwise flagged once:
+- SIP gone — if a logged SIP move covers it, "moved to <fund> (logged)"; otherwise flagged:
   "<fund> SIP stopped — moved anywhere? Log it under Move a SIP", so the switch check stops giving SIP
-  advice for it. Flag once; do not repeat it in later weeks.
+  advice for it.
 - A new SIP in a fund whose fund-mix type is unknown (not in `FUND_TYPE_BY_ISIN` / not classifiable)
   shows "type unknown" on `/funds` and in the report line; it is never dropped from the SIP total.
 
 *My call:* nothing is shown when nothing changed.
 
-## 5. SIP advice: capped at the budget, and a weekly-report line
+## 5. SIP advice: capped at the budget, and a monthly SIP block
 
 **Cap (owner, 2026-10-30).** The SIP card never suggests a SIP total above the monthly budget
 (`monthly_budget_paise`, ₹50,000 today). Today the card says its total "can be higher … not yet checked
@@ -105,15 +103,13 @@ rata over the increases, ₹100 rounding, remainder to the core fund as today). 
 already exceed the budget, no increase is suggested and the card says so. The card's copy states the
 cap. `suggestSips`'s comment that the total is preserved is stale since `neverCut`; fix it.
 
-**Weekly-report line.** One line when a SIP change is due, linking to `/funds`. "Due" (*my call*):
-- the switch check says "move SIP to B" for a fund with a live SIP; or
-- the card suggests starting a SIP in a type that has none (e.g. Nifty Next 50); or
-- a suggested amount differs from the current one by at least ₹1,000 or 20%, whichever is larger
-  (the card's weights move with prices every week; small drifts are not news).
-
-To avoid nagging, a due item is named once and repeats only when the advice changes materially (a
-different fund, or an amount that moved by the same band since it was last named). No line when
-nothing is due.
+**Monthly SIP block (owner, 2026-10-30: "SIP is monthly, no point giving it weekly").** Once a month,
+in the first weekly report of the IST month, one block lists the month's SIP changes from the feed (§4)
+and the SIP advice that is due, linking to `/funds`. "Due" (*my call*): the switch check says "move SIP
+to B"; the card suggests starting a SIP in a type with none; or a suggested amount differs from the
+current one by at least ₹1,000 or 20%, whichever is larger. Monthly cadence is the de-duplication: an
+item still due next month is shown again. No block when nothing changed and nothing is due; a stale feed
+says so and retries the next week.
 
 ## 6. Budget raise
 
@@ -135,7 +131,7 @@ wait and the drawdown refusal. Batch B adds only:
 
 ## 8. Left to the builder
 
-Table and column names; how the weekly SIP diff stores the previous view (existing SIP snapshots vs a
+Table and column names; how the monthly SIP diff stores the previous view (existing SIP snapshots vs a
 new one); whether lump-sum advice is computed on log or at the next run; small-amount threshold;
 report wording; test fixtures from the live 2026-10-30 data (₹20,691 interest, SIPs ₹30,254 incl.
 the logged Invesco move).
