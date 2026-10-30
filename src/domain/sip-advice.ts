@@ -5,10 +5,14 @@ import {
   FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, fundAliases, loadActualMix, loadSignedMix, neverCut, sameFund, suggestSips, typeOf,
   type ActualMix, type FundType, type SipInput, type SipSuggestion,
 } from './fund-mix.js';
-import { loadFundMoves } from './fund-moves.js';
+import { monthlyReviewDone, recordMonthlyReview } from './cadence.js';
+import { loadFundMoves, type FundMove } from './fund-moves.js';
 import { loadActiveSipMoves } from './owner-log.js';
+import { auditPayload } from './owner-sales.js';
 import { railPaise } from './rail-values.js';
-import { loadFreeEnvelope, loadSipCommitment, type FreeEnvelope } from './sips.js';
+import {
+  loadFreeEnvelope, loadSipCommitment, nextStepUp, SIP_COLS, SIP_MAX_AGE_DAYS, toSip, type FreeEnvelope, type SipDbRow,
+} from './sips.js';
 
 const ROUND_PAISE = 10_000n; // ₹100
 
@@ -137,4 +141,102 @@ export function tacticalCapBinds(e: Pick<FreeEnvelope, 'budgetPaise' | 'tactical
   if (e.sipTotalPaise === null) return null;
   const freePaise = e.budgetPaise - e.sipTotalPaise - e.setAsidePaise;
   return e.tacticalPaise < freePaise ? { capPaise: e.tacticalPaise, freePaise } : null;
+}
+
+/** Batch B §5: a SIP amount is due for a change when it differs by at least ₹1,000 or 20%, the larger. */
+export const SIP_DUE_MIN_PAISE = 100_000n;
+export const SIP_DUE_MIN_BPS = 2_000;
+
+const inr = (p: bigint) => formatInr(p as Paise);
+type Lines = { lines: string[] } | { unknown: string };
+
+/**
+ * Batch B §4: the SIP feed's changes since `sinceIso` (the previous monthly SIP block): the latest
+ * snapshot against the latest one at or before `sinceIso`, matched by `sip_id`. No previous block, or
+ * no snapshot that old: nothing to compare. A stale latest snapshot is unknown, never "no change".
+ */
+export async function sipChanges(db: Db, nowIso: string, sinceIso: string | null): Promise<Lines> {
+  const [latest] = await db.query<{ id: string | number; as_of: string | Date }>(
+    `select id, as_of from sip_snapshots order by as_of desc, id desc limit 1`);
+  if (!latest) return { unknown: 'the SIP feed has never synced (indmoney-sips)' };
+  const asOf = new Date(latest.as_of).toISOString();
+  if (!(Date.parse(nowIso) - Date.parse(asOf) <= SIP_MAX_AGE_DAYS * 86_400_000)) return { unknown: `SIP feed is stale (last ${asOf.slice(0, 10)})` };
+  if (sinceIso === null) return { lines: [] };
+  const [prior] = await db.query<{ id: string | number; as_of: string | Date }>(
+    `select id, as_of from sip_snapshots where as_of <= $1::timestamptz order by as_of desc, id desc limit 1`, [sinceIso]);
+  if (!prior) return { lines: [] };
+  const rowsOf = async (id: string | number, at: string | Date) => (await db.query<SipDbRow & { isin: string | null }>(
+    `select ${SIP_COLS}, x.isin from sips x where x.snapshot_id = $1 order by x.amount_paise desc, x.sip_id`, [id],
+  )).map((r) => ({ ...toSip(r, new Date(at).toISOString()), isin: r.isin }));
+  const now = await rowsOf(latest.id, latest.as_of);
+  const then = await rowsOf(prior.id, prior.as_of);
+  const lines: string[] = [];
+  for (const s of now) {
+    const old = then.find((o) => o.sipId === s.sipId);
+    if (!old) {
+      const known = FUND_TYPE_BY_ISIN[s.isin ?? ''] ?? await typeOf(db, s.instrumentId);
+      lines.push(`new SIP: ${s.fundName}, ${inr(s.amountPaise)}${known ? '' : ' — type unknown'}`);
+    } else if (old.amountPaise !== s.amountPaise) {
+      const stepUp = nextStepUp(old, old.asOf).amountPaise === s.amountPaise;
+      lines.push(`${s.fundName} SIP ${inr(old.amountPaise)} → ${inr(s.amountPaise)}${stepUp ? ' (step-up)' : ''}`);
+    }
+  }
+  const gone = then.filter((o) => !now.some((s) => s.sipId === o.sipId));
+  const moves = gone.length === 0 ? [] : await Promise.all((await loadActiveSipMoves(db)).map(async (m) => ({ ...m, from: await fundAliases(db, m.fromInstrumentId) })));
+  for (const o of gone) {
+    const aliases = await fundAliases(db, o.instrumentId, o.isin);
+    const m = moves.find((x) => sameFund(x.from, aliases));
+    lines.push(m ? `${o.fundName} SIP moved to ${m.toName} (logged)` : `${o.fundName} SIP stopped — moved anywhere? Log it under Move a SIP`);
+  }
+  return { lines };
+}
+
+/** Batch B §5 "due": the switch check moves a SIP; the card starts a SIP in a type with none; or an amount drifts enough. */
+export function sipDueLines(rows: SipSuggestion[], moves: FundMove[]): string[] {
+  const lines = moves.flatMap((f) => (f.sip.kind === 'move' ? [`Move the ${f.name} SIP to ${f.sip.toName}: ${f.sip.why}`] : []));
+  for (const r of rows) {
+    if (r.currentPaise === 0n) {
+      if (r.suggestedPaise > 0n) lines.push(`Start a ${r.fundType ? FUND_TYPE_LABEL[r.fundType] : 'type unknown'} SIP: ${r.fundName}, ${inr(r.suggestedPaise)}`);
+      continue;
+    }
+    const gap = r.suggestedPaise > r.currentPaise ? r.suggestedPaise - r.currentPaise : r.currentPaise - r.suggestedPaise;
+    const pct = (r.currentPaise * BigInt(SIP_DUE_MIN_BPS)) / 10_000n;
+    if (gap >= (pct > SIP_DUE_MIN_PAISE ? pct : SIP_DUE_MIN_PAISE)) lines.push(`${r.fundName} SIP ${inr(r.currentPaise)} → ${inr(r.suggestedPaise)}`);
+  }
+  return lines;
+}
+
+/** The SIP advice due this month, from the /funds card and switch check. An unknown card is unknown here too. */
+export async function sipAdviceDue(db: Db, nowIso: string): Promise<Lines> {
+  const s = await loadSipSuggestions(db, nowIso);
+  if (s.rows === null) return { unknown: s.reason };
+  return { lines: sipDueLines(s.rows, (await loadFundMoves(db, nowIso)).moves) };
+}
+
+/**
+ * Batch B §5 (owner, 2026-10-30: SIPs are monthly, so SIP advice is monthly): one block in the first weekly
+ * report of the month. Recorded only when produced from fresh data; an unknown prints its reason and leaves
+ * the month open, so the next weekly report retries (as `monthlyAdvice`). '' when this month's is already sent
+ * or nothing changed and nothing is due.
+ */
+export async function monthlySipBlock(db: Db, asOf: string, generatedAt: string): Promise<string> {
+  const month = asOf.slice(0, 7);
+  if (await monthlyReviewDone(db, 'sip', month)) return '';
+  try {
+    // The previous block's clock. Read through auditPayload: on prod the payload is a jsonb string.
+    const [prev] = await db.query<{ since: string | null }>(
+      `select ${auditPayload('a')}->>'sinceIso' since from audit_log a
+        where a.entity = 'monthly_review' and a.action = 'REVIEWED' and a.entity_id like 'sip:%' and a.entity_id < $1
+        order by a.entity_id desc, a.id desc limit 1`, [`sip:${month}`]);
+    const changes = await sipChanges(db, generatedAt, prev?.since ?? null);
+    if ('unknown' in changes) return `\n\nSIPs: ${changes.unknown}.`;
+    const advice = await sipAdviceDue(db, generatedAt);
+    if ('unknown' in advice) return `\n\nSIPs: ${advice.unknown}.`;
+    await recordMonthlyReview(db, 'sip', month, { sinceIso: generatedAt });
+    const lines = [...changes.lines, ...advice.lines];
+    return lines.length === 0 ? '' : `\n\nSIPs this month:\n${lines.map((l) => `• ${l}`).join('\n')}\nDetails on Funds.`;
+  } catch (error) {
+    console.error(`SIP block failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '\n\nSIPs: could not be read this week; the next weekly report retries.';
+  }
 }

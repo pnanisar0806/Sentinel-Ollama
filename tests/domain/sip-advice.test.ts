@@ -2,11 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
-import { parseMfSips } from '../../src/sources/indmoney.js';
+import { parseMfSips, type SipRow } from '../../src/sources/indmoney.js';
 import { istDate, istMonth, persistSipSnapshot } from '../../src/domain/sips.js';
 import { approveMix, proposeMix, type SipSuggestion } from '../../src/domain/fund-mix.js';
 import { logSipMove } from '../../src/domain/owner-log.js';
-import { capToBudget, loadSipSuggestions, sipCapLabel, sipCapSentence, tacticalCapBinds } from '../../src/domain/sip-advice.js';
+import { capToBudget, loadSipSuggestions, monthlySipBlock, sipCapLabel, sipCapSentence, sipChanges, sipDueLines, tacticalCapBinds } from '../../src/domain/sip-advice.js';
+import { monthlyReviewDone } from '../../src/domain/cadence.js';
 
 /** Batch B §5/§6: the SIP card never suggests a total above the monthly budget; the tactical-cap warning. */
 const R = (rupees: number) => BigInt(rupees) * 100n;
@@ -133,6 +134,94 @@ describe('loadSipSuggestions', () => {
     }
     // ₹38,302 unscaled fits ₹40,000 but not ₹35,000: the second pass had to scale.
     expect(await loadSipSuggestions(d, now)).toMatchObject({ capped: true });
+    await d.close();
+  });
+});
+
+/** Batch B §4/§5: the monthly SIP block in the weekly report — changes from the feed and due advice. */
+describe('monthly SIP block', () => {
+  const sip = (sipId: string, instrumentId: string, isin: string | null, fundName: string, rupees: number, stepUpRaw: number | null = null): SipRow => ({
+    sipId, instrumentId, isin, fundName, fundType: 'Equity', category: null, frequency: 'MONTHLY',
+    amountPaise: R(rupees), stepUpRaw, stepUpFreq: stepUpRaw === null ? null : 'YEARLY', startDate: '2025-11-05',
+  });
+  const icici = sip('ICICI-1', 'IND:5536', 'INF109K012M7', 'ICICI Prudential Nifty 50 Index Plan Direct Growth', 14_001);
+  const october = [icici, sip('BANDHAN-1', 'IND:1005544', 'INF194KB1AL4', 'Bandhan Small Cap Fund Direct Growth', 2_251, 1000),
+    sip('HDFC-1', 'IND:3097', 'INF179K01XQ0', 'HDFC Mid Cap Opportunities Direct Growth', 3_001),
+    sip('MOTILAL-1', 'IND:MO', 'INF247L01445', 'Motilal Oswal Midcap Fund Direct Growth', 2_000)];
+  const november = [icici, sip('BANDHAN-1', 'IND:1005544', 'INF194KB1AL4', 'Bandhan Small Cap Fund Direct Growth', 3_251, 1000),
+    sip('EDEL-1', 'IND:ED', 'INF754K01SZ5', 'Edelweiss Nifty Next 50 Index Fund Direct Growth', 2_000)];
+  const OCT = '2026-10-02T03:00:00.000Z';
+  const NOV = '2026-11-01T03:00:00.000Z';
+
+  async function db() {
+    const d = await openDb();
+    await runMigrations(d);
+    await approveMix(d, { band: proposeMix(OCT).band! }, OCT);
+    await persistSipSnapshot(d, october, OCT);
+    return d;
+  }
+
+  it('sipChanges lists a new SIP, a raise, a logged move and an unexplained stop', async () => {
+    const d = await db();
+    await persistSipSnapshot(d, november, NOV);
+    await d.query(`insert into instruments (id, kind, name, currency, isin, metadata) values
+      ('MF:HDFC-MIDCAP', 'MF', 'HDFC Mid Cap Opportunities Direct', 'INR', 'INF179K01XQ0', jsonb_build_object('amfiCategory', $1::text)),
+      ('MFU:120403', 'MF', 'Invesco India Mid Cap Direct Growth', 'INR', 'INF205K01MV6', jsonb_build_object('category', $1::text))`,
+    ['Equity Scheme - Mid Cap Fund']);
+    await logSipMove(d, { on: '2026-10-20', fromInstrumentId: 'MF:HDFC-MIDCAP', toInstrumentId: 'MFU:120403', amountPaise: R(3_001), firstMonth: '2026-11', note: '' }, NOV);
+
+    expect(await sipChanges(d, '2026-11-01T06:00:00.000Z', null)).toEqual({ lines: [] });
+    const r = await sipChanges(d, '2026-11-01T06:00:00.000Z', '2026-10-04T00:00:00.000Z');
+    if (!('lines' in r)) throw new Error(r.unknown);
+    expect([...r.lines].sort()).toEqual([
+      'Bandhan Small Cap Fund Direct Growth SIP ₹2,251 → ₹3,251 (step-up)',
+      'HDFC Mid Cap Opportunities Direct Growth SIP moved to Invesco India Mid Cap Direct Growth (logged)',
+      'Motilal Oswal Midcap Fund Direct Growth SIP stopped — moved anywhere? Log it under Move a SIP',
+      'new SIP: Edelweiss Nifty Next 50 Index Fund Direct Growth, ₹2,000 — type unknown',
+    ]);
+    await d.close();
+  });
+
+  it('a stale feed prints the reason and leaves the month open', async () => {
+    const d = await db();
+    const block = await monthlySipBlock(d, '2026-10-12', '2026-10-12T03:00:00.000Z');
+    expect(block).toContain('SIPs: SIP feed is stale (last 2026-10-02)');
+    expect(block).not.toMatch(/no change/i);
+    expect(await monthlyReviewDone(d, 'sip', '2026-10')).toBe(false);
+    await d.close();
+  });
+
+  it('sipAdviceDue ignores drifts under ₹1,000 or 20%', () => {
+    expect(sipDueLines([row(14_001, 14_900)], [])).toEqual([]);
+    expect(sipDueLines([row(14_001, 17_000)], [])).toEqual(['Fund 0 SIP ₹14,001 → ₹17,000']);
+    // 45% but under ₹1,000: not due.
+    expect(sipDueLines([row(2_000, 2_900)], [])).toEqual([]);
+    expect(sipDueLines([{ ...row(0, 3_000), fundType: 'US', instrumentId: null, fundName: 'Motilal Oswal S&P 500' }], [])).toEqual(['Start a US index SIP: Motilal Oswal S&P 500, ₹3,000']);
+    const move = { instrumentId: 'IND:3097', name: 'HDFC Mid Cap', category: 'Mid Cap', isIndex: false, units: { kind: 'keep', why: '' },
+      sip: { kind: 'move', amountPaise: R(3_001), toId: 'X', toName: 'Invesco India Mid Cap', why: 'better 5y return' } } as const;
+    expect(sipDueLines([], [move, { ...move, sip: { kind: 'keep', amountPaise: R(3_001) } }])).toEqual(['Move the HDFC Mid Cap SIP to Invesco India Mid Cap: better 5y return']);
+  });
+
+  it('the block is sent once a month', async () => {
+    const d = await db();
+    await monthlySipBlock(d, '2026-10-04', '2026-10-04T03:00:00.000Z');
+    expect(await monthlyReviewDone(d, 'sip', '2026-10')).toBe(true);
+    expect(await monthlySipBlock(d, '2026-10-05', '2026-10-05T03:00:00.000Z')).toBe('');
+    await persistSipSnapshot(d, november, NOV);
+    const block = await monthlySipBlock(d, '2026-11-01', '2026-11-01T06:00:00.000Z');
+    expect(block).toMatch(/^\n\nSIPs this month:\n/);
+    expect(block).toContain('new SIP: Edelweiss Nifty Next 50 Index Fund Direct Growth, ₹2,000');
+    expect(block).toMatch(/\nDetails on Funds\.$/);
+    await d.close();
+  });
+
+  it('reads the previous sinceIso from a jsonb-string payload (prod postgres-js)', async () => {
+    const d = await db();
+    await d.query(`insert into audit_log (entity, entity_id, action, actor, payload)
+      values ('monthly_review', 'sip:2026-10', 'REVIEWED', 'agent', to_jsonb($1::text))`,
+    [JSON.stringify({ kind: 'sip', month: '2026-10', sinceIso: '2026-10-04T03:00:00.000Z' })]);
+    await persistSipSnapshot(d, november, NOV);
+    expect(await monthlySipBlock(d, '2026-11-01', '2026-11-01T06:00:00.000Z')).toContain('new SIP: Edelweiss');
     await d.close();
   });
 });

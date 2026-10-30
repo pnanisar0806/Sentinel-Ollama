@@ -3,6 +3,7 @@ import { writeCommentary, type Fact } from '../advisor/commentary.js';
 import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
+import { monthlySipBlock } from '../domain/sip-advice.js';
 import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
@@ -12,7 +13,7 @@ import { buildReportInput, composeReport, REDEMPTION_HORIZON_DAYS } from '../not
 import { listRedemptionsUntil } from '../domain/redemptions.js';
 import { maturityRoutingRec } from '../domain/maturities.js';
 import { announceMaturity, type Recommendation } from '../domain/recommendations.js';
-import { Telegram } from '../notify/telegram.js';
+import { escapeMarkdown, Telegram } from '../notify/telegram.js';
 import { isMainModule } from '../util/main-module.js';
 import { alreadyReportedFor, recordReportRun } from '../domain/report-runs.js';
 import { loadFreeEnvelope, loadSipCommitment, sipAssetClass } from '../domain/sips.js';
@@ -193,7 +194,8 @@ if (isMainModule(import.meta.url)) {
   });
   const adviceLine = await monthlyAdvice(db, asOf, input.generatedAt,
     { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL });
-  const text = composeReport(input) + adviceLine;
+  // Batch B §5: the monthly SIP block (first weekly report of the month). Escaped whole: it carries fund names and no markdown of its own.
+  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt)) + adviceLine;
 
   const digest = await buildDigestInput(db, input.generatedAt);
 

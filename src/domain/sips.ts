@@ -160,16 +160,16 @@ export interface SipCommitment {
   unknownReason?: string;
 }
 
-type SipDbRow = {
+export type SipDbRow = {
   sip_id: string; instrument_id: string; fund_name: string; fund_type: string | null; category: string | null;
   amount_paise: string; step_up_raw: string | null; step_up_kind: StepUpKind | null;
   step_up_inferred: boolean; step_up_freq: string | null; start_date: string; frequency: string;
 };
 // ::text on amount, raw and date: bigint and numeric exactly, and a `date` never shifted
 // by a driver's local-midnight Date.
-const SIP_COLS = `x.sip_id, x.instrument_id, x.fund_name, x.fund_type, x.category, x.frequency, x.amount_paise::text,
+export const SIP_COLS = `x.sip_id, x.instrument_id, x.fund_name, x.fund_type, x.category, x.frequency, x.amount_paise::text,
   x.step_up_raw::text, x.step_up_kind, x.step_up_inferred, x.step_up_freq, x.start_date::text`;
-const toSip = (r: SipDbRow, asOf: string): ActiveSip => ({
+export const toSip = (r: SipDbRow, asOf: string): ActiveSip => ({
   sipId: r.sip_id, instrumentId: r.instrument_id, fundName: r.fund_name, fundType: r.fund_type, category: r.category,
   amountPaise: BigInt(r.amount_paise), stepUpRaw: r.step_up_raw === null ? null : Number(r.step_up_raw),
   stepUpKind: r.step_up_kind, stepUpInferred: r.step_up_inferred, stepUpFreq: r.step_up_freq,
