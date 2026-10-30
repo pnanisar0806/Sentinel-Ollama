@@ -192,12 +192,27 @@ describe('lumpSumAdvice in the weekly report', () => {
     expect(await count()).toBe(1);
   });
 
-  it('a HOLD/WAIT/NO_ACTION/UNAVAILABLE is re-advised only once it is older than 28 days', async () => {
-    await prior(id, 'WAIT', '2026-10-10T00:00:00Z');
-    expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toBe('');
-    await prior(id, 'UNAVAILABLE', '2026-10-01T00:00:00Z');
+  it('a HOLD/WAIT/NO_ACTION is re-advised only once it is older than 28 days', async () => {
+    for (const decision of ['HOLD', 'WAIT', 'NO_ACTION']) {
+      await prior(id, decision, '2026-10-10T00:00:00Z');
+      expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toBe('');
+    }
+    await prior(id, 'WAIT', '2026-10-01T00:00:00Z');
     expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toMatch(/Lump sum/);
-    expect(await count()).toBe(3);
+    expect(await count()).toBe(5);
+  });
+
+  it('UNAVAILABLE is not a decision: re-advised at the next report, whatever its age or status', async () => {
+    await prior(id, 'UNAVAILABLE', '2026-10-29T00:00:00Z');
+    expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toMatch(/Lump sum/);
+    await decideProposal(db, await prior(id, 'UNAVAILABLE', '2026-10-29T12:00:00Z'), 'SIGNED', '');
+    expect(await lumpSumAdvice(db, AS_OF, GEN, opts)).toMatch(/Lump sum/);
+    expect(await count()).toBe(4);
+  });
+
+  it('a loader that throws leaves the report standing: logged, returns empty', async () => {
+    const broken = { ...db, query: async () => { throw new Error('connection reset'); } } as unknown as Db;
+    await expect(lumpSumAdvice(broken, AS_OF, GEN, opts)).resolves.toBe('');
   });
 
   it('another lump sum\'s proposal does not count', async () => {

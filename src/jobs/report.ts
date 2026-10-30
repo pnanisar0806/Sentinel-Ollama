@@ -156,50 +156,57 @@ Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advis
   }
 }
 
-/** A lump sum's HOLD/WAIT/NO_ACTION/UNAVAILABLE is looked at again after this long. */
+/** A lump sum's HOLD/WAIT/NO_ACTION is looked at again after this long. */
 const LUMP_READVISE_DAYS = 28;
 
 /**
  * Batch B §3: advice for each open lump sum, at every weekly report (not held with the month's
  * budget — the lump sum is on top of it). Skipped while its latest proposal is a BUY awaiting
- * the owner or signed; re-advised when there is none, it was dismissed, or it was not a BUY and
- * is older than 28 days — an unsigned HOLD/WAIT/UNAVAILABLE must not block it for ever.
- * Returns the report lines ('' when nothing was advised).
+ * the owner or signed, or a HOLD/WAIT/NO_ACTION 28 days old or less; re-advised when there is
+ * none, it was dismissed, or it is older. UNAVAILABLE is not a decision: re-advised at the next
+ * report whatever its age or status. Returns the report lines ('' when nothing was advised, or
+ * on any failure — logged; the weekly report never fails for this, as `monthlyAdvice`).
  */
 export async function lumpSumAdvice(
   db: Db, asOf: string, generatedAt: string,
   opts: { apiKey: string | undefined; model: string | undefined; fetchImpl?: typeof fetch },
 ): Promise<string> {
-  const now = new Date(generatedAt);
-  // ponytail: last 500 LUMP_SUM proposals, filtered here — prod stores the payload as a jsonb
-  // string, so `payload->>'lumpSumId'` cannot be queried; page it if lump sums ever get that many.
-  const proposals = await loadProposals(db, 'LUMP_SUM', 500);
-  let lines = '';
-  for (const lump of await loadOpenLumpSums(db)) {
-    try {
-      const latest = proposals.find((p) => p.payload['lumpSumId'] === lump.id);
-      if (latest !== undefined && latest.status !== 'DISMISSED') {
-        if (latest.payload['decision'] === 'BUY') continue;
-        if (now.getTime() - Date.parse(latest.asOf) <= LUMP_READVISE_DAYS * 86_400_000) continue;
-      }
-      const input = await loadLumpSizingInput(db, lump.id, asOf, now);
-      const candidates = sizeLumpSum(input);
-      const limits = lumpLimits(input);
-      const remaining = formatInr(lump.remainingPaise as Paise);
-      const r = await runLumpSumAdvisor(db, {
-        lump: { id: lump.id, from: lump.from, remaining }, asOf, candidates, ...opts, now,
-        allocate: (ids) => allocateLumpSum(candidates, ids, input.remainingPaise, limits).map((p) => ({
-          candidateId: p.candidate.id, instrumentId: p.candidate.instrumentId, name: p.candidate.name, amountPaise: p.amountPaise, units: p.units,
-        })),
-      });
-      lines += `
+  try {
+    const now = new Date(generatedAt);
+    // ponytail: last 500 LUMP_SUM proposals, filtered here — prod stores the payload as a jsonb
+    // string, so `payload->>'lumpSumId'` cannot be queried; page it if lump sums ever get that many.
+    const proposals = await loadProposals(db, 'LUMP_SUM', 500);
+    let lines = '';
+    for (const lump of await loadOpenLumpSums(db)) {
+      try {
+        const latest = proposals.find((p) => p.payload['lumpSumId'] === lump.id);
+        if (latest !== undefined && latest.status !== 'DISMISSED') {
+          const decision = latest.payload['decision'];
+          if (decision === 'BUY') continue;
+          if (decision !== 'UNAVAILABLE' && now.getTime() - Date.parse(latest.asOf) <= LUMP_READVISE_DAYS * 86_400_000) continue;
+        }
+        const input = await loadLumpSizingInput(db, lump.id, asOf, now);
+        const candidates = sizeLumpSum(input);
+        const limits = lumpLimits(input);
+        const remaining = formatInr(lump.remainingPaise as Paise);
+        const r = await runLumpSumAdvisor(db, {
+          lump: { id: lump.id, from: lump.from, remaining }, asOf, candidates, ...opts, now,
+          allocate: (ids) => allocateLumpSum(candidates, ids, input.remainingPaise, limits).map((p) => ({
+            candidateId: p.candidate.id, instrumentId: p.candidate.instrumentId, name: p.candidate.name, amountPaise: p.amountPaise, units: p.units,
+          })),
+        });
+        lines += `
 
 Lump sum ${remaining} (${lump.from}): ${r.decision}. Review it on the Advisor page.`;
-    } catch (error) {
-      console.error(`lump-sum advice failed for ${lump.id}: ${error instanceof Error ? error.message : String(error)}`);
+      } catch (error) {
+        console.error(`lump-sum advice failed for ${lump.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+    return lines;
+  } catch (error) {
+    console.error(`lump-sum advice failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
   }
-  return lines;
 }
 
 /**

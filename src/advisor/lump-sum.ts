@@ -92,6 +92,8 @@ export async function runLumpSumAdvisor(
   const parts = opts.allocate(keep);
   if (parts.length === 0) return save('WAIT', { ...base, reason: 'no pick could be bought with the amount left', ...deferred }, model, evidence);
   const byId = new Map(opts.candidates.map((c) => [c.id, c]));
+  // Payload parts: { candidateId, instrumentId, name, amountPaise (string), units, basis } — `basis`
+  // is the sizer's own explanation of the candidate's ceiling, shown on /advisor beside the part.
   // whyNotFund is kept only where it is required: a stock among the parts.
   const whyNotFund = parts.some((p) => byId.get(p.candidateId)?.vehicle === 'STOCK') ? { whyNotFund: d.whyNotFund } : {};
   return save('BUY', {
