@@ -24,7 +24,8 @@ MEMORY.md; the code map lives in index.md.
       fix wave clean; 1631 tests). Lump sums (/log Money received → weekly advice → sign split on /advisor),
       SIP card capped at budget − set-aside, tactical-cap warning, monthly SIP block in the weekly report. Ship:
   - [ ] Owner: OK the FR-12 ruling (lump-sum parts outside the 4-a-month recommendation cap).
-  - [ ] Verify prod constraint names `log_reversals_entity_check`, `advisor_proposals_kind_check`; apply 0041; squash to main; push.
+  - [x] 0041 applied to prod 2026-10-31 via Supabase MCP (constraint names verified; in `schema_migrations`; 2 triggers, RLS on).
+  - [ ] Squash `feat/batch-b` onto main; push (Vercel deploys).
   - [ ] Owner logs ₹20,691 Edelweiss interest on /log → Money received; advice after Sunday's weekly report.
   - [ ] Browser-check /log, /funds, Overview, /advisor.
   - Deferred (fix wave): SIP month recorded before Telegram send; leftover-lump threshold; sign not atomic.

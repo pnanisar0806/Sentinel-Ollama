@@ -206,7 +206,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `migrations/0038_index_fund_candidates.sql` | **NOT yet applied.** `index_fund_candidates` (fund_type US/NEXT50, indmoney_fund_id, benchmark, amfi_scheme_code, expense/AUM/tracking error, sip_allowed, as_of, source; unique (fund, as_of)); append-only + RLS |
 | `migrations/0039_sip_moves.sql` | **NOT yet applied.** `sip_moves` (append-only + RLS) + `log_reversals` entity `'sip_move'` |
 | `migrations/0040_index_nifty50.sql` | **NOT yet applied.** widens `index_fund_candidates.fund_type` to US/NEXT50/NIFTY50 |
-| `migrations/0041_lump_sums.sql` | **NOT yet applied.** `lump_sums` (uuid id, append-only + RLS); `owner_purchases.lump_sum_id`, `recommendations.lump_sum_id` FKs; `log_reversals` entity `'lump_sum'`; `advisor_proposals.kind` `'LUMP_SUM'` |
+| `migrations/0041_lump_sums.sql` | Applied to prod 2026-10-31. `lump_sums` (uuid id, append-only + RLS); `owner_purchases.lump_sum_id`, `recommendations.lump_sum_id` FKs; `log_reversals` entity `'lump_sum'`; `advisor_proposals.kind` `'LUMP_SUM'` |
 | `web/app/funds/page.tsx`, `web/app/funds/approve-mix.tsx`, `web/app/api/funds/route.ts` | /funds: actual vs proposed mix, findings, SIP suggestions, index fund chooser; `ApproveMix({band,label})` client button → `POST /api/funds` (`approveMix`). **2026-10-26** |
 | `migrations/0018_cash_ceiling_rail.sql` | **applied to Supabase 2026-09-19.** Owner amendment: inserts `cash_ceiling_pct = 10` and deletes the legacy dotted-and-fraction `cash.ceiling = 0.2` key, so `settings_rails` carries one key in one unit |
 
