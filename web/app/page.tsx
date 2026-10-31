@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getGoals, getInvestmentControls, getOverview, getPlannedSpending, getSips } from '../lib/data';
+import { getGoals, getInvestmentControls, getLifeEventReview, getOverview, getPlannedSpending, getSips } from '../lib/data';
 import { plannedSpendingLine } from '../lib/log';
 import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
+import ReviewLines from './review-lines';
 import { tacticalCapBinds } from '../../src/domain/sip-advice.js';
 import { AllocationBar, Badge, Card, ClassChip, DataTable, Money, Notice, PageHead, Pct, Stat } from '../lib/ui';
 
@@ -15,6 +16,7 @@ export default async function OverviewPage() {
   const controls = await getInvestmentControls();
   const goals = await getGoals();
   const planned = plannedSpendingLine(await getPlannedSpending());
+  const life = await getLifeEventReview();
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
@@ -29,6 +31,12 @@ export default async function OverviewPage() {
       />
 
       <div className="bento">
+        {life.stops.map((s) => (
+          <div className="span-12" key={s.eventId}>
+            <Notice tone="amber">{s.text} Log it as ended on <Link href="/log">Log</Link> when it is over.</Notice>
+          </div>
+        ))}
+
         <div className="span-3">
           <Stat
             label="Net worth"
@@ -58,6 +66,24 @@ export default async function OverviewPage() {
             <p className="help">Based on synced holdings. A purchase recorded in Log updates the monthly budget immediately; allocation changes after the holdings sync includes it.</p>
           </Card>
         </div>
+
+        {life.open.length > 0 ? (
+          <div className="span-12">
+            <Card title="Review after life events" aside={`${life.open.length} open`} tone="warn">
+              <p className="help" style={{ marginTop: 0 }}>Numbers a life event you logged may have made stale. Nothing changes by itself.</p>
+              <ReviewLines lines={life.open} />
+            </Card>
+          </div>
+        ) : null}
+
+        {life.waiting.length > 0 ? (
+          <div className="span-12">
+            <Card title="Waiting on a code change" aside={`${life.waiting.length} waiting`}>
+              <p className="help" style={{ marginTop: 0 }}>You said these need a new value. They live in code; close each once the change ships.</p>
+              <ReviewLines lines={life.waiting} />
+            </Card>
+          </div>
+        ) : null}
 
         <div className="span-8">
           <Card

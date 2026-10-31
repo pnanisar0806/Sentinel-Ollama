@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import LifeEventForm from './life-event-form';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note';
+type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
@@ -15,6 +16,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'bond', label: 'Bond matured' },
   { id: 'lump_sum', label: 'Money received' },
   { id: 'milestone', label: 'Milestone done' },
+  { id: 'life_event', label: 'Life event' },
   { id: 'note', label: 'Anything else' },
 ];
 
@@ -39,7 +41,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums, lifeEvents }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -52,15 +54,19 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   sipMoves: SipMoveOptions;
   /** Open lump sums, labelled `from · ₹remaining left` by the page. */
   lumpSums: { id: string; label: string }[];
+  /** Live job losses / medical expenses for the Life event tab's **Ended**. */
+  lifeEvents: { id: string; label: string; on: string }[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('goal');
   // The picks that change which fields a form shows; cleared with the form.
   const [pick, setPick] = useState<Record<string, string>>({});
+  // Defaults handed over by another tab (a windfall → Money received); cleared with the tab.
+  const [prefill, setPrefill] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const go = (t: Tab) => { setTab(t); setPick({}); setMessage(null); };
+  const go = (t: Tab, fill: Record<string, string> = {}) => { setTab(t); setPick({}); setPrefill(fill); setMessage(null); };
   const choose = (k: string) => (e: React.ChangeEvent<HTMLSelectElement>) => { const v = e.target.value; setPick((p) => ({ ...p, [k]: v })); };
   const potName = (id: string) => (id === 'FI' ? 'FI (unassigned money)' : id === 'BANK' ? 'My bank, not earmarked' : pots.find((p) => p.id === id)?.name ?? id);
   const held = (id: string) => pots.find((p) => p.id === id)?.held;
@@ -75,7 +81,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
     try {
       const result = await post({ action: tab, ...body });
       setMessage(result);
-      if (result.ok) { target.reset(); setPick({}); router.refresh(); }
+      if (result.ok) { setPrefill({}); target.reset(); setPick({}); router.refresh(); }
     } catch (err) {
       setMessage({ ok: false, text: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -136,6 +142,9 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
         ))}
       </div>
 
+      {tab === 'life_event'
+        ? <LifeEventForm today={today} endable={lifeEvents} onWindfall={(fill) => go('lump_sum', fill)} />
+        : (
       <form className="form" onSubmit={submit} key={tab}>
         {tab === 'goal' && (
           <>
@@ -413,15 +422,15 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
             <div className="form-row">
               <div className="field">
                 <label htmlFor="rupees">Amount (₹)</label>
-                <input id="rupees" name="rupees" inputMode="decimal" placeholder="20691" required />
+                <input id="rupees" name="rupees" inputMode="decimal" placeholder="20691" defaultValue={prefill['rupees']} required />
               </div>
               <div className="field">
                 <label htmlFor="from">Where it came from</label>
-                <input id="from" name="from" maxLength={200} required placeholder="Edelweiss bond interest" />
+                <input id="from" name="from" maxLength={200} required placeholder="Edelweiss bond interest" defaultValue={prefill['from']} />
               </div>
               <div className="field">
                 <label htmlFor="on">Date received</label>
-                <input id="on" name="on" type="date" max={today} defaultValue={today} required />
+                <input id="on" name="on" type="date" max={today} defaultValue={prefill['on'] || today} required />
               </div>
             </div>
             {note}
@@ -461,6 +470,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
           {message ? <span role="status" className={message.ok ? 'result-ok' : 'result-err'}>{message.text}</span> : null}
         </div>
       </form>
+        )}
     </div>
   );
 }
