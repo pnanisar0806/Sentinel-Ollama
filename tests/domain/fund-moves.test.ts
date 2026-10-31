@@ -112,8 +112,9 @@ describe('loadFundMoves', () => {
       on: '2026-10-27', fromInstrumentId: 'MF:HDFC-MIDCAP', toInstrumentId: INVESCO, amountPaise: 300_100n, firstMonth: '2026-11', note: '',
     }, NOW);
     const hdfc = (await byId()).get('IND:HDFC-MID')!;
+    const [row] = await db.query<{ id: string }>(`select id::text from sip_moves order by id desc limit 1`);
     expect(hdfc.sip).toEqual({
-      kind: 'moved', toId: INVESCO, toName: 'Invesco India Mid Cap Direct Growth', firstMonth: '2026-11', loggedOn: '2026-10-27',
+      kind: 'moved', moveId: row!.id, amountPaise: 300_100n, toId: INVESCO, toName: 'Invesco India Mid Cap Direct Growth', firstMonth: '2026-11', loggedOn: '2026-10-27',
     });
     expect(hdfc.units).toMatchObject({ kind: 'move', toName: 'Invesco India Mid Cap Direct Growth' });
     // The old SIP stopped and left the feed: still "moved", not "no SIP".

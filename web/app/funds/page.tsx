@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
-import { sipText, unitsText } from '@/lib/funds';
+import { monthLabel, moveStarted, sipText, unitsText } from '@/lib/funds';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
 import { sipCapLabel, sipCapSentence, tacticalCapBinds } from '../../../src/domain/sip-advice';
@@ -8,7 +8,10 @@ import { formatInr, type Paise } from '../../../src/money/paise';
 import { INDEX_SWITCH_MIN_BPS } from '../../../src/domain/index-switch';
 import { FUND_TYPE_LABEL, midBps } from '../../../src/domain/fund-mix';
 import { ASSUMPTIONS } from '../../../src/config/assumptions';
+import { istDate, istMonth } from '../../../src/domain/sips';
+import { nextMonthStart } from '../../../src/domain/cadence';
 import { ApproveMix } from './approve-mix';
+import { SipMoveButton } from './sip-move-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +39,13 @@ export default async function FundsPage() {
   // Active SIPs only: a SIP stopped this month still counts toward the month, but is not running.
   const sipOf = new Map(sips.rows.filter((r) => !r.departed).map((r) => [r.instrumentId, r.amountPaise]));
   const total = ranked.reduce((a, r) => a + r.valuePaise, 0n);
+  const nowIso = new Date().toISOString();
+  const month = istMonth(nowIso);
+  const firstMonths = [month, nextMonthStart(month).slice(0, 7)].map((m) => ({ value: m, label: monthLabel(m) }));
+  const sipAnswerOf = new Map(fundMoves.moves.map((m) => [m.instrumentId, m.sip]));
+  // A logged move's new fund, shown in Suggested SIPs before the feed lists it.
+  const movedTo = new Map(fundMoves.moves.flatMap((m) => (m.sip.kind === 'moved' ? [[m.sip.toId, m.sip] as const] : [])));
+  const rupees = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padStart(2, '0')}`;
 
   return (
     <>
@@ -160,7 +170,10 @@ export default async function FundsPage() {
                 {
                   label: 'Fund',
                   value: ({ s }) => (s.instrumentId === null ? <span className="dim">{s.fundName}</span>
-                    : s.logged ? <>{s.fundName} <Badge tone="gray">logged, not yet in the feed</Badge></> : s.fundName),
+                    : s.logged ? <>{s.fundName} <Badge tone="gray">{(() => {
+                      const m = movedTo.get(s.instrumentId);
+                      return m && !moveStarted(m, month) ? `logged, starts ${monthLabel(m.firstMonth)}` : 'logged, not yet in the feed';
+                    })()}</Badge></> : s.fundName),
                 },
                 { label: 'Type', value: ({ s }) => (s.fundType === null ? <span className="dim">type unknown</span> : FUND_TYPE_LABEL[s.fundType]) },
                 {
@@ -285,6 +298,9 @@ export default async function FundsPage() {
                     // Stale (or a non-MONTHLY SIP in the set): the list is not a current monthly figure.
                     : sips.stale || sips.sipTotalPaise === null
                       ? <span className="dim">unknown (as of {sips.asOf.slice(0, 10)})</span>
+                    // A logged move overrides the feed: the old SIP runs until the move's first month.
+                    : sipAnswerOf.get(r.instrumentId)?.kind === 'moved'
+                      ? <span className="dim">{moveStarted(sipAnswerOf.get(r.instrumentId)!, month) ? 'stopped — ' : ''}{sipText(sipAnswerOf.get(r.instrumentId)!, month)}</span>
                     : sipOf.has(r.instrumentId)
                       ? <><Money p={sipOf.get(r.instrumentId)! as never} />/mo</>
                       : <span className="dim">no active SIP</span>),
@@ -313,8 +329,13 @@ export default async function FundsPage() {
                 { label: 'Category', value: ({ m }) => m.category },
                 {
                   label: 'SIP',
-                  value: ({ m }) => (m.sip.kind === 'none' || m.sip.kind === 'unknown' ? <span className="dim">{sipText(m.sip)}</span>
-                    : <Badge tone={m.sip.kind === 'move' ? 'amber' : m.sip.kind === 'moved' ? 'indigo' : 'green'}>{sipText(m.sip)}</Badge>),
+                  value: ({ m }) => (m.sip.kind === 'none' || m.sip.kind === 'unknown' ? <span className="dim">{sipText(m.sip, month)}</span>
+                    : <>
+                      <Badge tone={m.sip.kind === 'move' ? 'amber' : m.sip.kind === 'moved' ? 'indigo' : 'green'}>{sipText(m.sip, month)}</Badge>
+                      {m.sip.kind === 'move'
+                        ? <SipMoveButton kind="move" fromId={m.instrumentId} toId={m.sip.toId} rupees={rupees(m.sip.amountPaise)} today={istDate(nowIso)} months={firstMonths} />
+                        : m.sip.kind === 'moved' ? <SipMoveButton kind="moved" moveId={m.sip.moveId} /> : null}
+                    </>),
                 },
                 {
                   label: 'Units',

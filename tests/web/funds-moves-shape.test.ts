@@ -5,7 +5,7 @@ import { logSipMove } from '../../src/domain/owner-log.js';
 import { persistSipSnapshot } from '../../src/domain/sips.js';
 import { LTCG_EXEMPTION_PER_FY } from '../../src/domain/cleanup.js';
 import { db, getFundMoves } from '../../web/lib/data.js';
-import { sipText, unitsText } from '../../web/lib/funds.js';
+import { moveStarted, sipText, unitsText } from '../../web/lib/funds.js';
 
 /** Fund switch Task 6: /funds "Switch check" gives a SIP answer and a units answer per held fund. */
 const NOW = new Date().toISOString();
@@ -52,14 +52,27 @@ describe('getFundMoves', () => {
     const byId = new Map((await getFundMoves()).moves.map((m) => [m.instrumentId, m]));
     const hdfc = byId.get('MF:HDFC-MIDCAP')!;
     expect(hdfc.sip.kind).toBe('moved');
-    expect(sipText(hdfc.sip)).toBe('moved to Invesco India Mid Cap Direct Growth from Nov 2026');
-    expect(sipText(byId.get('MF:PPFC')!.sip)).toBe('no SIP');
+    expect(sipText(hdfc.sip, '2026-11')).toBe('moved to Invesco India Mid Cap Direct Growth from Nov 2026');
+    expect(sipText(byId.get('MF:PPFC')!.sip, '2026-11')).toBe('no SIP');
+  });
+
+  it('a logged move carries its row id (for undo) and amount; before its first month the old SIP still runs', async () => {
+    const hdfc = (await getFundMoves()).moves.find((m) => m.instrumentId === 'MF:HDFC-MIDCAP')!;
+    if (hdfc.sip.kind !== 'moved') throw new Error('expected moved');
+    const [row] = await (await db()).query<{ id: string }>(`select id::text from sip_moves where from_instrument_id = 'MF:HDFC-MIDCAP'`);
+    expect(hdfc.sip.moveId).toBe(row!.id);
+    expect(hdfc.sip.amountPaise).toBe(300_100n);
+    expect(sipText(hdfc.sip, '2026-10')).toBe('running ₹3,001, moves to Invesco India Mid Cap Direct Growth from Nov 2026');
+    expect(moveStarted(hdfc.sip, '2026-10')).toBe(false);
+    expect(moveStarted(hdfc.sip, '2026-11')).toBe(true);
+    expect(moveStarted(hdfc.sip, '2026-12')).toBe(true);
+    expect(moveStarted({ kind: 'keep', amountPaise: 1n }, '2026-12')).toBe(false);
   });
 
   it('SIP and units texts for keep and move', () => {
-    expect(sipText({ kind: 'keep', amountPaise: 300_100n })).toBe('keep running ₹3,001');
-    expect(sipText({ kind: 'move', amountPaise: 300_100n, toId: INVESCO, toName: 'Invesco', why: '' })).toBe('move SIP to Invesco');
-    expect(sipText({ kind: 'unknown', reason: 'SIP commitment unknown' })).toBe('unknown');
+    expect(sipText({ kind: 'keep', amountPaise: 300_100n }, '2026-11')).toBe('keep running ₹3,001');
+    expect(sipText({ kind: 'move', amountPaise: 300_100n, toId: INVESCO, toName: 'Invesco', why: '' }, '2026-11')).toBe('move SIP to Invesco');
+    expect(sipText({ kind: 'unknown', reason: 'SIP commitment unknown' }, '2026-11')).toBe('unknown');
     expect(unitsText({ kind: 'keep', why: '' })).toBe('keep');
     expect(unitsText({ kind: 'move', toId: INVESCO, toName: 'Invesco', why: '', valuePaise: 1n, investedPaise: null, gainPaise: null }))
       .toBe('move to Invesco');

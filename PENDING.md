@@ -5,6 +5,10 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
+      SIP move in place (same `logSipMove` checks); "Undo" reverses it. The chosen month now drives labels: before
+      it the old SIP shows "running ₹X, moves to Y from Mon"; from it, "stopped — moved to Y". Feed rows untouched.
+  - [ ] Owner: move ICICI Nifty 50 → Navi Nifty 50 in INDmoney, then press Done on /funds.
 - [x] **FUND SWITCH BUILT 2026-10-29** on `fix/sip-suggestions` (local, not pushed): `46184c2` SIP-card
       fix + T1–T6 (SIP moves on /log, Nifty 50 index switch check, per-fund SIP and units answers on
       `/funds`, SIP card follows moves). Ledger `.superpowers/sdd/2026-10-29-fund-switch/progress.md`. Ship:
