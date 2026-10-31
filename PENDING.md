@@ -26,7 +26,7 @@ MEMORY.md; the code map lives in index.md.
   - [x] Owner OK'd 2026-10-31: lump-sum parts are outside the 4-a-month recommendation cap.
   - [x] 0041 applied to prod 2026-10-31 via Supabase MCP (constraint names verified; in `schema_migrations`; 2 triggers, RLS on).
   - [x] Merged via PR #2; deployed.
-  - [ ] Owner logs ₹20,691 Edelweiss interest on /log → Money received; advice after Sunday's weekly report.
+  - [x] Owner logged ₹20,691 Edelweiss interest on /log → Money received, 2026-10-31. Next: sign the split on /advisor after Sunday 2026-11-01 weekly report.
   - [x] Browser-checked prod: /log Money received tab, /funds cap copy, /advisor Lump sum card, Overview (no cap warning at ₹50k).
   - Deferred (fix wave): SIP month recorded before Telegram send; leftover-lump threshold; sign not atomic.
   - [ ] Known gap: ETFs not switch-checked (next after batch B).
