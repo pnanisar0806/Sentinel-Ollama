@@ -5,10 +5,12 @@ import { IPS_BANDS } from './allocation.js';
 import { fundAliases, loadActualMix, loadFundCandidates, loadSignedMix, sameFund, typeOf } from './fund-mix.js';
 import { loadFundMoves } from './fund-moves.js';
 import { FUND_TYPE_LABEL, byGap, midBps, type FundType } from './fund-types.js';
+import { loadActiveHoldingRules, ruleBlock, type HoldingRule } from './holding-rules.js';
 import { loadLumpSum, openLumpSumPaise } from './lump-sums.js';
 import { universeInstrumentId } from './mf-universe.js';
 import { EXCHANGE_TRADED, freshQuote, stocksWait, type Candidate, type SizingInput } from './sizing.js';
 import { loadSizingInput } from './sizing-input.js';
+import { istMonth } from './sips.js';
 
 /**
  * Lump-sum sizing (batch B §3). Every eligible destination is sized **independently** against
@@ -43,6 +45,10 @@ export interface LumpSizingInput {
   newFunds: NewFund[];
   /** `goldPaise` is every held GOLD instrument; `actualBps` (floored) is for display only. */
   gold: { instrumentId: string; name: string; kind: string; actualBps: number; maxBps: number; portfolioPaise: bigint; goldPaise: bigint } | null;
+  /** Active owner holding rules, the IST month of `now`, and each destination's fund aliases (only loaded when a rule is active). */
+  rules: HoldingRule[];
+  month: string;
+  aliases: Record<string, string[]>;
 }
 
 /** Limits the picks share; `allocateLumpSum` spends them down across parts. */
@@ -117,7 +123,15 @@ export async function loadLumpSizingInput(db: Db, lumpSumId: string, asOf: strin
   }
 
   const typeValuePaise = Object.fromEntries(Object.entries(mix.byType).map(([t, v]) => [t, v.valuePaise])) as Record<FundType, bigint>;
-  return { lumpSumId, remainingPaise: lump.remainingPaise, sizing, fundTotalPaise: mix.totalPaise, typeValuePaise, newFunds, gold };
+  const rules = await loadActiveHoldingRules(db, now.toISOString());
+  const aliases: Record<string, string[]> = {};
+  if (rules.length > 0) {
+    for (const id of [...funds.buys.map((f) => f.instrumentId), ...newFunds.map((f) => f.instrumentId), ...(gold ? [gold.instrumentId] : []), ...sizing.buys.map((b) => b.instrumentId)]) {
+      aliases[id] ??= await fundAliases(db, id);
+    }
+  }
+  return { lumpSumId, remainingPaise: lump.remainingPaise, sizing, fundTotalPaise: mix.totalPaise, typeValuePaise, newFunds, gold,
+    rules, month: istMonth(now.toISOString()), aliases };
 }
 
 const min = (...xs: bigint[]): bigint => xs.reduce((m, x) => (x < m ? x : m));
@@ -157,6 +171,8 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
   const cash = s.cashAvailablePaise === null ? null : s.cashAvailablePaise - s.reservedPaise;
   const schemeCap = (s.portfolioPaise * BigInt(Math.round(s.singleSchemeCapPct * 100))) / 10_000n;
   const stockCap = (s.portfolioPaise * BigInt(Math.round(s.singleStockCapPct * 100))) / 10_000n;
+  const holding = new Map<string, bigint>(); // one per instrument, summed across accounts
+  for (const h of s.holdings) holding.set(h.instrumentId, (holding.get(h.instrumentId) ?? 0n) + h.valuePaise);
 
   /**
    * `full` is why there is no headroom; `heldPaise` (funds only) is checked against the
@@ -164,6 +180,15 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
    */
   const size = (b: Base, kind: string, headroom: bigint, label: string, full: string, heldPaise: bigint | null = null, blocked: string | null = null): void => {
     const push = (c: Partial<Candidate>): void => {
+      if (c.status === 'ELIGIBLE') {
+        // An owner holding rule on the sized amount: refused parts leave their money to the next pick.
+        const hit = ruleBlock(i.rules, {
+          aliases: i.aliases[b.instrumentId] ?? [b.instrumentId], action: 'BUY', amountPaise: c.amountPaise!,
+          heldPaise: heldPaise ?? holding.get(b.instrumentId) ?? 0n, portfolioPaise: s.portfolioPaise, month: i.month, lumpSumId: i.lumpSumId,
+        });
+        if (hit !== null && hit.waivedBy === null) c = { withheldReason: hit.reason, ruleId: hit.rule.id };
+        else if (hit !== null) c = { ...c, constraints: [`allowed once by exception ${hit.waivedBy} to ${hit.reason}`] };
+      }
       out.push(withLumpId(i.lumpSumId, s.asOf, {
         action: 'BUY', ...b, status: 'WITHHELD', withheldReason: null, amountPaise: null, units: null, pricePaise: null, quoteAsOf: null,
         basis: '', constraints: [], ...c,
@@ -205,8 +230,6 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
       g.kind, goldRoom(g), `gold room to its ${g.maxBps / 100}% band max`, 'gold is at its IPS band max');
   }
   const wait = stocksWait(s.funds);
-  const holding = new Map<string, bigint>(); // one per instrument, summed across accounts
-  for (const h of s.holdings) holding.set(h.instrumentId, (holding.get(h.instrumentId) ?? 0n) + h.valuePaise);
   for (const b of [...s.buys].sort((x, y) => y.score - x.score || x.instrumentId.localeCompare(y.instrumentId))) {
     size({ instrumentId: b.instrumentId, name: b.name, vehicle: 'STOCK', fund: null }, b.kind, stockCap - (holding.get(b.instrumentId) ?? 0n),
       'single-stock cap headroom', `already at the ${s.singleStockCapPct}% single-stock cap`, null, wait);
