@@ -36,6 +36,14 @@ export const AREAS: Area[] = [
     missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'Sale and redemption proceeds do not become a lump sum by themselves (log them as money received)', 'No capital-gains tax on a logged sale'],
   },
   {
+    slug: 'life-events',
+    name: 'Life events',
+    stage: 'live',
+    what: 'A change in the owner’s life (salary, job loss, new dependent, windfall, retirement age, major medical expense) leaves a list of the numbers it may have made stale, until each is reviewed.',
+    works: ['“Life event” tab on /log, fields per kind; a windfall hands off to Money received, prefilled', 'Review lines on the Overview with today’s value: Still right, or Needs changing with the new value', 'Rail lines (budget, goal set-aside) change only through the signed editor on Cleanup, and close when a change is proposed', '“Waiting on a code change” list on the Overview for constants that need a new value', 'IPS stop-events (job loss over 3 months, medical expense over ₹30,00,000) shown on the Overview and in the weekly report: pausing SIPs is permitted, never automatic', 'Job loss / medical expense marked Ended on /log; every event reversible on the timeline'],
+    missing: ['A constant marked “needs changing” waits for a code change; the app never edits it', 'No emergency-fund runway figure (nothing computes one)'],
+  },
+  {
     slug: 'overview',
     name: 'Net worth & day-over-day',
     stage: 'live',

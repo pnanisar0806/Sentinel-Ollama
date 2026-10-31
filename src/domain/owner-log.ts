@@ -521,6 +521,22 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
     case 'bond_redemption/REDEEMED': return { kind: 'Bond', summary: `Bond redeemed: ${entityId}` };
     case 'bond_redemption/AMOUNT_STATED': return { kind: 'Bond', summary: `Redemption amount stated: ${money(p['amountPaise'])}` };
     case 'rsu_vest/CONFIRMED': return { kind: 'RSU', summary: 'Vest confirmed' };
+    case 'life_event/LOGGED':
+    case 'life_event/ENDED': {
+      const d = (p['detail'] ?? {}) as Payload;
+      const note = p['note'] ? ` — ${String(p['note'])}` : '';
+      const what: Record<string, string> = {
+        SALARY_CHANGE: `Salary change: take-home now ${money(p['amountPaise'])} a month`,
+        JOB_LOSS: `Job loss / career break${d['expectedOn'] ? `, expected to end ${String(d['expectedOn'])}` : ''}`,
+        NEW_DEPENDENT: `New dependent expected ${String(d['expectedOn'] ?? 'unknown date')}`,
+        WINDFALL: `Windfall of ${money(p['amountPaise'])}${d['from'] ? ` from ${String(d['from'])}` : ''}`,
+        RETIREMENT_AGE: `FI target age now ${String(d['fiTargetAge'] ?? 'unknown')}`,
+        MEDICAL_EXPENSE: `Medical expense of ${money(p['amountPaise'])}`,
+      };
+      if (action === 'LOGGED') return { kind: 'Life event', summary: `${what[String(p['kind'])] ?? String(p['kind'])}${note}` };
+      const ended = p['endsKind'] === 'JOB_LOSS' ? 'job loss' : p['endsKind'] === 'MEDICAL_EXPENSE' ? 'medical expense' : 'life event';
+      return { kind: 'Life event', summary: `Ended a ${ended}${note}` };
+    }
     default: return { kind: entity, summary: `${entity} ${action}` };
   }
 }
@@ -530,7 +546,7 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
       where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
-        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'lump_sum')
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'lump_sum', 'life_event')
       order by at desc, id desc limit $1`,
     [limit],
   );
@@ -538,8 +554,12 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const reversals = new Map((await db.query<{ entity: string; entity_id: string; reason: string; as_of: string | Date }>(
     `select entity, entity_id, reason, as_of from log_reversals`))
     .map((x) => [`${x.entity}|${x.entity_id}`, { on: istDate(new Date(x.as_of).toISOString()), reason: x.reason }]));
+  const payloadOf = (r: { payload: unknown }) => (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload ?? {}) as Payload;
+  // An ENDED life event names what it ended; its payload carries only the ended row's id.
+  const lifeKinds = new Map(rows.filter((r) => r.entity === 'life_event').map((r) => [String(payloadOf(r)['rowId']), r.entity_id]));
   return rows.map((r) => {
-    const p = (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload ?? {}) as Payload;
+    const p = payloadOf(r);
+    if (r.entity === 'life_event' && r.action === 'ENDED') p['endsKind'] = lifeKinds.get(String(p['endsEventId']));
     const at = new Date(r.at).toISOString();
     const on = ['on', 'receivedOn', 'paidOn'].map((k) => p[k]).find((v): v is string => typeof v === 'string') ?? at.slice(0, 10);
     const entity = r.entity as ReversalEntity;

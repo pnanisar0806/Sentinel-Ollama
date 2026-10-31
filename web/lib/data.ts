@@ -49,6 +49,8 @@ import { chooseIndexFund, loadIndexFundRows, type IndexFundChoice } from '../../
 import { sipMoveFunds } from '../../src/domain/owner-log.js';
 import { loadUniverse } from '../../src/domain/mf-universe.js';
 import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
+import { loadReviewLines, stopEventsInForce, type ReviewLine } from '../../src/domain/life-events.js';
+import { goalReviewLines } from './life-events';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -1022,4 +1024,34 @@ export async function getInvestmentControls(): Promise<InvestmentControls> {
   const values = Object.fromEntries(Object.entries(DEFAULT_OWNER_RAILS).map(([key, value]) => [key, Number(value)]));
   for (const row of rows) values[row.key] = Number(row.value);
   return { values, pending: await pendingRailChanges(d), budgetMonth: await loadBudgetMonth(d, new Date().toISOString()) };
+}
+
+export type StopEvent = Awaited<ReturnType<typeof stopEventsInForce>>[number];
+
+/**
+ * Batch C: what life events left to review. `open` lines await Still right (or, for a rail,
+ * a signed change); `waiting` are NEEDS_CHANGE lines until the constant ships and the owner
+ * presses Still right. Goal lines are web-only (the normal plan never reads goal status).
+ */
+export async function getLifeEventReview(): Promise<{ open: ReviewLine[]; waiting: ReviewLine[]; stops: StopEvent[] }> {
+  const d = await db();
+  const now = new Date().toISOString();
+  const lines = [...await loadReviewLines(d, now), ...await goalReviewLines(d, now)]
+    .sort((a, b) => a.eventOn.localeCompare(b.eventOn) || Number(a.eventId) - Number(b.eventId));
+  return {
+    open: lines.filter((l) => l.state === 'OPEN'),
+    waiting: lines.filter((l) => l.state === 'NEEDS_CHANGE'),
+    stops: await stopEventsInForce(d, now),
+  };
+}
+
+/** Live job losses and medical expenses not yet ended: /log offers **Ended** on each. */
+export async function getEndableLifeEvents(): Promise<{ id: string; kind: 'JOB_LOSS' | 'MEDICAL_EXPENSE'; on: string; amountPaise: bigint | null }[]> {
+  const live = (a: string) => `not exists (select 1 from log_reversals r where r.entity = 'life_event' and r.entity_id = ${a}.id::text)`;
+  const rows = await (await db()).query<{ id: string; kind: 'JOB_LOSS' | 'MEDICAL_EXPENSE'; on: string; amount_paise: string | null }>(
+    `select e.id::text, e.kind, e.occurred_on::text as "on", e.amount_paise::text from life_events e
+      where e.kind in ('JOB_LOSS', 'MEDICAL_EXPENSE') and ${live('e')}
+        and not exists (select 1 from life_events x where x.ends_event_id = e.id and ${live('x')})
+      order by e.occurred_on, e.id`);
+  return rows.map((r) => ({ id: r.id, kind: r.kind, on: r.on, amountPaise: r.amount_paise === null ? null : BigInt(r.amount_paise) }));
 }

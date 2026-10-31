@@ -7,6 +7,7 @@ import { reverseEntry, type ReversalEntity } from '../../../../src/domain/revers
 import { loadGoalTracker } from '../../../../src/domain/goal-plan';
 import type { Db } from '../../../../src/db/client';
 import { recordRedemption, stateRedemptionAmount } from '../../../../src/domain/bond-redemptions';
+import { endLifeEvent, logLifeEvent, reviewLine, type LifeEventKind } from '../../../../src/domain/life-events';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,11 @@ type Body =
   | { action: 'spend'; on: string; rupees: string; purpose: string; from: 'B2' | 'B3' | 'B4' | 'SP' | 'BANK'; label?: string; note?: string }
   | { action: 'earmark'; on: string; rupees: string; from: EarmarkEnd; to: EarmarkEnd; label?: string; expectedOn?: string; note?: string }
   | { action: 'sip_move'; on: string; fromInstrumentId: string; toInstrumentId: string; rupees: string; firstMonth: string; note?: string }
-  | { action: 'reverse'; entity: ReversalEntity; entityId: string; reason: string };
+  | { action: 'reverse'; entity: ReversalEntity; entityId: string; reason: string }
+  // Batch C life events: nothing here changes a rail or pauses a SIP.
+  | { action: 'life_event'; kind: LifeEventKind; on: string; rupees?: string; expectedOn?: string; fiTargetAge?: string; from?: string; note?: string }
+  | { action: 'end_life_event'; eventId: string; on: string; note?: string }
+  | { action: 'review_line'; eventId: string; key: string; outcome: 'STILL_RIGHT' | 'NEEDS_CHANGE'; newValueText?: string };
 
 /** Optional exact decimal units; '' is none. The column's own error is not readable. */
 function units(text: string | undefined): string | null {
@@ -114,6 +119,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'reverse':
         await reverseEntry(d, { entity: body.entity, entityId: body.entityId ?? '', reason: body.reason ?? '' }, new Date().toISOString());
         return NextResponse.json({ ok: true, message: 'Reversed. The original stays on the timeline, struck through.' });
+      case 'life_event': {
+        const rupees = (body.rupees ?? '').trim();
+        await logLifeEvent(d, {
+          kind: body.kind, on: body.on, ...(rupees ? { amountPaise: paise(rupees) } : {}), note: body.note ?? '',
+          detail: { expectedOn: body.expectedOn || undefined, from: body.from, fiTargetAge: body.fiTargetAge ? Number(body.fiTargetAge) : undefined },
+        });
+        return NextResponse.json({ ok: true, message: 'Life event recorded. Its review list is on the Overview; nothing changes by itself.' });
+      }
+      case 'end_life_event':
+        await endLifeEvent(d, { eventId: body.eventId ?? '', on: body.on, note: body.note ?? '' });
+        return NextResponse.json({ ok: true, message: 'Marked as ended.' });
+      case 'review_line':
+        await reviewLine(d, { eventId: body.eventId ?? '', key: body.key ?? '', outcome: body.outcome, newValueText: body.newValueText });
+        return NextResponse.json({ ok: true, message: body.outcome === 'NEEDS_CHANGE' ? 'Noted; it waits for the code change.' : 'Closed.' });
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });
         return NextResponse.json({ ok: true, message: 'Noted.' });
