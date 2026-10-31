@@ -318,7 +318,7 @@ export default async function FundsPage() {
               challenger must beat the holding by {fundMoves.margin} points on a{' '}
               {MAX_ACHIEVABLE_COMPOSITE}-point scale. Each index fund against funds tracking the
               same index: a challenger must cost at least {(INDEX_SWITCH_MIN_BPS / 100).toFixed(2)} points a
-              year less. Only mutual funds are checked, not ETFs. Moving a SIP stops this SIP and
+              year less. ETFs are not checked: none has a SIP to redirect, so a switch means selling, and the tax and brokerage cost more than the fee saved. Moving a SIP stops this SIP and
               starts the same amount in the new fund — no tax; past units are untouched.
             </p>
             {sipUnknown && <Notice tone="amber">SIP answers unknown — {sipUnknown.reason}</Notice>}

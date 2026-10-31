@@ -5,6 +5,7 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [ ] **BATCH C (holding rules + life events)** — design `docs/superpowers/specs/2026-10-31-batch-c-design.md`, awaiting owner sign-off; then plan → opus SDD → one squashed push.
 - [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
       SIP move in place (same `logSipMove` checks); "Undo" reverses it. The chosen month now drives labels: before
       it the old SIP shows "running ₹X, moves to Y from Mon"; from it, "stopped — moved to Y". Feed rows untouched.
@@ -23,7 +24,7 @@ MEMORY.md; the code map lives in index.md.
   - [x] Invesco India Mid Cap Direct Growth `INF205K01MV6` (AMFI 120403) typed MID in `FUND_TYPE_BY_ISIN`, 2026-10-29.
   - [x] ~~Fix wave: index challengers not loggable~~ — fix wave 2026-10-29 (`fix-wave-report.md`): the index
         job registers them; /log and `logSipMove` require the same index.
-  - [ ] Known gap: ETFs (e.g. Nifty 50 ETFs) are not switch-checked; only mutual funds (`/funds` says so).
+  - [x] ~~ETF switch check~~ — dropped 2026-10-31 (owner OK): no ETF SIP to redirect, a switch is a sale costing more than the fee saved; `/funds` says so.
 - [x] **BATCH B SHIPPED 2026-10-31** — squash `17ef60a` (PR #2) on main; Vercel green; final review + fix wave
       clean; 1631 tests. Lump sums (/log Money received → weekly advice → sign split on /advisor),
       SIP card capped at budget − set-aside, tactical-cap warning, monthly SIP block in the weekly report. Ship:
@@ -33,7 +34,6 @@ MEMORY.md; the code map lives in index.md.
   - [x] Owner logged ₹20,691 Edelweiss interest on /log → Money received, 2026-10-31. Next: sign the split on /advisor after Sunday 2026-11-01 weekly report.
   - [x] Browser-checked prod: /log Money received tab, /funds cap copy, /advisor Lump sum card, Overview (no cap warning at ₹50k).
   - Deferred (fix wave): SIP month recorded before Telegram send; leftover-lump threshold; sign not atomic.
-  - [ ] Known gap: ETFs not switch-checked (next after batch B).
 - [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
       applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
       `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:
