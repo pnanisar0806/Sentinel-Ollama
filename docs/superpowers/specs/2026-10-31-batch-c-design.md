@@ -73,20 +73,28 @@ logged event leaves a visible review list of what it touches until the owner clo
 - `loadActiveHoldingRules(db, now)` in `src/domain/holding-rules.ts`; matching by
   `fundAliases` / `sameFund` so a rule on the seed id reaches the live `IND:*` holding.
 - **Enforcement at the single gate.** `gateRecommendation` (every persisted recommendation
-  passes it) refuses:
-  - BUY / REDIRECT-in of X under `NO_ADD`, or under `NO_REBUY` when X is not held;
+  passes it) checks **every leg** — primary and both alternates — and refuses the whole
+  recommendation if any leg breaks a rule (no leg swapping; FR-11's two alternates stay
+  intact or the draft is withheld). It refuses:
+  - BUY of X under `NO_ADD`, or under `NO_REBUY` when X is not held (REDIRECT legs carry no
+    instrument today, so they are not checked);
   - SELL / TRIM / REDEEM of X under `HOLD_UNTIL`;
   - BUY of X under `CAP_PCT` when (X value + amount) / portfolio total > cap. Portfolio total
     is the same total the sizing input uses; unknown total → refused with "cap unknown".
-  The refusal reason names the rule. The order gate in `rails.ts` gets the same check, so an
-  order cannot bypass it.
+  The refusal reason names the rule and is stored with `suppressed_by = 'HOLDING_RULE'`
+  (not `FR-12`), so "withheld — your rule" keeps its source. The order gate (`checkRails`,
+  `orders.ts`) gets the same check, so an order cannot bypass it.
 - **Advice that is not a recommendation row** also honours rules:
   - SIP suggestions (`loadSipSuggestions`): a `NO_ADD` fund gets "kept — your rule" and no
     increase; `NO_REBUY`/`CAP_PCT` behave the same for funds not held / at cap.
   - Switch check (`loadFundMoves`): a `HOLD_UNTIL` fund's units answer is "keep — your rule
     until <date>"; the SIP answer is unaffected (moving a SIP sells nothing).
+  - **Destination funds.** A switch target, a SIP "move to" pick, or a new US / Next 50 index
+    pick that is under `NO_ADD`, `NO_REBUY` or `CAP_PCT` (at cap) is skipped; the next eligible
+    pick is used. No eligible pick → "keep — no allowed alternative (your rule on <X>)".
   - Exit candidates (`loadExitCandidates`): `HOLD_UNTIL` turns an exit into a warning.
   - Lump-sum advice: rules apply through the gate.
+  - **Refused money:** see "Open for the owner".
 - UI: a small "Rule" button on each row of `/holdings` and the `/funds` ranking opens an
   inline form (kind as pills like the month picker, until-date, cap %, note). Active rules
   show as a badge on the row. `/log` "Holding rules" tab lists every active rule with
@@ -96,26 +104,32 @@ logged event leaves a visible review list of what it touches until the owner clo
 
 - Table `life_events` (id, kind, occurred_on, amount_paise null, detail jsonb, note, as_of,
   source) and `life_event_reviews` (id, event_id, item_key, outcome `STILL_RIGHT` |
-  `SIGNED`, as_of, source) — both append-only. A line is open until a review row closes it.
+  `SIGNED` | `NEEDS_CHANGE`, as_of, source) — both append-only. A line is open until a review row closes it.
 - Kinds and their fields:
   | Kind | Fields | Review lines (item_key) |
   |---|---|---|
   | `SALARY_CHANGE` | new monthly take-home | `monthly_budget_paise`, `goal_setaside_monthly_paise`, `salaryStepUp`, emergency-fund target |
-  | `JOB_LOSS` | start date, expected end (optional) | emergency-fund runway, `monthly_budget_paise`; **stop rule** after 3 months |
+  | `JOB_LOSS` | start date, expected end (optional) | emergency-fund target, `monthly_budget_paise`; **stop rule** after 3 months |
   | `NEW_DEPENDENT` | expected date | `childArrivalYear`, `childMonthlyDentInr`, emergency-fund target, education goal |
   | `WINDFALL` | amount, from | none — it offers "log as Money received" (batch B lump sum), prefilled |
   | `RETIREMENT_AGE` | new FI target age | `fiTargetAge`, fund-mix horizon band (re-proposal) |
   | `MEDICAL_EXPENSE` | amount | emergency fund; **stop rule** when amount > ₹30L |
-- **Assumption lines.** `ASSUMPTIONS` values are code constants. Their review line shows the
-  current value and two actions: **Still right** (closes it) or **Needs changing** (closes it
-  as a dated note in `MEMORY.md`'s owner true-up list via the PENDING workflow — i.e. it
-  tells the owner "ask Claude to change `fiTargetAge` to 50"). Rail lines link to the
-  existing signed editor and close when a newer signed value exists.
+- **Three kinds of review line:**
+  - **Rail lines** (`monthly_budget_paise`, `goal_setaside_monthly_paise`) link to the existing
+    signed editor and close (`SIGNED`) when a signed value newer than the event exists.
+  - **Constant lines** (`ASSUMPTIONS` keys) show the code value. **Still right** closes the
+    line (`STILL_RIGHT`). **Needs changing** takes the new value as text and records
+    `NEEDS_CHANGE`; the line moves to a "Waiting on a code change" list on Overview until a
+    later `STILL_RIGHT` closes it (owner presses it once the constant ships). Claude checks
+    this list at session start, like PENDING.md.
+  - **Goal lines** (emergency-fund target = bucket B3 target, education goal) are goal status:
+    rendered **only in `web/`** (the normal plan never reads them), same two buttons as
+    constant lines. No runway figure — nothing computes one today.
 - **Stop rules.** `stopEventsInForce(db, now)`: a `JOB_LOSS` started ≥ 3 months ago with no
-  end, or a `MEDICAL_EXPENSE` > ₹30,00,000. Overview shows a Notice; the weekly report adds
+  end, or a `MEDICAL_EXPENSE` > ₹30,00,000 not yet logged as settled. Overview shows a Notice; the weekly report adds
   one line: "IPS stop-event in force (job loss since <date>): pausing SIPs is permitted, not
-  advised. Sentinel changes nothing." Ends when the owner logs the job loss as ended
-  (a dated end, append-only as a second event row referencing the first).
+  advised. Sentinel changes nothing." Ends when the owner logs the job loss as ended or the
+  medical expense as settled (a dated end, append-only as a second event row referencing the first).
 - UI: `/log` "Life event" tab (one form, fields per kind). Overview card **Review after life
   events** listing open lines with their buttons; hidden when none.
 
@@ -133,6 +147,18 @@ Shipped with this batch's first commit.
    me to change, not a UI edit.
 4. Major medical expense added as a sixth event because the IPS names it as a stop-event.
 5. Windfall reuses batch B's Money received rather than a new path.
+6. A rule-breaking alternate withholds the whole recommendation; no automatic swap.
+7. Destination funds under a rule are skipped for the next eligible pick.
+8. "Needs changing" is a third stored outcome with a waiting list, not a repo write.
+9. Emergency-fund and education lines are web-only; no runway figure.
+10. A medical-expense stop-event ends when logged as settled, like job loss.
+
+## Open for the owner
+
+1. **Money a rule refuses.** When a `NO_ADD` / `CAP_PCT` fund cannot take its share of the
+   SIP suggestion or a lump-sum part: (a) spread it over the other eligible funds by the same
+   mix logic, or (b) leave it unallocated ("₹X not placed — your rule on Y")?
+   Recommended: (a).
 
 ## Left to the builder
 
