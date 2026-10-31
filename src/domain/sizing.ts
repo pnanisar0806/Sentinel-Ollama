@@ -65,6 +65,8 @@ export interface Candidate {
   /** BUY: where it came from. SELL/TRIM: FUND for MF and ETF kinds, STOCK otherwise. */
   vehicle: 'FUND' | 'STOCK';
   fund: { fundType: FundType; actualBps: number; midBps: number; minBps: number; maxBps: number; quality: string } | null;
+  /** Lump sum only: the owner holding rule that withheld this BUY (for "Allow once"). */
+  ruleId?: string;
 }
 
 const days = (a: string, b: string): number => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
