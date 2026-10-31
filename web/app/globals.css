@@ -695,7 +695,9 @@ a:hover { color: #f0abfc; }
   border: 1px solid var(--border-strong); border-radius: 999px; padding: 8px 16px;
   transition: background 0.15s ease, color 0.15s ease;
 }
-.tabs button[aria-selected='true'] { color: #fff; background: var(--grad); border-color: transparent; }
+.tabs button[aria-selected='true'], .tabs button[aria-checked='true'] { color: #fff; background: var(--grad); border-color: transparent; }
+.tabs-sm { gap: 6px; }
+.tabs-sm button { min-height: 32px; padding: 5px 12px; font-size: 12.5px; }
 .result-ok { color: var(--green); } .result-err { color: var(--red); }
 .btn { min-height: 44px; }
 .btn-sm { min-height: 32px; }

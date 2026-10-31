@@ -32,10 +32,14 @@ export function SipMoveButton(p:
     <div className="btn-row" style={{ marginTop: 6 }}>
       {p.kind === 'move' ? (
         <>
-          <label className="dim" htmlFor={`first-${p.fromId}`}>first SIP in</label>
-          <select id={`first-${p.fromId}`} value={month} disabled={busy} onChange={(e) => setMonth(e.target.value)}>
-            {p.months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-          </select>
+          <span className="dim" id={`first-${p.fromId}`}>first SIP in</span>
+          <div className="tabs tabs-sm" role="radiogroup" aria-labelledby={`first-${p.fromId}`}>
+            {p.months.map((m) => (
+              <button key={m.value} type="button" role="radio" aria-checked={month === m.value} disabled={busy} onClick={() => setMonth(m.value)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
           <button className="btn btn-primary btn-sm" type="button" disabled={busy} onClick={run}>{busy ? 'Saving…' : 'Done'}</button>
         </>
       ) : (
