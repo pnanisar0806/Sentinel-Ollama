@@ -3,10 +3,10 @@ import { classify, loadPositions, type Position } from './networth.js';
 import { concentration } from './allocation.js';
 import { blockedInstruments, assessStaleness } from '../sources/staleness.js';
 import { formatInr, paise } from '../money/paise.js';
-import type { Recommendation } from './recommendations.js';
+import { holdingRuleChecker, type Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
 import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
-import { loadFreeEnvelope } from './sips.js';
+import { istMonth, loadFreeEnvelope } from './sips.js';
 import { loadLumpSum } from './lump-sums.js';
 import { loadBucketBalances } from './bucket-balances.js';
 import { isFundTopUp, monthsBetween } from './repeat-buy-hold.js';
@@ -25,7 +25,8 @@ export type RailViolation =
   | { code: 'OVERRIDE_INVALID'; detail: string }
   | { code: 'COOLING_NOT_ELAPSED'; detail: string }
   | { code: 'DRAWDOWN_LOOSENING_BLOCKED'; detail: string }
-  | { code: 'DRAWDOWN_JUSTIFICATION_REQUIRED'; detail: string };
+  | { code: 'DRAWDOWN_JUSTIFICATION_REQUIRED'; detail: string }
+  | { code: 'HOLDING_RULE'; detail: string };
 
 type FreezeState = {
   active: boolean;
@@ -126,6 +127,12 @@ export async function checkRails(
       });
     }
   }
+
+  // Owner holding rules (batch C) on the order itself. The exception month is the order's IST
+  // month, as for the envelope above, not the recommendation's; a lump-sum part is covered only
+  // by an exception on its lump sum.
+  const ruled = await (await holdingRuleChecker(db))(recommendation.primary, istMonth(new Date().toISOString()), link?.lump_sum_id ?? null);
+  if (ruled !== null && ruled.waivedBy === null) violations.push({ code: 'HOLDING_RULE', detail: ruled.reason });
 
   // Fund top-ups are exempt from the hold (owner amendment to FR-12, 2026-10-27).
   if (recommendation.primary.action === 'BUY' && primaryInst
