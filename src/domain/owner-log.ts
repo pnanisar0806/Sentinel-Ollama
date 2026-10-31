@@ -24,7 +24,7 @@ export type GoalMoveKind = 'sip' | 'maturity' | 'vest' | 'withdrawal';
 const today = (now: string): string => istDate(now);
 
 /** YYYY-MM-DD and a real calendar day: 2026-02-30 and 2026-13-45 are refused. */
-function assertRealDate(on: string): void {
+export function assertRealDate(on: string): void {
   const d = new Date(`${on}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== on) throw new Error(`not a date: ${on}`);
 }
