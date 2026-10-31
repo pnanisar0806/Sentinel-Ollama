@@ -5,6 +5,10 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
+      SIP move in place (same `logSipMove` checks); "Undo" reverses it. The chosen month now drives labels: before
+      it the old SIP shows "running ₹X, moves to Y from Mon"; from it, "stopped — moved to Y". Feed rows untouched.
+  - [ ] Owner: move ICICI Nifty 50 → Navi Nifty 50 in INDmoney, then press Done on /funds.
 - [x] **FUND SWITCH BUILT 2026-10-29** on `fix/sip-suggestions` (local, not pushed): `46184c2` SIP-card
       fix + T1–T6 (SIP moves on /log, Nifty 50 index switch check, per-fund SIP and units answers on
       `/funds`, SIP card follows moves). Ledger `.superpowers/sdd/2026-10-29-fund-switch/progress.md`. Ship:
@@ -26,7 +30,7 @@ MEMORY.md; the code map lives in index.md.
   - [x] Owner OK'd 2026-10-31: lump-sum parts are outside the 4-a-month recommendation cap.
   - [x] 0041 applied to prod 2026-10-31 via Supabase MCP (constraint names verified; in `schema_migrations`; 2 triggers, RLS on).
   - [x] Merged via PR #2; deployed.
-  - [ ] Owner logs ₹20,691 Edelweiss interest on /log → Money received; advice after Sunday's weekly report.
+  - [x] Owner logged ₹20,691 Edelweiss interest on /log → Money received, 2026-10-31. Next: sign the split on /advisor after Sunday 2026-11-01 weekly report.
   - [x] Browser-checked prod: /log Money received tab, /funds cap copy, /advisor Lump sum card, Overview (no cap warning at ₹50k).
   - Deferred (fix wave): SIP month recorded before Telegram send; leftover-lump threshold; sign not atomic.
   - [ ] Known gap: ETFs not switch-checked (next after batch B).

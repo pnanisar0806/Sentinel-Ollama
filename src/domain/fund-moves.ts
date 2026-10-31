@@ -24,7 +24,7 @@ export type SipAnswer =
   | { kind: 'unknown'; reason: string }
   | { kind: 'keep'; amountPaise: bigint }
   | { kind: 'move'; amountPaise: bigint; toId: string; toName: string; why: string }
-  | { kind: 'moved'; toId: string; toName: string; firstMonth: string; loggedOn: string };
+  | { kind: 'moved'; moveId: string; amountPaise: bigint; toId: string; toName: string; firstMonth: string; loggedOn: string };
 export type UnitsAnswer =
   | { kind: 'keep'; why: string }
   | { kind: 'move'; toId: string; toName: string; why: string; valuePaise: bigint; investedPaise: bigint | null; gainPaise: bigint | null };
@@ -95,7 +95,7 @@ export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: Fund
     const m = moved.find((x) => sameFund(x.aliases, own))?.m; // newest first
     const mine = sips.filter((s) => sameFund(s.aliases, own));
     const amountPaise = mine.length === 0 ? undefined : mine.reduce((a, s) => a + s.amountPaise, 0n);
-    const sip: SipAnswer = m ? { kind: 'moved', toId: m.toInstrumentId, toName: m.toName, firstMonth: m.firstMonth, loggedOn: m.on }
+    const sip: SipAnswer = m ? { kind: 'moved', moveId: m.id, amountPaise: m.amountPaise, toId: m.toInstrumentId, toName: m.toName, firstMonth: m.firstMonth, loggedOn: m.on }
       : sipUnknown !== null ? { kind: 'unknown', reason: sipUnknown }
       : amountPaise === undefined ? { kind: 'none' }
       : to ? { kind: 'move', amountPaise, toId: to.id, toName: to.name, why }
