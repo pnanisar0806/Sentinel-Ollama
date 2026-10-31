@@ -94,7 +94,7 @@ logged event leaves a visible review list of what it touches until the owner clo
     pick is used. No eligible pick → "keep — no allowed alternative (your rule on <X>)".
   - Exit candidates (`loadExitCandidates`): `HOLD_UNTIL` turns an exit into a warning.
   - Lump-sum advice: rules apply through the gate.
-  - **Refused money:** see "Open for the owner".
+  - **Refused money:** spread over the other eligible funds; see "Owner decisions".
 - UI: a small "Rule" button on each row of `/holdings` and the `/funds` ranking opens an
   inline form (kind as pills like the month picker, until-date, cap %, note). Active rules
   show as a badge on the row. `/log` "Holding rules" tab lists every active rule with
@@ -153,12 +153,17 @@ Shipped with this batch's first commit.
 9. Emergency-fund and education lines are web-only; no runway figure.
 10. A medical-expense stop-event ends when logged as settled, like job loss.
 
-## Open for the owner
+## Owner decisions (2026-10-31)
 
-1. **Money a rule refuses.** When a `NO_ADD` / `CAP_PCT` fund cannot take its share of the
-   SIP suggestion or a lump-sum part: (a) spread it over the other eligible funds by the same
-   mix logic, or (b) leave it unallocated ("₹X not placed — your rule on Y")?
-   Recommended: (a).
+1. **Money a rule refuses is spread** over the other eligible funds by the same mix logic
+   (SIP suggestions and lump-sum splits). The row for the ruled fund says "kept — your
+   <rule> rule; ₹X went to the others".
+2. **One-off exceptions.** Where a rule blocked advice, the blocked item shows **Allow once**.
+   It writes an append-only `holding_rule_exceptions` row (rule id, scope: an IST month or a
+   lump-sum id, note required). Inside that scope the rule is ignored for that fund only;
+   the rule itself stays active. The next advice run (weekly report, or the /funds card on
+   reload) uses it. Reversible like every log entry. Every recommendation that relied on an
+   exception says so in its thesis ("your NO_ADD rule on X waived for 2026-11, by you").
 
 ## Left to the builder
 
