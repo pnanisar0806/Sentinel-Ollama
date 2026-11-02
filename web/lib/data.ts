@@ -19,7 +19,7 @@ import { projectVests, type VestEvent } from '../../src/domain/rsu.js';
 import { fetchLiveRsuInputs } from '../../src/sources/rsu-live.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
-import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
+import { evaluateExits, loadExitCandidates, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { pendingRailChanges, type PendingRailChange } from '../../src/domain/controls.js';
 import { DEFAULT_OWNER_RAILS } from '../../src/domain/rail-values.js';
@@ -41,7 +41,7 @@ import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js'
 import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
 import {
-  FUND_TYPE_LABEL, loadActualMix, loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
+  FUND_TYPE_LABEL, fundAliases, loadActualMix, sameFund,loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
   type ActualMix, type Finding, type FundCandidates, type FundType, type RangeRow, type SignedMix,
 } from '../../src/domain/fund-mix.js';
 import { loadSipSuggestions, type SipSuggestions } from '../../src/domain/sip-advice.js';
@@ -51,6 +51,8 @@ import { loadUniverse } from '../../src/domain/mf-universe.js';
 import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
 import { loadReviewLines, stopEventsInForce, type ReviewLine } from '../../src/domain/life-events.js';
 import { goalReviewLines } from './life-events';
+import { loadActiveHoldingRules, type HoldingRule } from '../../src/domain/holding-rules.js';
+import { loadLumpSizingInput, sizeLumpSum } from '../../src/domain/lump-sizing.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -1054,4 +1056,56 @@ export async function getEndableLifeEvents(): Promise<{ id: string; kind: 'JOB_L
         and not exists (select 1 from life_events x where x.ends_event_id = e.id and ${live('x')})
       order by e.occurred_on, e.id`);
   return rows.map((r) => ({ id: r.id, kind: r.kind, on: r.on, amountPaise: r.amount_paise === null ? null : BigInt(r.amount_paise) }));
+}
+
+/** Batch C: the owner's active holding rules (not ended, not past their date), each with its live exceptions. */
+export async function getHoldingRules(): Promise<HoldingRule[]> {
+  return loadActiveHoldingRules(await db(), new Date().toISOString());
+}
+
+/** Active rules per instrument id, matched through the fund's aliases (an MF:/IND: row of one scheme is one fund). */
+export async function getRulesFor(instrumentIds: string[]): Promise<Map<string, HoldingRule[]>> {
+  const d = await db();
+  const rules = await loadActiveHoldingRules(d, new Date().toISOString());
+  const out = new Map<string, HoldingRule[]>();
+  if (rules.length === 0) return out;
+  for (const id of new Set(instrumentIds)) {
+    const own = await fundAliases(d, id);
+    const hit = rules.filter((r) => sameFund(r.aliases, own));
+    if (hit.length > 0) out.set(id, hit);
+  }
+  return out;
+}
+
+/** /recommendations "Withheld by your rules": what a holding rule refused, last 60 days, newest first. */
+export async function getRuleSuppressions(): Promise<{ on: string; action: string; reason: string }[]> {
+  return (await db()).query<{ on: string; action: string; reason: string }>(
+    `select logged_on::text as "on", action, reason from suppressed_actions
+      where suppressed_by = 'HOLDING_RULE' and logged_on >= current_date - 60
+      order by logged_on desc, action`);
+}
+
+/** The latest month's exit signals a hold-until rule holds back: a warning with its evidence, never a recommendation. */
+export async function getRuleHeldExits(): Promise<ExitCandidate[]> {
+  return (await loadExitCandidates(await db())).filter((e) => e.heldByRule !== null);
+}
+
+/**
+ * /advisor: per open lump sum, the parts a holding rule withholds today, sized live as signing
+ * does (the stored advice keeps only the reason text). A lump that cannot be sized lists none.
+ */
+export async function getLumpRuleHolds(): Promise<Map<string, { name: string; reason: string; ruleId: string }[]>> {
+  const d = await db();
+  const out = new Map<string, { name: string; reason: string; ruleId: string }[]>();
+  if ((await loadActiveHoldingRules(d, new Date().toISOString())).length === 0) return out;
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  for (const lump of await loadOpenLumpSums(d)) {
+    const parts = await loadLumpSizingInput(d, lump.id, today).then(sizeLumpSum).catch((e: unknown) => {
+      console.error(`advisor: could not size lump sum ${lump.id}: ${why(e)}`);
+      return [];
+    });
+    const ruled = parts.flatMap((c) => (c.ruleId === undefined ? [] : [{ name: c.name, reason: c.withheldReason ?? '', ruleId: c.ruleId }]));
+    if (ruled.length > 0) out.set(lump.id, ruled);
+  }
+  return out;
 }
