@@ -3,15 +3,18 @@ import { formatInr, type Paise } from '../money/paise.js';
 import { chooseIndexFund, loadIndexFundRows } from '../sources/index-funds.js';
 import {
   FUND_TYPE_BY_ISIN, FUND_TYPE_LABEL, fundAliases, loadActualMix, loadSignedMix, neverCut, sameFund, suggestSips, typeOf,
-  type ActualMix, type FundType, type SipInput, type SipSuggestion,
+  type FundType, type SipInput, type SipSuggestion,
 } from './fund-mix.js';
 import { monthlyReviewDone, recordMonthlyReview } from './cadence.js';
 import { loadFundMoves, type FundMove } from './fund-moves.js';
+import { loadActiveHoldingRules, ruleBlock, ruleLabel } from './holding-rules.js';
+import { universeInstrumentId } from './mf-universe.js';
+import { loadPositions } from './networth.js';
 import { loadActiveSipMoves } from './owner-log.js';
 import { auditPayload } from './owner-sales.js';
 import { railPaise } from './rail-values.js';
 import {
-  loadFreeEnvelope, loadSipCommitment, nextStepUp, SIP_COLS, SIP_MAX_AGE_DAYS, toSip, type FreeEnvelope, type SipDbRow,
+  istMonth, loadFreeEnvelope, loadSipCommitment, nextStepUp, SIP_COLS, SIP_MAX_AGE_DAYS, toSip, type FreeEnvelope, type SipDbRow,
 } from './sips.js';
 
 const ROUND_PAISE = 10_000n; // ₹100
@@ -29,6 +32,9 @@ export type SipSuggestions =
  * A logged SIP move (fund switch §3) stops its "from" SIP (dropped even while the feed still lists
  * it) and leaves that fund; the "to" fund stands in at the logged amount, `logged: true`, until the
  * feed shows that SIP; then the feed amount wins. The total counts the moved money once.
+ * Batch C: a SIP or held fund a holding rule refuses new money (BUY, amount unknown up front, so a cap
+ * refuses only once already over it; a waived rule allows) is `ruled` — kept, its share spread over the
+ * type's other funds; a US / Next 50 new-fund pick under a rule is skipped for the chooser's next one.
  */
 export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggestions> {
   const signed = await loadSignedMix(d);
@@ -44,7 +50,9 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   // Funds to leave: a logged move's "from" (listed first, so it wins), then every fund the /funds
   // switch check (active and index, fund switch §4) says to move, with the pick's name.
   const leavers: { from: string[]; toName: string }[] = [...moves, ...await Promise.all((await loadFundMoves(d, now)).moves
-    .flatMap((f) => (f.units.kind === 'move' ? [{ id: f.instrumentId, toName: f.units.toName }] : []))
+    // The SIP answer too: a hold-until rule keeps the units, but the fund still takes no new money.
+    .flatMap((f) => (f.sip.kind === 'move' ? [{ id: f.instrumentId, toName: f.sip.toName }]
+      : f.units.kind === 'move' ? [{ id: f.instrumentId, toName: f.units.toName }] : []))
     .map(async (f) => ({ from: await fundAliases(d, f.id), toName: f.toName })))];
   // Spec §3: a moved SIP's new fund is in the same AMFI category, so an untyped "to" takes the "from" type.
   const typed = async (instrumentId: string, isinOf: string | null, aliases: string[]) => {
@@ -52,42 +60,78 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     const m = t === null ? moves.find((x) => sameFund(x.to, aliases)) : undefined;
     return m ? await typeOf(d, m.fromInstrumentId) : t;
   };
+  const rules = await loadActiveHoldingRules(d, now);
+  const positions = rules.length === 0 ? [] : await loadPositions(d);
+  const portfolioPaise = positions.reduce((a, p) => a + p.valuePaise, 0n);
+  const heldAliases = await Promise.all(positions.map(async (p) => ({ v: p.valuePaise, aliases: await fundAliases(d, p.instrumentId) })));
+  const refusal = (aliases: string[]) => {
+    if (rules.length === 0) return null;
+    const heldPaise = heldAliases.filter((h) => sameFund(h.aliases, aliases)).reduce((a, h) => a + h.v, 0n);
+    const b = ruleBlock(rules, { aliases, action: 'BUY', amountPaise: null, heldPaise, portfolioPaise, month: istMonth(now), lumpSumId: null });
+    return b !== null && b.waivedBy === null ? b : null;
+  };
+  const ruleIds = new Map<string, string>();
+  /** The refusing rule's reason, or nothing; records the rule id for the row's Allow once. */
+  const ruled = (instrumentId: string, aliases: string[]): { ruled?: string } => {
+    const b = refusal(aliases);
+    if (b === null) return {};
+    ruleIds.set(instrumentId, b.rule.id);
+    return { ruled: b.reason };
+  };
   const sips: SipInput[] = [];
   const feed: string[][] = [];
   for (const s of c.sips) {
-    const aliases = leavers.length === 0 ? [] : await fundAliases(d, s.instrumentId, isin.get(s.sipId) ?? null);
+    const aliases = leavers.length === 0 && rules.length === 0 ? [] : await fundAliases(d, s.instrumentId, isin.get(s.sipId) ?? null);
     feed.push(aliases);
     // A moved SIP was stopped: the feed may still list it (lag), but its money now runs in the "to" fund.
     if (moves.some((m) => sameFund(m.from, aliases))) continue;
     const t = await typed(s.instrumentId, isin.get(s.sipId) ?? null, aliases);
-    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise });
+    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise, ...ruled(s.instrumentId, aliases) });
   }
   // A move whose new fund the feed does not show yet: its logged amount stands in until the feed does.
   for (const m of moves.filter((x) => !feed.some((f) => sameFund(f, x.to)))) {
     const t = await typed(m.toInstrumentId, null, m.to);
-    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true });
+    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true, ...ruled(m.toInstrumentId, m.to) });
   }
   const actual = await loadActualMix(d);
   const types = Object.keys(FUND_TYPE_LABEL) as FundType[];
   // A US / Next 50 new-fund row is named from the chooser's top pick (Task 10).
   const { rows: indexRows } = await loadIndexFundRows(d);
   const choices = (['US', 'NEXT50'] as const).map((t) => chooseIndexFund(indexRows, t));
+  // A pick a rule refuses is skipped for the next; none left names the first refusing rule.
+  const newFundNames: Partial<Record<FundType, string>> = {};
+  for (const x of choices) {
+    let name: string | undefined;
+    let refusedBy: string | undefined;
+    for (const pick of x.top ? [x.top, ...x.alternatives] : []) {
+      // A ranked pick is always a verified AMFI Direct Growth scheme (`chooseIndexFund`).
+      const b = rules.length === 0 ? null : refusal(await fundAliases(d, universeInstrumentId(pick.amfiSchemeCode!)));
+      if (b === null) { name = pick.name; break; }
+      refusedBy ??= `no allowed alternative (your ${ruleLabel(b.rule)} rule on ${pick.name})`;
+    }
+    const shown = name ?? refusedBy;
+    if (shown !== undefined) newFundNames[x.fundType] = shown;
+  }
   // A fund to leave gets no new money, under every id it appears as (feed SIP or holding); its type names the pick.
   const leaving: Record<string, string> = {};
   const leave = (id: string, own: string[]) => { const m = leavers.find((x) => sameFund(x.from, own)); if (m) leaving[id] = m.toName; };
   c.sips.forEach((s, i) => leave(s.instrumentId, feed[i]!));
   for (const h of leavers.length === 0 ? [] : types.flatMap((t) => actual.byType[t].holdings)) leave(h.instrumentId, await fundAliases(d, h.instrumentId));
+  const heldByType = Object.fromEntries(await Promise.all(types.map(async (t) => [t, await Promise.all(actual.byType[t].holdings.map(async (h) => (
+    rules.length === 0 ? h : { ...h, ...ruled(h.instrumentId, await fundAliases(d, h.instrumentId)) })))]))) as Parameters<typeof suggestSips>[0]['heldByType'];
   const budgetPaise = await railPaise(d, 'monthly_budget_paise');
   const setAsidePaise = await railPaise(d, 'goal_setaside_monthly_paise');
   const { rows, capped } = capToBudget(neverCut(suggestSips({
     sips, ranges: signed.ranges,
     actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
-    heldByType: Object.fromEntries(types.map((t) => [t, actual.byType[t].holdings])) as Record<FundType, ActualMix['byType'][FundType]['holdings']>,
-    newFundNames: Object.fromEntries(choices.flatMap((x) => (x.top ? [[x.fundType, x.top.name]] : []))),
-    leaving,
+    heldByType, newFundNames, leaving,
   })), investablePaise(budgetPaise, setAsidePaise));
   return {
-    rows, capped, budgetPaise, setAsidePaise,
+    rows: rows.map((r) => {
+      const ruleId = r.instrumentId === null || !r.reason.startsWith('kept — your') ? undefined : ruleIds.get(r.instrumentId);
+      return ruleId === undefined ? r : { ...r, ruleId };
+    }),
+    capped, budgetPaise, setAsidePaise,
     currentPaise: sips.reduce((a, s) => a + s.amountPaise, 0n),
     suggestedPaise: rows.reduce((a, r) => a + r.suggestedPaise, 0n),
   };

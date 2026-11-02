@@ -2,6 +2,9 @@ import type { Db } from '../db/client.js';
 import { CAPS, concentration } from './allocation.js';
 import { listRedemptionsUntil } from './redemptions.js';
 import type { Position } from './networth.js';
+import { fundAliases } from './fund-mix.js';
+import { loadActiveHoldingRules, ruleBlock } from './holding-rules.js';
+import { istMonth } from './sips.js';
 
 /**
  * PRD §6.5 sell / exit triggers, evaluated monthly (FR-15).
@@ -102,6 +105,11 @@ export interface ExitCandidate {
   amountPaise: bigint | null;
   /** §6.5 candidates are recommendations, never orders. */
   paper: true;
+  /**
+   * Batch C: the owner's unwaived `HOLD_UNTIL` rule on this instrument. The exit still shows, as a
+   * warning with its evidence, but is never promoted to a recommendation. Set by `loadExitCandidates`.
+   */
+  heldByRule: { ruleId: string; untilOn: string } | null;
 }
 
 const monthStart = (month: string): string => `${month}-01`;
@@ -230,6 +238,7 @@ function candidate(
     blockedByMinimumHold,
     amountPaise,
     paper: true,
+    heldByRule: null,
   };
 }
 
@@ -539,8 +548,11 @@ export async function persistExitCandidates(
   return written;
 }
 
-/** Everything recorded for a month, newest month first when `month` is omitted. */
-export async function loadExitCandidates(db: Db, month?: string): Promise<ExitCandidate[]> {
+/**
+ * Everything recorded for a month, newest month first when `month` is omitted. `heldByRule` is read
+ * against the rules active at `now` (a rule is the owner's current word, not the month's).
+ */
+export async function loadExitCandidates(db: Db, month?: string, now = new Date().toISOString()): Promise<ExitCandidate[]> {
   const rows = await db.query<{
     month: string; instrument_id: string; trigger_code: ExitTrigger;
     action: ExitCandidate['action']; evidence: string; ips_clause_refs: unknown;
@@ -554,19 +566,30 @@ export async function loadExitCandidates(db: Db, month?: string): Promise<ExitCa
       : `select * from exit_candidates where month = $1 order by instrument_id, trigger_code`,
     month === undefined ? [] : [month],
   );
-  return rows.map((r) => ({
-    trigger: r.trigger_code,
-    instrumentId: r.instrument_id,
-    action: r.action,
-    month: r.month,
-    evidence: r.evidence,
-    ipsClauseRefs: (typeof r.ips_clause_refs === 'string'
-      ? JSON.parse(r.ips_clause_refs)
-      : r.ips_clause_refs) as string[],
-    overridesMinimumHold: r.overrides_minimum_hold,
-    heldMonths: r.held_months,
-    blockedByMinimumHold: r.blocked_by_minimum_hold,
-    amountPaise: r.amount_paise === null ? null : BigInt(r.amount_paise),
-    paper: true,
-  }));
+  const rules = rows.length === 0 ? [] : await loadActiveHoldingRules(db, now);
+  const out: ExitCandidate[] = [];
+  for (const r of rows) {
+    const amountPaise = r.amount_paise === null ? null : BigInt(r.amount_paise);
+    const hold = rules.length === 0 ? null : ruleBlock(rules, {
+      aliases: await fundAliases(db, r.instrument_id), action: 'SELL', amountPaise, heldPaise: 0n, portfolioPaise: null,
+      month: istMonth(now), lumpSumId: null,
+    });
+    out.push({
+      trigger: r.trigger_code,
+      instrumentId: r.instrument_id,
+      action: r.action,
+      month: r.month,
+      evidence: r.evidence,
+      ipsClauseRefs: (typeof r.ips_clause_refs === 'string'
+        ? JSON.parse(r.ips_clause_refs)
+        : r.ips_clause_refs) as string[],
+      overridesMinimumHold: r.overrides_minimum_hold,
+      heldMonths: r.held_months,
+      blockedByMinimumHold: r.blocked_by_minimum_hold,
+      amountPaise,
+      paper: true,
+      heldByRule: hold === null || hold.waivedBy !== null ? null : { ruleId: hold.rule.id, untilOn: hold.rule.untilOn! },
+    });
+  }
+  return out;
 }
