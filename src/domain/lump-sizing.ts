@@ -45,10 +45,14 @@ export interface LumpSizingInput {
   newFunds: NewFund[];
   /** `goldPaise` is every held GOLD instrument; `actualBps` (floored) is for display only. */
   gold: { instrumentId: string; name: string; kind: string; actualBps: number; maxBps: number; portfolioPaise: bigint; goldPaise: bigint } | null;
-  /** Active owner holding rules, the IST month of `now`, and each destination's fund aliases (only loaded when a rule is active). */
+  /**
+   * Active owner holding rules, the IST month of `now`; with a rule active, each destination's fund
+   * aliases and its held value summed over every alias-matching holding (absent → 0n).
+   */
   rules: HoldingRule[];
   month: string;
   aliases: Record<string, string[]>;
+  held: Record<string, bigint>;
 }
 
 /** Limits the picks share; `allocateLumpSum` spends them down across parts. */
@@ -125,13 +129,21 @@ export async function loadLumpSizingInput(db: Db, lumpSumId: string, asOf: strin
   const typeValuePaise = Object.fromEntries(Object.entries(mix.byType).map(([t, v]) => [t, v.valuePaise])) as Record<FundType, bigint>;
   const rules = await loadActiveHoldingRules(db, now.toISOString());
   const aliases: Record<string, string[]> = {};
+  const held: Record<string, bigint> = {};
   if (rules.length > 0) {
+    const heldAliases = new Map<string, string[]>();
+    for (const h of sizing.holdings) if (!heldAliases.has(h.instrumentId)) heldAliases.set(h.instrumentId, await fundAliases(db, h.instrumentId));
     for (const id of [...funds.buys.map((f) => f.instrumentId), ...newFunds.map((f) => f.instrumentId), ...(gold ? [gold.instrumentId] : []), ...sizing.buys.map((b) => b.instrumentId)]) {
       aliases[id] ??= await fundAliases(db, id);
     }
+    // Held value across every alias of a destination (IND:A and MF:A are one fund), as the Task 3 gate sums it.
+    // A new fund stays 0n: it is never a held copy (`heldCopy`).
+    for (const id of [...funds.buys.map((f) => f.instrumentId), ...(gold ? [gold.instrumentId] : []), ...sizing.buys.map((b) => b.instrumentId)]) {
+      held[id] = sizing.holdings.filter((h) => sameFund(heldAliases.get(h.instrumentId)!, aliases[id]!)).reduce((a, h) => a + h.valuePaise, 0n);
+    }
   }
   return { lumpSumId, remainingPaise: lump.remainingPaise, sizing, fundTotalPaise: mix.totalPaise, typeValuePaise, newFunds, gold,
-    rules, month: istMonth(now.toISOString()), aliases };
+    rules, month: istMonth(now.toISOString()), aliases, held };
 }
 
 const min = (...xs: bigint[]): bigint => xs.reduce((m, x) => (x < m ? x : m));
@@ -184,10 +196,10 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
         // An owner holding rule on the sized amount: refused parts leave their money to the next pick.
         const hit = ruleBlock(i.rules, {
           aliases: i.aliases[b.instrumentId] ?? [b.instrumentId], action: 'BUY', amountPaise: c.amountPaise!,
-          heldPaise: heldPaise ?? holding.get(b.instrumentId) ?? 0n, portfolioPaise: s.portfolioPaise, month: i.month, lumpSumId: i.lumpSumId,
+          heldPaise: i.held[b.instrumentId] ?? 0n, portfolioPaise: s.portfolioPaise, month: i.month, lumpSumId: i.lumpSumId,
         });
         if (hit !== null && hit.waivedBy === null) c = { withheldReason: hit.reason, ruleId: hit.rule.id };
-        else if (hit !== null) c = { ...c, constraints: [`allowed once by exception ${hit.waivedBy} to ${hit.reason}`] };
+        else if (hit !== null) c = { ...c, constraints: [`${hit.reason} waived for this lump sum, by you`] };
       }
       out.push(withLumpId(i.lumpSumId, s.asOf, {
         action: 'BUY', ...b, status: 'WITHHELD', withheldReason: null, amountPaise: null, units: null, pricePaise: null, quoteAsOf: null,

@@ -71,11 +71,11 @@ describe('holding rules in lump-sum sizing', () => {
     await logRuleException(db, { ruleId, month: '2026-10', note: 'this month only' }, NOW);
     expect(sizeLumpSum(await loadLumpSizingInput(db, lumpId, AS_OF, new Date(NOW))).find((c) => c.instrumentId === 'MF:A'))
       .toMatchObject({ status: 'WITHHELD', ruleId });
-    const { id: exId } = await logRuleException(db, { ruleId, lumpSumId: lumpId, note: 'bond interest, fine' }, NOW);
+    await logRuleException(db, { ruleId, lumpSumId: lumpId, note: 'bond interest, fine' }, NOW);
     const allowed = sizeLumpSum(await loadLumpSizingInput(db, lumpId, AS_OF, new Date(NOW))).find((c) => c.instrumentId === 'MF:A')!;
     expect(allowed).toMatchObject({ status: 'ELIGIBLE', amountPaise: SIZED });
     expect(allowed.ruleId).toBeUndefined();
-    expect(allowed.constraints).toContain(`allowed once by exception ${exId} to your no new money rule on A Mid Cap Fund`);
+    expect(allowed.constraints).toEqual(['your no new money rule on A Mid Cap Fund waived for this lump sum, by you']);
   });
 
   it('a cap rule is checked against the sized amount', async () => {
@@ -91,5 +91,22 @@ describe('holding rules in lump-sum sizing', () => {
     await reverseEntry(db, { entity: 'holding_rule', entityId: ruleId, reason: 'tighter' }, NOW);
     await logHoldingRule(db, { on: AS_OF, instrumentId: 'MF:A', kind: 'CAP_PCT', capBps: capBps - 1, note: '' }, NOW);
     expect(await a()).toMatchObject({ status: 'WITHHELD', withheldReason: `your cap at ${(capBps - 1) / 100}% rule on A Mid Cap Direct` });
+  });
+
+  it('a cap counts the fund held under every alias, not just the destination id', async () => {
+    // ₹10,000 more of fund A held as its IND row: A is ₹90,000 (MF:A) + ₹10,000 (IND:A).
+    await db.query(`insert into holdings (snapshot_id, instrument_id, account, quantity, value_paise, source, as_of)
+      select id, 'IND:A', 'indmoney', 1, 1000000, 'indmoney', timestamptz '2026-10-20T12:00:00Z' from snapshots`);
+    const { id: lumpId } = await logLumpSum(db, { receivedOn: '2026-10-28', amountPaise: LUMP, from: 'Edelweiss bond interest' }, NOW);
+    const before = await loadLumpSizingInput(db, lumpId, AS_OF, new Date(NOW));
+    const amount = sizeLumpSum(before).find((c) => c.instrumentId === 'MF:A')!.amountPaise!;
+    const portfolio = before.sizing.portfolioPaise;
+    // The cap fits MF:A alone plus the part (rounded up), but not the alias-summed ₹1,00,000 plus the part.
+    const capBps = Number(((9_000_000n + amount) * 10_000n + portfolio - 1n) / portfolio);
+    expect((10_000_000n + amount) * 10_000n > BigInt(capBps) * portfolio).toBe(true);
+    await logHoldingRule(db, { on: AS_OF, instrumentId: 'MF:A', kind: 'CAP_PCT', capBps, note: '' }, NOW);
+    const input = await loadLumpSizingInput(db, lumpId, AS_OF, new Date(NOW));
+    expect(input.held['MF:A']).toBe(10_000_000n);
+    expect(sizeLumpSum(input).find((c) => c.instrumentId === 'MF:A')).toMatchObject({ status: 'WITHHELD', withheldReason: `your cap at ${capBps / 100}% rule on A Mid Cap Direct` });
   });
 });
