@@ -25,7 +25,6 @@ describe('logLifeEvent', () => {
     ['SALARY_CHANGE', { kind: 'SALARY_CHANGE', on: '2026-10-01', amountPaise: 2_50_000_00n, note: 'raise' }],
     ['JOB_LOSS', { kind: 'JOB_LOSS', on: '2026-10-01', detail: { expectedOn: '2027-01-01' }, note: '' }],
     ['NEW_DEPENDENT', { kind: 'NEW_DEPENDENT', on: '2026-10-01', detail: { expectedOn: '2027-06-01' }, note: '' }],
-    ['WINDFALL', { kind: 'WINDFALL', on: '2026-10-01', amountPaise: 10_00_000_00n, detail: { from: 'inheritance' }, note: '' }],
     ['RETIREMENT_AGE', { kind: 'RETIREMENT_AGE', on: '2026-10-01', detail: { fiTargetAge: 50 }, note: '' }],
     ['MEDICAL_EXPENSE', { kind: 'MEDICAL_EXPENSE', on: '2026-10-01', amountPaise: 5_00_000_00n, note: '' }],
   ];
@@ -41,7 +40,7 @@ describe('logLifeEvent', () => {
     ['salary without amount', { kind: 'SALARY_CHANGE', on: '2026-10-01', note: '' }, /amount/],
     ['job loss in the future', { kind: 'JOB_LOSS', on: '2026-11-15', note: '' }, /future/],
     ['dependent without expected date', { kind: 'NEW_DEPENDENT', on: '2026-10-01', note: '' }, /expected/],
-    ['windfall of zero', { kind: 'WINDFALL', on: '2026-10-01', amountPaise: 0n, note: '' }, /amount/],
+    ['a windfall (it is Money received)', { kind: 'WINDFALL', on: '2026-10-01', amountPaise: 10_00_000_00n, detail: { from: 'inheritance' }, note: '' }, /log a windfall under Money received/],
     ['FI age 76', { kind: 'RETIREMENT_AGE', on: '2026-10-01', detail: { fiTargetAge: 76 }, note: '' }, /35–75/],
     ['FI age 50.5', { kind: 'RETIREMENT_AGE', on: '2026-10-01', detail: { fiTargetAge: 50.5 }, note: '' }, /35–75/],
     ['medical without amount', { kind: 'MEDICAL_EXPENSE', on: '2026-10-01', note: '' }, /amount/],
@@ -119,6 +118,22 @@ describe('review lines', () => {
     expect(await loadReviewLines(db, new Date().toISOString())).toEqual([]);
   });
 
+  it('a rail proposal later refused by the cooling-off check leaves the line open; one after now does not count', async () => {
+    const day = 86_400_000;
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const t0 = Date.now() - 10 * day;
+    await logLifeEvent(db, { kind: 'JOB_LOSS', on: iso(t0).slice(0, 10), note: '' }, iso(t0));
+    const audit = (ms: number, action: string) => db.query(
+      `insert into audit_log (at, entity, entity_id, action, actor) values ($1, 'rail', 'monthly_budget_paise', $2, 'agent')`, [iso(ms), action]);
+    await audit(t0 + day, 'RAIL_CHANGE_PROPOSED');
+    await audit(t0 + 3 * day, 'RAIL_CHANGE_REFUSED');
+    expect((await loadReviewLines(db, iso(t0 + 4 * day))).map((l) => l.key)).toEqual(['monthly_budget_paise']);
+    // A proposal not yet made at the review's clock does not close the line.
+    await audit(t0 + 5 * day, 'RAIL_CHANGE_PROPOSED');
+    expect((await loadReviewLines(db, iso(t0 + 4 * day))).map((l) => l.key)).toEqual(['monthly_budget_paise']);
+    expect(await loadReviewLines(db, iso(t0 + 6 * day))).toEqual([]);
+  });
+
   it('a reversed event has no lines', async () => {
     const { id } = await logLifeEvent(db, { kind: 'SALARY_CHANGE', on: '2026-10-01', amountPaise: 2_50_000_00n, note: '' }, NOW);
     await reverseEntry(db, { entity: 'life_event', entityId: id, reason: 'typo' }, at(1));
@@ -150,7 +165,7 @@ describe('stopEventsInForce', () => {
   });
 
   it('only a job loss or a medical expense can be ended', async () => {
-    const { id } = await logLifeEvent(db, { kind: 'WINDFALL', on: '2026-11-01', amountPaise: 1n, note: '' }, NOV);
+    const { id } = await logLifeEvent(db, { kind: 'SALARY_CHANGE', on: '2026-11-01', amountPaise: 1n, note: '' }, NOV);
     await expect(endLifeEvent(db, { eventId: id, on: '2026-11-02', note: '' }, NOV)).rejects.toThrow(/job loss or a medical expense/);
   });
 

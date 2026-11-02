@@ -49,6 +49,11 @@ describe('migration 0042 — rules and events', () => {
     await expect(db.query(`delete from holding_rules`)).rejects.toThrow(/append-only/);
   });
 
+  it.each(['holding_rules', 'holding_rule_exceptions', 'life_events', 'life_event_reviews'])('%s refuses UPDATE and TRUNCATE', async (t) => {
+    await expect(db.query(`update ${t} set source = 'x'`)).rejects.toThrow(/append-only/);
+    await expect(db.query(`truncate ${t} cascade`)).rejects.toThrow(/append-only/);
+  });
+
   it('life_events cannot be truncated, and ENDED needs the event it ends', async () => {
     const [e] = await db.query<{ id: string }>(
       `insert into life_events (kind, occurred_on, amount_paise, as_of, source) values ('WINDFALL', '2026-10-01', 100, ${META}) returning id`);

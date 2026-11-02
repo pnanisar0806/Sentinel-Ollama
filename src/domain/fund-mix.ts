@@ -1,4 +1,5 @@
 import type { Db } from '../db/client.js';
+import { formatInr, type Paise } from '../money/paise.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import { CAPS } from './allocation.js';
 import { loadMfMetadata } from './mf-metadata.js';
@@ -256,7 +257,7 @@ export function suggestSips(i: {
       rest -= kept;
       // Only a cut is kept beyond the total: the shown amount over the floored share it would have had.
       if (share < s.amountPaise) beyond += s.amountPaise - (share / ROUND_PAISE) * ROUND_PAISE;
-      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: `kept — ${s.ruled}; its share went to the other funds`, logged: s.logged ?? false, ...(s.ruleId === undefined ? {} : { ruleId: s.ruleId }) });
+      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: share > s.amountPaise ? `kept — ${s.ruled}; ${formatInr(((share - s.amountPaise) / 100n) * 100n as Paise)} went to the others` : `kept — ${s.ruled}`, logged: s.logged ?? false, ...(s.ruleId === undefined ? {} : { ruleId: s.ruleId }) });
     }
     let to: { instrumentId: string | null; fundName: string; amountPaise: bigint; logged?: boolean }[] = open.filter((x) => x.ruled === undefined);
     if (to.length === 0) {

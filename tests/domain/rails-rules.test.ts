@@ -6,6 +6,7 @@ import { checkRails } from '../../src/domain/rails.js';
 import { logHoldingRule, logRuleException } from '../../src/domain/holding-rules.js';
 import { istMonth } from '../../src/domain/sips.js';
 import { buildRecommendation, type Recommendation } from '../../src/domain/recommendations.js';
+import { logLumpSum } from '../../src/domain/owner-log.js';
 
 /** Batch C Task 3: the order gate refuses an order a holding rule forbids, unless an exception covers it. */
 let db: Db;
@@ -38,5 +39,20 @@ describe('checkRails and holding rules', () => {
     const { id } = await logHoldingRule(db, { on: '2026-08-12', instrumentId: 'NSE:GOLDBEES', kind: 'NO_ADD', note: '' }, now);
     await logRuleException(db, { ruleId: id, month: istMonth(now), note: 'once' }, now);
     expect(await codes()).not.toContain('HOLDING_RULE');
+  });
+
+  it('a lump-sum part is covered by an exception on its lump sum, never by a month exception', async () => {
+    const now = new Date().toISOString();
+    const { id: lumpId } = await logLumpSum(db, { receivedOn: now.slice(0, 10), amountPaise: 5_000_000n, from: 'bonus' }, now);
+    const [r] = await db.query<{ id: string }>(
+      `insert into recommendations (created_on, kind, intent, primary_rec, alternates, ips_clause_refs, engine_evidence, lump_sum_id)
+       values ('2026-09-20', 'rebalance', 'x', $1, '[]', '[]', '{}', $2) returning id::text`, [JSON.stringify(rec().primary), lumpId]);
+    const forLump = async () => (await checkRails(db, rec(), { forRecommendationId: Number(r!.id) })).map((v) => v.code);
+    const { id } = await logHoldingRule(db, { on: '2026-08-12', instrumentId: 'NSE:GOLDBEES', kind: 'NO_ADD', note: '' }, now);
+    await logRuleException(db, { ruleId: id, month: istMonth(now), note: 'month money only' }, now);
+    expect(await codes()).not.toContain('HOLDING_RULE');
+    expect(await forLump()).toContain('HOLDING_RULE');
+    await logRuleException(db, { ruleId: id, lumpSumId: lumpId, note: 'the bonus may' }, now);
+    expect(await forLump()).not.toContain('HOLDING_RULE');
   });
 });

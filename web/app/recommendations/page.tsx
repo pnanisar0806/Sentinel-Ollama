@@ -119,7 +119,7 @@ export default async function RecommendationsPage() {
         recommendation; nothing is swapped in. Rules are added on <Link href="/holdings">Holdings</Link> and <Link href="/funds">Mutual funds</Link>, and ended on <Link href="/log">Log what I did</Link> → Holding rules.
       </p>
       {ruleWithheld.length === 0
-        ? <Notice>Nothing withheld by a rule in the last 60 days — either no rule is on, or none refused the monthly advice. The weekly report&apos;s monthly advice is what fills this list.</Notice>
+        ? <Notice>Nothing withheld by a rule in the last 60 days — either no rule is on, or none refused a recommendation. A refusal is recorded here when a recommendation is about to be stored: when you sign monthly or lump-sum advice on <Link href="/advisor">Advisor</Link>, promote an exit on <Link href="/cleanup">Cleanup</Link>, or the cleanup job drafts one. Advice a rule withholds before you sign is shown on Advisor instead.</Notice>
         : (
           <Card title="Refused by a rule">
             <ul className="timeline">

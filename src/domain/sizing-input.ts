@@ -4,11 +4,13 @@ import { railPaise } from './rails.js';
 import { loadFreeEnvelope } from './sips.js';
 import { loadStockChecks } from './stock-checks.js';
 import { CAPS } from './allocation.js';
-import { loadFundCandidates } from './fund-mix.js';
+import { fundAliases, loadFundCandidates, sameFund } from './fund-mix.js';
 import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
-import type { SizingInput } from './sizing.js';
+import type { RuleCheck, SizingInput } from './sizing.js';
 import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
 import { openLumpSumPaise } from './lump-sums.js';
+import { loadActiveHoldingRules, monthLabel, ruleBlock, type HoldingRule } from './holding-rules.js';
+import { istMonth } from './sips.js';
 
 /**
  * Reads what `sizeCandidates` needs from the database (Phase 2.5 Task 4). Read-only.
@@ -74,6 +76,9 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
   // month (envelope less BUY orders and owner-logged purchases), never the whole envelope.
   const envelope = await loadFreeEnvelope(db, new Date().toISOString());
 
+  const funds = await loadFundCandidates(db, asOf);
+  const ruleCheck = await ruleChecker(db, now, positions, [...funds.buys.map((f) => f.instrumentId), ...buys.map((b) => b.instrumentId), ...sells.map((s) => s.instrument_id)]);
+
   return {
     asOf,
     tacticalBudgetPaise: envelope.remainingPaise ?? 0n,
@@ -94,7 +99,41 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
       amountPaise: s.amount_paise === null ? null : BigInt(s.amount_paise),
       blockedByMinimumHold: s.blocked_by_minimum_hold, reason: `${s.trigger_code}: ${s.evidence}`,
     })),
-    funds: await loadFundCandidates(db, asOf),
+    funds,
     singleSchemeCapPct: Math.round(CAPS.singleMfScheme * 100),
+    ...(ruleCheck === null ? {} : { ruleCheck }),
+  };
+}
+
+/**
+ * Owner holding rules for the monthly plan (batch C), as the gate checks them at signing: matched
+ * through fund aliases, held value summed over every alias-matching position, the IST month of
+ * `now` for exceptions. Null when no rule is active.
+ */
+async function ruleChecker(
+  db: Db, now: Date, positions: { instrumentId: string; valuePaise: bigint }[], ids: string[],
+): Promise<RuleCheck | null> {
+  const rules = await loadActiveHoldingRules(db, now.toISOString());
+  if (rules.length === 0) return null;
+  const month = istMonth(now.toISOString());
+  const portfolio = positions.reduce((s, p) => s + p.valuePaise, 0n);
+  const held = await Promise.all(positions.map(async (p) => ({ aliases: await fundAliases(db, p.instrumentId), valuePaise: p.valuePaise })));
+  const aliases = new Map<string, string[]>();
+  for (const id of ids) if (!aliases.has(id)) aliases.set(id, await fundAliases(db, id));
+  return makeRuleCheck(rules, month, aliases, held, portfolio);
+}
+
+/** Pure: the closure `sizeCandidates` calls. `held` is every position with its fund aliases. */
+export function makeRuleCheck(
+  rules: HoldingRule[], month: string, aliases: Map<string, string[]>, held: { aliases: string[]; valuePaise: bigint }[], portfolio: bigint,
+): RuleCheck {
+  return ({ instrumentId, action, amountPaise }) => {
+    const own = aliases.get(instrumentId) ?? [instrumentId];
+    const hit = ruleBlock(rules, {
+      aliases: own, action, amountPaise, portfolioPaise: portfolio === 0n ? null : portfolio, month, lumpSumId: null,
+      heldPaise: held.filter((h) => sameFund(h.aliases, own)).reduce((s, h) => s + h.valuePaise, 0n),
+    });
+    if (hit === null) return null;
+    return { reason: hit.reason, ruleId: hit.rule.id, waiver: hit.waivedBy === null ? null : `${hit.reason} waived for ${monthLabel(month)}, by you` };
   };
 }

@@ -16,7 +16,9 @@ export default async function OverviewPage() {
   const controls = await getInvestmentControls();
   const goals = await getGoals();
   const planned = plannedSpendingLine(await getPlannedSpending());
-  const life = await getLifeEventReview();
+  // Fail-soft: the overview never goes down for the life-event review.
+  const life = await getLifeEventReview().then((l) => ({ ...l, error: null as string | null }))
+    .catch((e: unknown) => ({ open: [], waiting: [], stops: [], error: e instanceof Error ? e.message : String(e) }));
   const stale = input.staleness.filter((r) => r.stale);
   const delta = input.previousNetPaise === null ? null : (input.netPaise - input.previousNetPaise) as Paise;
   const healthy = stale.length === 0 && blocked.length === 0;
@@ -31,6 +33,7 @@ export default async function OverviewPage() {
       />
 
       <div className="bento">
+        {life.error !== null && <div className="span-12"><Notice tone="amber">life-event review unavailable: {life.error}</Notice></div>}
         {life.stops.map((s) => (
           <div className="span-12" key={s.eventId}>
             <Notice tone="amber">{s.text} Log it as ended on <Link href="/log">Log</Link> when it is over.</Notice>

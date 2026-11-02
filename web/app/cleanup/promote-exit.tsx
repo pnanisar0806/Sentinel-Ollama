@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
  * firing.
  */
 export default function PromoteExit(
-  { instrumentId, trigger, blocked }: { instrumentId: string; trigger: string; blocked: boolean },
+  { instrumentId, trigger, blocked, heldByRule }: { instrumentId: string; trigger: string; blocked: boolean; heldByRule: boolean },
 ) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -26,6 +26,9 @@ export default function PromoteExit(
       </span>
     );
   }
+
+  // A hold-until rule: the promote gate would refuse it, so no button (batch C).
+  if (heldByRule) return <span className="dim" title="your hold-until rule — end it on Log what I did → Holding rules">held by your rule</span>;
 
   async function promote() {
     setBusy(true);

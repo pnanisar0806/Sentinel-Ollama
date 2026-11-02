@@ -60,6 +60,11 @@ describe('the append-only guard cannot be quietly replaced', () => {
       'ips_versions_append_only', 'ips_versions_truncate_only',
       'bucket_flows_append_only', 'bucket_flows_truncate_only',
       'lots_immutable_update', 'lots_immutable_delete', 'lots_truncate_only',
+      // 0042, batch C: rules, exceptions, life events and their reviews.
+      'holding_rules_append_only', 'holding_rules_truncate_only',
+      'holding_rule_exceptions_append_only', 'holding_rule_exceptions_truncate_only',
+      'life_events_append_only', 'life_events_truncate_only',
+      'life_event_reviews_append_only', 'life_event_reviews_truncate_only',
     ]) {
       expect(names).toContain(expected);
     }

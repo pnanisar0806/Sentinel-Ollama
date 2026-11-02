@@ -22,11 +22,14 @@ export interface HoldingRule {
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
+/** `YYYY-MM` (or a date) → "Nov 2026". */
+export const monthLabel = (ym: string): string => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
+
 export function ruleLabel(r: Pick<HoldingRule, 'kind' | 'untilOn' | 'capBps'>): string {
   switch (r.kind) {
     case 'NO_ADD': return 'no new money';
     case 'NO_REBUY': return 'never buy again';
-    case 'HOLD_UNTIL': return `hold until ${MONTHS[Number(r.untilOn!.slice(5, 7)) - 1]} ${r.untilOn!.slice(0, 4)}`;
+    case 'HOLD_UNTIL': return `hold until ${monthLabel(r.untilOn!)}`;
     // Display only: an integer bps over 100 prints exactly (1250 → 12.5).
     case 'CAP_PCT': return `cap at ${r.capBps! / 100}%`;
   }

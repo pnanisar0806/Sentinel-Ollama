@@ -38,7 +38,7 @@ import { loadOpenLumpSums, type LumpSum } from '../../src/domain/lump-sums.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
-import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
+import { istMonth, loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
 import {
   FUND_TYPE_LABEL, fundAliases, loadActualMix, sameFund,loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
@@ -51,8 +51,10 @@ import { loadUniverse } from '../../src/domain/mf-universe.js';
 import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
 import { loadReviewLines, stopEventsInForce, type ReviewLine } from '../../src/domain/life-events.js';
 import { goalReviewLines } from './life-events';
-import { loadActiveHoldingRules, type HoldingRule } from '../../src/domain/holding-rules.js';
+import { loadActiveHoldingRules, ruleBlock, type HoldingRule } from '../../src/domain/holding-rules.js';
 import { loadLumpSizingInput, sizeLumpSum } from '../../src/domain/lump-sizing.js';
+import { loadSizingInput } from '../../src/domain/sizing-input.js';
+import { sizeCandidates } from '../../src/domain/sizing.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -405,16 +407,25 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
        from exit_candidates group by 1, 2`,
   );
   const firstSeen = new Map(history.map((h) => [`${h.instrument_id}|${h.trigger_code}`, h.first_seen]));
-  
+  // A hold-until rule holds an exit back (the promote gate refuses it too): the button says so instead.
+  const nowIso = new Date().toISOString();
+  const rules = await loadActiveHoldingRules(d, nowIso);
+  const heldByRule = async (instrumentId: string): Promise<ExitCandidate['heldByRule']> => {
+    if (rules.length === 0) return null;
+    const hit = ruleBlock(rules, { aliases: await fundAliases(d, instrumentId), action: 'SELL', amountPaise: null, heldPaise: 0n, portfolioPaise: null, month: istMonth(nowIso), lumpSumId: null });
+    return hit === null || hit.waivedBy !== null ? null : { ruleId: hit.rule.id, untilOn: hit.rule.untilOn! };
+  };
+
   return {
     redemptions,
     freezeState,
     breakerState,
     railChanges,
-    exitCandidates: exitCandidates.map((c) => ({
+    exitCandidates: await Promise.all(exitCandidates.map(async (c) => ({
       ...c,
+      heldByRule: await heldByRule(c.instrumentId),
       firstSeen: firstSeen.get(`${c.instrumentId}|${c.trigger}`) ?? null,
-    })),
+    }))),
     // numeric arrives as a string from postgres
     drawdownPct: drawdown ? Number(drawdown.current_pct) : null,
   };
@@ -1088,6 +1099,23 @@ export async function getRuleSuppressions(): Promise<{ on: string; action: strin
 /** The latest month's exit signals a hold-until rule holds back: a warning with its evidence, never a recommendation. */
 export async function getRuleHeldExits(): Promise<ExitCandidate[]> {
   return (await loadExitCandidates(await db())).filter((e) => e.heldByRule !== null);
+}
+
+/**
+ * /advisor: this month's candidates a holding rule withholds, sized live exactly as the weekly
+ * advisor and signing size them, with the IST month an Allow once covers. Sizing failure → none, logged.
+ */
+export async function getMonthRuleHolds(): Promise<{ month: string; holds: { action: string; name: string; reason: string; ruleId: string }[] }> {
+  const d = await db();
+  const now = new Date();
+  const month = istMonth(now.toISOString());
+  if ((await loadActiveHoldingRules(d, now.toISOString())).length === 0) return { month, holds: [] };
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const candidates = await loadSizingInput(d, today, now).then(sizeCandidates).catch((e: unknown) => {
+    console.error(`advisor: could not size this month's candidates: ${why(e)}`);
+    return [];
+  });
+  return { month, holds: candidates.flatMap((c) => (c.ruleId === undefined ? [] : [{ action: c.action, name: c.name, reason: c.withheldReason ?? '', ruleId: c.ruleId }])) };
 }
 
 /**

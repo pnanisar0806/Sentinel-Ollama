@@ -39,7 +39,11 @@ describe('suggestSips with a ruled SIP', () => {
     const b = get(ruled, 'IND:MB');
     expect(get(free, 'IND:MA').suggestedPaise > R(500)).toBe(true); // Mid cap is underweight: an addition exists
     expect(a.suggestedPaise).toBe(R(500));
-    expect(a.reason).toBe('kept — your no new money rule on Mid A; its share went to the other funds');
+    // It names what it refused: the addition the free re-split gave it (that row is floored to ₹100).
+    const refused = /^kept — your no new money rule on Mid A; ₹([\d,]+) went to the others$/.exec(a.reason);
+    expect(refused).not.toBeNull();
+    const x = R(Number(refused![1]!.replace(/,/g, ''))) - (get(free, 'IND:MA').suggestedPaise - R(500));
+    expect(x >= 0n && x < R(100)).toBe(true);
     // The type's money is unchanged up to the rows' ₹100 floors (two rows floored before, one after):
     // Mid B = the type's money less Mid A's ₹500.
     const diff = mid(free) - mid(ruled);
@@ -115,7 +119,7 @@ describe('loadSipSuggestions with rules', () => {
     // Every SIP here is typed and nothing is cut, so before the budget cap the total is the SIPs' own.
     expect(r.capped || r.suggestedPaise >= r.currentPaise).toBe(true);
     expect(hdfc).toMatchObject({ ruleId: id, currentPaise: R(1_001), suggestedPaise: R(1_001) });
-    expect(hdfc.reason).toMatch(/^kept — your no new money rule on HDFC Mid Cap Opportunities Direct; its share went to the other funds/);
+    expect(hdfc.reason).toMatch(/^kept — your no new money rule on HDFC Mid Cap Opportunities Direct; ₹[\d,]+ went to the others$/);
     // Its Mid cap money went elsewhere: a new-fund row for the type.
     expect(r.rows.some((x) => x.fundType === 'MID' && x.instrumentId !== 'IND:3097' && x.suggestedPaise > 0n)).toBe(true);
 

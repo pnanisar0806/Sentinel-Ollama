@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getSips, getStockChecks } from '../../lib/data';
+import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getMonthRuleHolds, getSips, getStockChecks } from '../../lib/data';
+import { monthLabel } from '../../lib/funds';
 import { AllowOnce } from '../allow-once';
 import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
@@ -70,6 +71,7 @@ async function StockChecksCard() {
 /** Funds first (Piece 3): held funds below their signed midpoint, in the order the sizer tries them. */
 async function FundCandidatesCard() {
   const { approved, buys, typesBelowMidpoint, excluded } = await getFundCandidates();
+  const { month, holds } = await getMonthRuleHolds();
   const pct = (bps: number) => `${(bps / 100).toFixed(1)}%`;
   const below = typesBelowMidpoint.map((t) => FUND_TYPE_LABEL[t]).join(', ');
   return (
@@ -95,6 +97,12 @@ async function FundCandidatesCard() {
                 ]}
               />}
           </>}
+      {holds.map((h) => (
+        <div key={`${h.ruleId}:${h.action}:${h.name}`} style={{ marginTop: 10 }}>
+          <Badge tone="amber">withheld by your rule</Badge> <strong>{h.action.toLowerCase()} {h.name}</strong> <span className="dim">— {h.reason}; not offered this month.</span>
+          <AllowOnce ruleId={h.ruleId} month={month} scope={`for ${monthLabel(month)}`} />
+        </div>
+      ))}
       {excluded.length > 0 && (
         <details style={{ marginTop: 10 }}><summary className="muted">{excluded.length} held fund(s) not a candidate, and why</summary>
           <ul className="muted" style={{ paddingLeft: 18 }}>{excluded.map((e) => <li key={e.instrumentId}>{e.name}: {e.reason}</li>)}</ul>

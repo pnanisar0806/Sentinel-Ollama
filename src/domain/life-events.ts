@@ -81,8 +81,10 @@ export async function logLifeEvent(
   now = new Date().toISOString(),
 ): Promise<{ id: string }> {
   if (!KINDS.includes(e.kind)) throw new Error(`not a life event: ${e.kind}`);
+  // A windfall is money: it is logged as a lump sum (the /log form hands off), never as an event row.
+  if (e.kind === 'WINDFALL') throw new Error('log a windfall under Money received');
   if (e.kind === 'NEW_DEPENDENT') assertRealDate(e.on); else assertPast(e.on, now);
-  const needsAmount = e.kind === 'SALARY_CHANGE' || e.kind === 'WINDFALL' || e.kind === 'MEDICAL_EXPENSE';
+  const needsAmount = e.kind === 'SALARY_CHANGE' || e.kind === 'MEDICAL_EXPENSE';
   if (e.amountPaise !== undefined ? e.amountPaise <= 0n : needsAmount) throw new Error('the amount must be positive');
   const d = e.detail ?? {};
   const detail: Record<string, unknown> = {};
@@ -142,7 +144,8 @@ export async function reviewLine(
 /**
  * Open lines of the given item kinds, for live events logged by `now`. The latest review
  * row per (event, key) decides — by `as_of`, so two answers to one line need distinct
- * instants. A rail line also closes when a rail change was proposed after the event.
+ * instants. A rail line also closes when a rail change was proposed after the event, by `now`,
+ * and not refused since (`applyDueRailChanges` refuses a loosening at activation).
  * Shared with `web/lib/life-events.ts`, which passes the goal kind and its own `current`.
  */
 export async function openReviewLines(
@@ -156,7 +159,11 @@ export async function openReviewLines(
     `select distinct on (event_id, item_key) event_id::text, item_key, outcome, new_value_text from life_event_reviews
       where as_of <= $1 order by event_id, item_key, as_of desc`, [now])).map((r) => [`${r.event_id}|${r.item_key}`, r]));
   const proposed = new Map((await db.query<{ key: string; at: string | Date }>(
-    `select entity_id as key, max(at) as at from audit_log where entity = 'rail' and action = 'RAIL_CHANGE_PROPOSED' group by entity_id`))
+    `select p.entity_id as key, max(p.at) as at from audit_log p
+      where p.entity = 'rail' and p.action = 'RAIL_CHANGE_PROPOSED' and p.at <= $1
+        and not exists (select 1 from audit_log x where x.entity = 'rail' and x.entity_id = p.entity_id
+                          and x.action = 'RAIL_CHANGE_REFUSED' and x.at > p.at and x.at <= $1)
+      group by p.entity_id`, [now]))
     .map((p) => [p.key, new Date(p.at).getTime()]));
   const lines: ReviewLine[] = [];
   for (const ev of events) {
