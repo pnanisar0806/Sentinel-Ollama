@@ -44,6 +44,14 @@ export const AREAS: Area[] = [
     missing: ['A constant marked “needs changing” waits for a code change; the app never edits it', 'No emergency-fund runway figure (nothing computes one)'],
   },
   {
+    slug: 'holding-rules',
+    name: 'Holding rules',
+    stage: 'live',
+    what: 'A standing instruction on one holding — no new money, hold until a date, never buy again, or cap its weight — that advice must respect, with a one-off "Allow once" where a rule blocked something.',
+    works: ['Add rule on Holdings (stocks, ETFs, funds, gold) and on the Mutual funds ranking; active rules shown as badges', 'Suggested SIPs, the switch check, lump-sum splits and monthly recommendations respect the rules; refused money goes to the other funds', 'Allow once on a ruled Suggested SIP row and a ruled switch-check row (this IST month) and on a withheld lump-sum part (that lump sum), note required; the rule stays on', '“Withheld by your rules” on Recommendations (last 60 days), and “your rule waived by you” on a recommendation that relied on an Allow once', 'Exit signals a hold-until rule holds back shown on Holdings as a warning with their evidence, never promoted', '“Holding rules” tab on /log: End now on a rule, Undo on an Allow once, each a reversal with a reason'],
+    missing: ['Rules and Allow onces are not on the /log timeline; they are listed only under Holding rules', 'A withheld lump-sum part is re-sized live on /advisor; the stored advice keeps only the reason text', 'No Allow once on the Recommendations page: a monthly recommendation a rule refused is listed there, but an exception for it is given on /funds or /advisor where the ruled item shows'],
+  },
+  {
     slug: 'overview',
     name: 'Net worth & day-over-day',
     stage: 'live',

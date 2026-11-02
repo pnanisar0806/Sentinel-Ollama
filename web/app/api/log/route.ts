@@ -8,6 +8,8 @@ import { loadGoalTracker } from '../../../../src/domain/goal-plan';
 import type { Db } from '../../../../src/db/client';
 import { recordRedemption, stateRedemptionAmount } from '../../../../src/domain/bond-redemptions';
 import { endLifeEvent, logLifeEvent, reviewLine, type LifeEventKind } from '../../../../src/domain/life-events';
+import { logHoldingRule, logRuleException, type RuleKind } from '../../../../src/domain/holding-rules';
+import { capBps } from '@/lib/rules';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +33,10 @@ type Body =
   // Batch C life events: nothing here changes a rail or pauses a SIP.
   | { action: 'life_event'; kind: LifeEventKind; on: string; rupees?: string; expectedOn?: string; fiTargetAge?: string; from?: string; note?: string }
   | { action: 'end_life_event'; eventId: string; on: string; note?: string }
-  | { action: 'review_line'; eventId: string; key: string; outcome: 'STILL_RIGHT' | 'NEEDS_CHANGE'; newValueText?: string };
+  | { action: 'review_line'; eventId: string; key: string; outcome: 'STILL_RIGHT' | 'NEEDS_CHANGE'; newValueText?: string }
+  // Batch C holding rules: a rule only refuses advice; it never changes a rail or pauses a SIP.
+  | { action: 'holding_rule'; on: string; instrumentId: string; kind: RuleKind; untilOn?: string; capPct?: string; note?: string }
+  | { action: 'rule_exception'; ruleId: string; month?: string; lumpSumId?: string; note: string };
 
 /** Optional exact decimal units; '' is none. The column's own error is not readable. */
 function units(text: string | undefined): string | null {
@@ -133,6 +138,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       case 'review_line':
         await reviewLine(d, { eventId: body.eventId ?? '', key: body.key ?? '', outcome: body.outcome, newValueText: body.newValueText });
         return NextResponse.json({ ok: true, message: body.outcome === 'NEEDS_CHANGE' ? 'Noted; it waits for the code change.' : 'Closed.' });
+      case 'holding_rule':
+        // Only the fields the kind carries reach the domain, which refuses a stray one.
+        await logHoldingRule(d, {
+          on: body.on, instrumentId: body.instrumentId ?? '', kind: body.kind, note: body.note ?? '',
+          ...(body.kind === 'HOLD_UNTIL' ? { untilOn: body.untilOn ?? '' } : {}),
+          ...(body.kind === 'CAP_PCT' ? { capBps: capBps(body.capPct ?? '') } : {}),
+        });
+        return NextResponse.json({ ok: true, message: 'Rule recorded. Advice follows it from the next run; nothing is sold or paused by it.' });
+      case 'rule_exception':
+        await logRuleException(d, {
+          ruleId: body.ruleId ?? '', note: body.note ?? '',
+          ...(body.lumpSumId ? { lumpSumId: body.lumpSumId } : { month: body.month ?? '' }),
+        });
+        return NextResponse.json({ ok: true, message: 'Allowed once. The rule stays on; the next advice run uses this.' });
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });
         return NextResponse.json({ ok: true, message: 'Noted.' });

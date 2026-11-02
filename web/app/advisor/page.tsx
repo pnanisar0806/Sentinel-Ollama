@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getSips, getStockChecks } from '../../lib/data';
+import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getSips, getStockChecks } from '../../lib/data';
+import { AllowOnce } from '../allow-once';
 import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import { rupees } from '../../lib/format';
@@ -106,7 +107,7 @@ async function FundCandidatesCard() {
 type LumpPart = { candidateId: string; instrumentId: string; name: string; amountPaise: string; units: string | null; basis: string | null };
 
 /** Batch B §3: each open lump sum and its latest advice, on top of the month's plan. */
-function LumpSumCard({ lumpSums }: { lumpSums: AdvisorData['lumpSums'] }) {
+function LumpSumCard({ lumpSums, ruleHolds }: { lumpSums: AdvisorData['lumpSums']; ruleHolds: Awaited<ReturnType<typeof getLumpRuleHolds>> }) {
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
   return (
     <Card title="Lump sum" aside="on top of the monthly budget · you sign, then approve">
@@ -122,6 +123,12 @@ function LumpSumCard({ lumpSums }: { lumpSums: AdvisorData['lumpSums'] }) {
                 <strong>{lump.from}</strong> · received {lump.receivedOn} · <span className="tnum"><Money p={lump.amountPaise as never} /></span>
                 {' '}· left <strong className="tnum"><Money p={lump.remainingPaise as never} /></strong>
               </p>
+              {(ruleHolds.get(lump.id) ?? []).map((h) => (
+                <div key={`${h.ruleId}:${h.name}`} style={{ marginTop: 10 }}>
+                  <Badge tone="amber">withheld by your rule</Badge> <strong>{h.name}</strong> <span className="dim">— {h.reason}. Its share goes to the other picks.</span>
+                  <AllowOnce ruleId={h.ruleId} lumpSumId={lump.id} scope="for this lump sum" />
+                </div>
+              ))}
               {proposal === null ? <Notice>Advice appears after Sunday&apos;s weekly report.</Notice> : <>
                 <div style={{ marginTop: 10 }}><Badge tone={d.tone}>{d.label}</Badge> <span className="dim">{proposal.asOf.slice(0, 10)} · {proposal.status.toLowerCase()}</span></div>
                 {p['reason'] ? <p className="dim">{str(p['reason'])}</p> : null}
@@ -261,7 +268,7 @@ export default async function AdvisorPage() {
 
       <div className="bento">
         <div className="span-12">
-          <LumpSumCard lumpSums={lumpSums} />
+          <LumpSumCard lumpSums={lumpSums} ruleHolds={await getLumpRuleHolds()} />
         </div>
 
         <div className="span-6">

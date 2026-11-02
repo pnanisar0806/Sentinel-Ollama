@@ -745,3 +745,10 @@ a:hover { color: #f0abfc; }
 .control-pending-row { display: grid; gap: 3px; margin-top: 12px; }
 .investment-editor p + p { margin-top: 8px; }
 @media (max-width: 600px) { .control-form { grid-template-columns: minmax(0, 1fr); } }
+
+/* Holding rules and Allow once (batch C): inline forms always stack, never wider than a phone,
+   and every control inside is a 44px tap target. Scoped: existing .btn-sm / .tabs-sm are untouched. */
+.rule-ctl { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-top: 6px; max-width: min(100%, 360px); }
+.rule-ctl .btn, .rule-ctl .tabs button { min-height: 44px; }
+.rule-ctl .field, .rule-ctl .btn-row, .rule-ctl .tabs { align-self: stretch; }
+.rule-ctl .field input { width: 100%; min-width: 0; box-sizing: border-box; }

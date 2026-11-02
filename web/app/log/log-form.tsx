@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import LifeEventForm from './life-event-form';
+import RulesPanel, { type RuleRow } from './rules-panel';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event';
+type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event' | 'rules';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
@@ -17,6 +18,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'lump_sum', label: 'Money received' },
   { id: 'milestone', label: 'Milestone done' },
   { id: 'life_event', label: 'Life event' },
+  { id: 'rules', label: 'Holding rules' },
   { id: 'note', label: 'Anything else' },
 ];
 
@@ -41,7 +43,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums, lifeEvents }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums, lifeEvents, rules }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -56,6 +58,8 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   lumpSums: { id: string; label: string }[];
   /** Live job losses / medical expenses for the Life event tab's **Ended**. */
   lifeEvents: { id: string; label: string; on: string }[];
+  /** Active holding rules with their Allow onces, for the Holding rules tab. */
+  rules: RuleRow[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>('goal');
@@ -144,6 +148,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
 
       {tab === 'life_event'
         ? <LifeEventForm today={today} endable={lifeEvents} onWindfall={(fill) => go('lump_sum', fill)} />
+        : tab === 'rules' ? <RulesPanel rules={rules} />
         : (
       <form className="form" onSubmit={submit} key={tab}>
         {tab === 'goal' && (

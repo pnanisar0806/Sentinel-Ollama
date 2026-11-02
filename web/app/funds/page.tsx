@@ -1,5 +1,8 @@
 import Link from 'next/link';
-import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getRulesFor, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { ruleLabel } from '../../../src/domain/holding-rules';
+import { AllowOnce } from '../allow-once';
+import { RuleButton } from '../rule-button';
 import { monthLabel, moveStarted, sipText, unitsText } from '@/lib/funds';
 import { Badge, Card, DataTable, Money, Notice, PageHead, Stat, type Tone } from '@/lib/ui';
 import { MAX_ACHIEVABLE_COMPOSITE } from '../../../src/domain/mf-ranking';
@@ -46,6 +49,8 @@ export default async function FundsPage() {
   // A logged move's new fund, shown in Suggested SIPs before the feed lists it.
   const movedTo = new Map(fundMoves.moves.flatMap((m) => (m.sip.kind === 'moved' ? [[m.sip.toId, m.sip] as const] : [])));
   const rupees = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padStart(2, '0')}`;
+  const rules = await getRulesFor(ranked.map((r) => r.instrumentId));
+  const thisMonth = `for ${monthLabel(month)}`;
 
   return (
     <>
@@ -180,7 +185,10 @@ export default async function FundsPage() {
                   label: 'Current → suggested', align: 'right',
                   value: ({ s }) => <span className="tnum"><Money p={s.currentPaise as never} /> → <strong><Money p={s.suggestedPaise as never} /></strong></span>,
                 },
-                { label: 'Why', value: ({ s }) => <span className="dim">{s.reason}</span> },
+                {
+                  label: 'Why',
+                  value: ({ s }) => <><span className="dim">{s.reason}</span>{s.ruleId ? <AllowOnce ruleId={s.ruleId} month={month} scope={thisMonth} /> : null}</>,
+                },
               ]}
             />
             <p className="muted">
@@ -305,6 +313,13 @@ export default async function FundsPage() {
                       ? <><Money p={sipOf.get(r.instrumentId)! as never} />/mo</>
                       : <span className="dim">no active SIP</span>),
                 },
+                {
+                  label: 'Rule',
+                  value: ({ r }) => <>
+                    {(rules.get(r.instrumentId) ?? []).map((x) => <Badge key={x.id} tone="indigo">{ruleLabel(x)}</Badge>)}
+                    <RuleButton instrumentId={r.instrumentId} name={r.name} today={istDate(nowIso)} />
+                  </>,
+                },
               ]}
             />
           </Card>
@@ -347,7 +362,14 @@ export default async function FundsPage() {
                     : m.units.gainPaise === null ? <span className="dim">unknown</span>
                     : <span className="tnum"><Money p={m.units.gainPaise as never} /></span>),
                 },
-                { label: 'Why', value: ({ m }) => <span className="dim">{m.units.why}</span> },
+                {
+                  label: 'Why',
+                  value: ({ m }) => <>
+                    <span className="dim">{m.units.why}</span>
+                    {m.ruleNote ? <><br /><Badge tone="amber">withheld by your rule</Badge>{m.ruleNote.text === m.units.why ? null : <> <span className="dim">{m.ruleNote.text}</span></>}
+                      <AllowOnce ruleId={m.ruleNote.ruleId} month={month} scope={thisMonth} /></> : null}
+                  </>,
+                },
               ]}
             />
             <p className="muted">
