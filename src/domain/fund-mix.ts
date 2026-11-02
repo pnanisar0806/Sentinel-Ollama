@@ -184,7 +184,7 @@ export interface SipSuggestion {
 }
 
 /** `ruled`: a holding rule refuses this fund new money (batch C) — the reason, e.g. "your no new money rule on X". */
-export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint; logged?: boolean; ruled?: string }
+export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint; logged?: boolean; ruled?: string; ruleId?: string }
 
 const ROUND_PAISE = 10_000n; // ₹100
 const NON_CORE_CAP_BPS = 3_000n;
@@ -254,8 +254,9 @@ export function suggestSips(i: {
       const share = openPaise === 0n ? 0n : (amount * s.amountPaise) / openPaise;
       const kept = share < s.amountPaise ? share : s.amountPaise;
       rest -= kept;
-      beyond += s.amountPaise - (kept / ROUND_PAISE) * ROUND_PAISE; // its ₹100 floor's residue stays with the anchor
-      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: `kept — ${s.ruled}; its share went to the other funds`, logged: s.logged ?? false });
+      // Only a cut is kept beyond the total: the shown amount over the floored share it would have had.
+      if (share < s.amountPaise) beyond += s.amountPaise - (share / ROUND_PAISE) * ROUND_PAISE;
+      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: `kept — ${s.ruled}; its share went to the other funds`, logged: s.logged ?? false, ...(s.ruleId === undefined ? {} : { ruleId: s.ruleId }) });
     }
     let to: { instrumentId: string | null; fundName: string; amountPaise: bigint; logged?: boolean }[] = open.filter((x) => x.ruled === undefined);
     if (to.length === 0) {

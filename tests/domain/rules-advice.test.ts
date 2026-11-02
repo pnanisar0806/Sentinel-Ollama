@@ -49,6 +49,19 @@ describe('suggestSips with a ruled SIP', () => {
     expect(ruled.reduce((x, r) => x + r.suggestedPaise, 0n)).toBe(R(15_000));
   });
 
+  it('a ruled amount off the ₹100 grid that nothing cuts: the typed total stays exact, and the row carries its rule id', () => {
+    // ₹13,999 / ₹501 / ₹500: Mid cap's share exceeds both, so the rule cuts nothing.
+    const s: SipInput[] = [
+      { instrumentId: 'IND:N50', fundName: 'Nifty 50', type: 'NIFTY50', topUp: true, amountPaise: R(13_999) },
+      { instrumentId: 'IND:MA', fundName: 'Mid A', type: 'MID', topUp: true, amountPaise: R(501), ruled: 'your no new money rule on Mid A', ruleId: '7' },
+      { instrumentId: 'IND:MB', fundName: 'Mid B', type: 'MID', topUp: true, amountPaise: R(500) },
+    ];
+    const rows = run(s);
+    expect(get(rows, 'IND:MA')).toMatchObject({ suggestedPaise: R(501), ruleId: '7' });
+    expect(rows.reduce((x, r) => x + r.suggestedPaise, 0n)).toBe(R(15_000));
+    expect(get(run(sips(500, 500)), 'IND:MA').ruleId).toBeUndefined();
+  });
+
   it('a ruled SIP the re-split would cut refuses nothing: the others and the anchor are as without the rule', () => {
     const free = run(sips(3_000, 2_000));
     const ruled = run(rule(sips(3_000, 2_000)));
@@ -99,6 +112,8 @@ describe('loadSipSuggestions with rules', () => {
     const r = await loadSipSuggestions(d, now);
     if (r.rows === null) throw new Error(r.reason);
     const hdfc = r.rows.find((x) => x.instrumentId === 'IND:3097')!;
+    // Every SIP here is typed and nothing is cut, so before the budget cap the total is the SIPs' own.
+    expect(r.capped || r.suggestedPaise >= r.currentPaise).toBe(true);
     expect(hdfc).toMatchObject({ ruleId: id, currentPaise: R(1_001), suggestedPaise: R(1_001) });
     expect(hdfc.reason).toMatch(/^kept — your no new money rule on HDFC Mid Cap Opportunities Direct; its share went to the other funds/);
     // Its Mid cap money went elsewhere: a new-fund row for the type.
@@ -168,6 +183,10 @@ describe('loadFundMoves with rules', () => {
     expect(none.units).toEqual({ kind: 'keep', why });
     expect(none.sip).toEqual({ kind: 'keep', amountPaise: 1_000_000n });
     expect(none.ruleNote).toEqual({ ruleId: navi.id, text: why });
+
+    // A hold-until on the held fund decides the units answer, so its rule is the note, not the destination's.
+    const hold = await logHoldingRule(d, { on: '2026-10-28', instrumentId: 'MF:ICICI-N50', kind: 'HOLD_UNTIL', untilOn: '2030-03-31', note: '' }, NOW);
+    expect((await icici(d)).ruleNote).toEqual({ ruleId: hold.id, text: 'keep — your hold until Mar 2030 rule' });
   });
 });
 
