@@ -151,7 +151,8 @@ export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: Fund
     const hold = rules.length === 0 ? null
       : ruleBlock(rules, { aliases: own, action: 'SELL', amountPaise: valuePaise, heldPaise: valuePaise, portfolioPaise, month, lumpSumId: null });
     const holdWhy = hold !== null && hold.waivedBy === null ? `keep — your ${ruleLabel(hold.rule)} rule` : null;
-    if (holdWhy !== null) ruleNote ??= { ruleId: hold!.rule.id, text: holdWhy };
+    // The hold rule decides the units answer, so it is the one Allow once would waive.
+    if (holdWhy !== null) ruleNote = { ruleId: hold!.rule.id, text: holdWhy };
     const units: UnitsAnswer = holdWhy !== null ? { kind: 'keep', why: holdWhy }
       : to ? { kind: 'move', toId: to.id, toName: to.name, why, valuePaise, investedPaise,
           gainPaise: investedPaise === null ? null : valuePaise - investedPaise }

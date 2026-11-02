@@ -70,13 +70,10 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     const b = ruleBlock(rules, { aliases, action: 'BUY', amountPaise: null, heldPaise, portfolioPaise, month: istMonth(now), lumpSumId: null });
     return b !== null && b.waivedBy === null ? b : null;
   };
-  const ruleIds = new Map<string, string>();
-  /** The refusing rule's reason, or nothing; records the rule id for the row's Allow once. */
-  const ruled = (instrumentId: string, aliases: string[]): { ruled?: string } => {
+  /** The refusing rule's reason and id (for the row's Allow once), or nothing. */
+  const ruled = (aliases: string[]): { ruled?: string; ruleId?: string } => {
     const b = refusal(aliases);
-    if (b === null) return {};
-    ruleIds.set(instrumentId, b.rule.id);
-    return { ruled: b.reason };
+    return b === null ? {} : { ruled: b.reason, ruleId: b.rule.id };
   };
   const sips: SipInput[] = [];
   const feed: string[][] = [];
@@ -86,12 +83,12 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     // A moved SIP was stopped: the feed may still list it (lag), but its money now runs in the "to" fund.
     if (moves.some((m) => sameFund(m.from, aliases))) continue;
     const t = await typed(s.instrumentId, isin.get(s.sipId) ?? null, aliases);
-    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise, ...ruled(s.instrumentId, aliases) });
+    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise, ...ruled(aliases) });
   }
   // A move whose new fund the feed does not show yet: its logged amount stands in until the feed does.
   for (const m of moves.filter((x) => !feed.some((f) => sameFund(f, x.to)))) {
     const t = await typed(m.toInstrumentId, null, m.to);
-    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true, ...ruled(m.toInstrumentId, m.to) });
+    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true, ...ruled(m.to) });
   }
   const actual = await loadActualMix(d);
   const types = Object.keys(FUND_TYPE_LABEL) as FundType[];
@@ -118,7 +115,7 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   c.sips.forEach((s, i) => leave(s.instrumentId, feed[i]!));
   for (const h of leavers.length === 0 ? [] : types.flatMap((t) => actual.byType[t].holdings)) leave(h.instrumentId, await fundAliases(d, h.instrumentId));
   const heldByType = Object.fromEntries(await Promise.all(types.map(async (t) => [t, await Promise.all(actual.byType[t].holdings.map(async (h) => (
-    rules.length === 0 ? h : { ...h, ...ruled(h.instrumentId, await fundAliases(d, h.instrumentId)) })))]))) as Parameters<typeof suggestSips>[0]['heldByType'];
+    rules.length === 0 ? h : { ...h, ...ruled(await fundAliases(d, h.instrumentId)) })))]))) as Parameters<typeof suggestSips>[0]['heldByType'];
   const budgetPaise = await railPaise(d, 'monthly_budget_paise');
   const setAsidePaise = await railPaise(d, 'goal_setaside_monthly_paise');
   const { rows, capped } = capToBudget(neverCut(suggestSips({
@@ -127,11 +124,7 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     heldByType, newFundNames, leaving,
   })), investablePaise(budgetPaise, setAsidePaise));
   return {
-    rows: rows.map((r) => {
-      const ruleId = r.instrumentId === null || !r.reason.startsWith('kept — your') ? undefined : ruleIds.get(r.instrumentId);
-      return ruleId === undefined ? r : { ...r, ruleId };
-    }),
-    capped, budgetPaise, setAsidePaise,
+    rows, capped, budgetPaise, setAsidePaise,
     currentPaise: sips.reduce((a, s) => a + s.amountPaise, 0n),
     suggestedPaise: rows.reduce((a, r) => a + r.suggestedPaise, 0n),
   };
