@@ -28,8 +28,10 @@ export default function Nav() {
   return (
     <>
       <header className="topbar">
-        <span className="brand-mark" aria-hidden="true" />
-        <span className="topbar-title">{pageTitle(path)}</span>
+        <Link href="/" className="topbar-home" aria-label="Sentinel — go to Overview">
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="topbar-title">{pageTitle(path)}</span>
+        </Link>
         <button
           ref={button}
           type="button"

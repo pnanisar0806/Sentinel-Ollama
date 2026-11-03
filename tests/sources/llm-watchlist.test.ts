@@ -29,7 +29,7 @@ const respond = (content: string): typeof fetch =>
 
 describe('project model configuration (owner decision 2026-09-13)', () => {
   it('uses the finance-tuned Ling model for every text job', () => {
-    expect(TEXT_MODEL).toBe('inclusionai/ling-3.0-flash-fin:free');
+    expect(TEXT_MODEL).toBe('inclusionai/ling-3.1-flash');
     expect(DEFAULT_NARRATION_MODEL).toBe(TEXT_MODEL);
   });
 
