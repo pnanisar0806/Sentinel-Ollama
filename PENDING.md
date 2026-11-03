@@ -12,7 +12,7 @@ MEMORY.md; the code map lives in index.md.
   - [ ] Owner to confirm: CAP_PCT measures against the WHOLE portfolio (EPF, bonds, cash, RSU included) — same basis as sizing.
   - [ ] Owner flag: when every US/Next 50 pick is ruled, that money sits on a "no allowed alternative" row (not spread).
   - Deferred minors (next fix wave): see `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` batch C line.
-- [x] **MOBILE PASS SHIPPED 2026-11-03** (spec `2026-11-03-mobile-design.md`): phone top bar + drawer nav, DataTable → cards < 640px, 44px controls, wrap overflow; prod 390px audit follows. Deferred: DataTable role attrs for VoiceOver.
+- [x] **MOBILE PASS SHIPPED 2026-11-03** (spec `2026-11-03-mobile-design.md`): phone top bar + drawer nav, DataTable → cards < 640px, 44px controls, wrap overflow; prod 390px audit 2026-11-03: all 22 pages fit (scrollWidth ≤ viewport) after #8 badge wrap. Screenshots not captured (Chrome CDP screenshot times out) — owner to eyeball on phone. Deferred: DataTable role attrs for VoiceOver.
 - [ ] ~~NEXT: MOBILE PASS (owner-approved 2026-11-02)~~ — app-wide phone layout: nav → top bar + drawer; DataTable →
       stacked cards < 640px; forms/tabs/stats; per-page fixes at 390px; phone screenshots to owner before ship.
       Standing rule: every web change is browser-checked at 390px too.
