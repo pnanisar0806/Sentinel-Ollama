@@ -65,3 +65,8 @@
   .notyet { padding: 18px 16px; }
   .notyet-actions .btn { width: 100%; justify-content: center; }
 }
+
+/* A long badge (e.g. "reversed on …: <reason>" on the /log timeline) wraps instead of widening the page. */
+@media (max-width: 900px) {
+  .badge { white-space: normal; max-width: 100%; overflow-wrap: anywhere; height: auto; }
+}
