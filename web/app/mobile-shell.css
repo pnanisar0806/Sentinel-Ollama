@@ -113,3 +113,8 @@
 
 /* Body scroll lock while the drawer is open. */
 html:has(.drawer[open]) { overflow: hidden; }
+
+/* `*::before/::after` in the global reduced-motion rule does not match ::backdrop. */
+@media (prefers-reduced-motion: reduce) {
+  .drawer::backdrop { transition: none; }
+}

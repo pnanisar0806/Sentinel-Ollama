@@ -21,7 +21,7 @@
   .timeline li > * { min-width: 0; }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 639.98px) {
   /* Forms: one column, full width. */
   .form-row,
   .control-form { grid-template-columns: minmax(0, 1fr); max-width: none; }

@@ -87,7 +87,7 @@
   .bento > .span-3:has(> .stat) { grid-column: span 6; }
   .stat { padding: 14px; }
   .stat-label { font-size: 10.5px; letter-spacing: 0.08em; margin-bottom: 6px; }
-  .stat-value { font-size: 20px; overflow-wrap: anywhere; }
+  .stat-value { font-size: clamp(16px, 5vw, 20px); }
 
   .notice { width: 100%; box-sizing: border-box; }
   .ips-text { padding: 14px; }
@@ -98,4 +98,13 @@
 @media (max-width: 359.98px) {
   .stats, .stat-grid { grid-template-columns: minmax(0, 1fr); }
   .bento > .span-3:has(> .stat) { grid-column: span 12; }
+}
+
+/* Landscape phones and small tablets (640–900px): tables are still tables, so a wide one scrolls inside its card instead of widening the page. */
+@media (min-width: 640px) and (max-width: 900px) {
+  .card:has(> .table) { overflow-x: auto; }
+}
+/* A hidden empty first cell must not leave a divider above the card's first visible row. */
+@media (max-width: 639.98px) {
+  .table td:first-child:empty + td { border-top: none; }
 }
