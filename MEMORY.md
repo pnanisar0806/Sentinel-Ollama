@@ -599,6 +599,20 @@ Two structural ones worth holding in mind: **T15 never wires the OAuth INDmoney 
 
 ## Owner decisions (do not re-litigate)
 
+- **Batch C holding rules (2026-10-31/11-02).** Four kinds per holding: NO_ADD, HOLD_UNTIL (date, IST), NO_REBUY,
+  CAP_PCT (bps of the WHOLE portfolio = sum of all positions, same as sizing). Matched by `fundAliases`/`sameFund`.
+  `ruleBlock` returns the first UNWAIVED breaking rule. Money a rule refuses is spread over other eligible funds.
+  Allow once = `holding_rule_exceptions` scoped to an IST month OR a lump sum, never both; a month exception never
+  covers a lump sum. Enforced in gateRecommendation (every leg, suppressed_by HOLDING_RULE), checkRails (order's
+  IST month), sizeCandidates (via `ruleCheck` closure — sizing.ts must not import holding-rules, advisor firewall),
+  SIP suggestions, switch check, index picks, exits (heldByRule), lump sizing. HOLD_UNTIL never hides red-flag
+  evidence; it only stops a sell recommendation.
+- **Batch C life events.** SALARY_CHANGE, JOB_LOSS, NEW_DEPENDENT, RETIREMENT_AGE, MEDICAL_EXPENSE (+ ENDED);
+  WINDFALL is refused — it is Money received. Events never change a number: they raise review lines (rail →
+  closes on an unrefused rail proposal after the event; constant → Still right / Needs changing (waits for a code
+  change); goal → web only). Stop-events (job loss ≥ 3 months, medical > ₹30L, not ENDED) only FLAG that pausing
+  SIPs is permitted. Owner is already married — no marriage event.
+
 - **EPF: passive, not a target (decided 2026-08-23).** The ₹13.54L is mandatory ServiceNow
   payroll EPF and ServiceNow keeps contributing. The owner adds **nothing further** — no VPF,
   no FDs. It stays in net worth and counts as DEBT per PRD §3.3 ("EPF counts as debt-like"),

@@ -256,7 +256,7 @@ describe('FR-12 caps', () => {
     it('a fund, ETF or gold top-up recommended a month ago is allowed', async () => {
       for (const id of ['MF:TOPUP', 'NSE:TOPUPETF', 'NSE:TOPUPGOLD']) {
         expect((await persistRecommendation(db, topUp(id, '2026-08-01'))).suppressed).toBe(false);
-        expect(await gateRecommendation(db, topUp(id, '2026-09-01'))).toEqual({ allowed: true, reason: null });
+        expect(await gateRecommendation(db, topUp(id, '2026-09-01'))).toEqual({ allowed: true, reason: null, by: null, waived: [] });
       }
       // A switch into a fund is not a top-up: the hold still applies to it.
       const sw = buildRecommendation({ kind: 'mf_switch', createdOn: '2026-09-01', primary: leg({ intent: 'switch', instrumentId: 'MF:TOPUP' }) });

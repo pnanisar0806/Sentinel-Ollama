@@ -2,6 +2,7 @@ import type { Db } from '../db/client.js';
 import { chooseIndexFund, loadIndexFundRows, type IndexFundType } from '../sources/index-funds.js';
 import { LTCG_EXEMPTION_PER_FY } from './cleanup.js';
 import { fundAliases, sameFund, typeOf } from './fund-mix.js';
+import { loadActiveHoldingRules, ruleBlock, ruleLabel, type HoldingRule } from './holding-rules.js';
 import { indexChallenger } from './index-switch.js';
 import { loadMfMetadata } from './mf-metadata.js';
 import { heldFunds } from './mf-ranking.js';
@@ -9,7 +10,7 @@ import { evaluateSwitches, type SwitchCandidate } from './mf-switch.js';
 import { universeInstrumentId } from './mf-universe.js';
 import { loadPositions } from './networth.js';
 import { loadActiveSipMoves } from './owner-log.js';
-import { loadSipCommitment, sipUnknownReason } from './sips.js';
+import { istMonth, loadSipCommitment, sipUnknownReason } from './sips.js';
 
 /**
  * Fund switch spec §4: two answers per held fund — one for its SIP (new money, no tax) and
@@ -28,13 +29,21 @@ export type SipAnswer =
 export type UnitsAnswer =
   | { kind: 'keep'; why: string }
   | { kind: 'move'; toId: string; toName: string; why: string; valuePaise: bigint; investedPaise: bigint | null; gainPaise: bigint | null };
-export interface FundMove { instrumentId: string; name: string; category: string; isIndex: boolean; sip: SipAnswer; units: UnitsAnswer }
+/** `ruleNote`: a holding rule changed this fund's answers (batch C) — for the web's Allow once. */
+export interface FundMove { instrumentId: string; name: string; category: string; isIndex: boolean; sip: SipAnswer; units: UnitsAnswer; ruleNote?: { ruleId: string; text: string } }
 
 /** Index funds are compared only with funds tracking the same index (§4.4), on cost. */
 const INDEX_TYPES: ReadonlySet<string> = new Set<IndexFundType>(['NIFTY50', 'NEXT50', 'US']);
 
+/**
+ * Batch C: a `HOLD_UNTIL` rule on the held fund keeps its units (the SIP answer is unaffected —
+ * moving a SIP sells nothing). A destination a rule refuses new money is skipped for the next
+ * eligible pick (index: the chooser's top, then its alternatives; active: the one challenger);
+ * none left → both answers keep, naming the rule. A waived rule (an exception) allows.
+ */
 export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: FundMove[]; ltcgExemptionPaise: bigint }> {
-  const positions = (await loadPositions(db)).filter((p) => p.kind === 'MF');
+  const all = await loadPositions(db);
+  const positions = all.filter((p) => p.kind === 'MF');
   const held = await heldFunds(db, positions); // one per position, same order
 
   // One fund per instrument (a fund held in two accounts is one holding). Invested is
@@ -65,6 +74,20 @@ export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: Fund
     amountPaise: s.amountPaise, aliases: await fundAliases(db, s.instrumentId, isinOf.get(s.sipId) ?? null) })));
   const moved = await Promise.all((await loadActiveSipMoves(db)).map(async (m) => ({ m, aliases: await fundAliases(db, m.fromInstrumentId) })));
 
+  const rules = await loadActiveHoldingRules(db, asOf);
+  const month = istMonth(asOf);
+  // CAP_PCT and NO_REBUY read what is held: every position, matched by aliases (as the gate's portfolio total).
+  const portfolioPaise = all.reduce((a, p) => a + p.valuePaise, 0n);
+  const heldAliases = rules.length === 0 ? [] : await Promise.all(all.map(async (p) => ({ v: p.valuePaise, aliases: await fundAliases(db, p.instrumentId) })));
+  const buyRefused = async (id: string): Promise<HoldingRule | null> => {
+    if (rules.length === 0) return null;
+    const aliases = await fundAliases(db, id);
+    const heldPaise = heldAliases.filter((h) => sameFund(h.aliases, aliases)).reduce((a, h) => a + h.v, 0n);
+    const b = ruleBlock(rules, { aliases, action: 'BUY', amountPaise: null, heldPaise, portfolioPaise, month, lumpSumId: null });
+    return b !== null && b.waivedBy === null ? b.rule : null;
+  };
+  const ruleText = (r: HoldingRule, name: string) => `your ${ruleLabel(r)} rule on ${name}`;
+
   const index = (await loadIndexFundRows(db)).rows;
   const metadata = await loadMfMetadata(db);
   let switches: SwitchCandidate[] | null = null;
@@ -75,20 +98,45 @@ export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: Fund
     const isIndex = typing !== null && INDEX_TYPES.has(typing.type);
     let to: { id: string; name: string } | null;
     let why: string;
+    let ruleNote: { ruleId: string; text: string } | undefined;
     if (isIndex) {
       const indId = id.startsWith('IND:') ? id : null;
       const own = indId === null ? undefined : index.find((r) => r.indmoneyFundId === indId.slice(4));
       const expenseRatioBps = own !== undefined ? own.expenseRatioBps
         : (metadata.get(id) ?? metadata.get(h.navInstrumentId))?.expenseRatioBps ?? null;
-      const r = indexChallenger({ indmoneyFundId: indId, expenseRatioBps }, chooseIndexFund(index, typing.type as IndexFundType));
+      const choice = chooseIndexFund(index, typing.type as IndexFundType);
+      const held = { indmoneyFundId: indId, expenseRatioBps };
+      const r = indexChallenger(held, choice);
       // A ranked challenger is always a verified AMFI Direct Growth scheme (`chooseIndexFund`).
       to = r.challenger && { id: universeInstrumentId(r.challenger.amfiSchemeCode!), name: r.challenger.name };
       why = r.reason;
+      const refused = to && await buyRefused(to.id);
+      if (to && refused) {
+        const text = ruleText(refused, to.name);
+        to = null;
+        why = `keep — no allowed alternative (${text})`;
+        for (const alt of choice.alternatives) {
+          const a = indexChallenger(held, { ...choice, top: alt });
+          const altId = a.challenger && universeInstrumentId(a.challenger.amfiSchemeCode!);
+          if (altId && !(await buyRefused(altId))) {
+            to = { id: altId, name: a.challenger!.name };
+            why = `${a.reason}; ${r.challenger!.name} skipped — ${text}`;
+            break;
+          }
+        }
+        ruleNote = { ruleId: refused.id, text: why };
+      }
     } else {
       switches ??= await evaluateSwitches(db, asOf.slice(0, 10));
       const s = switches.find((x) => x.heldInstrumentId === id);
       to = !s || s.challengerId === null ? null : { id: s.challengerId, name: s.challengerName ?? s.challengerId };
       why = s?.reason ?? 'not in the switch check';
+      const refused = to && await buyRefused(to.id);
+      if (to && refused) {
+        why = `keep — no allowed alternative (${ruleText(refused, to.name)})`;
+        to = null;
+        ruleNote = { ruleId: refused.id, text: why };
+      }
     }
 
     const own = await fundAliases(db, id);
@@ -100,11 +148,16 @@ export async function loadFundMoves(db: Db, asOf: string): Promise<{ moves: Fund
       : amountPaise === undefined ? { kind: 'none' }
       : to ? { kind: 'move', amountPaise, toId: to.id, toName: to.name, why }
       : { kind: 'keep', amountPaise };
-    const units: UnitsAnswer = to
-      ? { kind: 'move', toId: to.id, toName: to.name, why, valuePaise, investedPaise,
+    const hold = rules.length === 0 ? null
+      : ruleBlock(rules, { aliases: own, action: 'SELL', amountPaise: valuePaise, heldPaise: valuePaise, portfolioPaise, month, lumpSumId: null });
+    const holdWhy = hold !== null && hold.waivedBy === null ? `keep — your ${ruleLabel(hold.rule)} rule` : null;
+    // The hold rule decides the units answer, so it is the one Allow once would waive.
+    if (holdWhy !== null) ruleNote = { ruleId: hold!.rule.id, text: holdWhy };
+    const units: UnitsAnswer = holdWhy !== null ? { kind: 'keep', why: holdWhy }
+      : to ? { kind: 'move', toId: to.id, toName: to.name, why, valuePaise, investedPaise,
           gainPaise: investedPaise === null ? null : valuePaise - investedPaise }
       : { kind: 'keep', why };
-    moves.push({ instrumentId: id, name: h.name, category: h.category ?? 'uncategorised', isIndex, sip, units });
+    moves.push({ instrumentId: id, name: h.name, category: h.category ?? 'uncategorised', isIndex, sip, units, ...(ruleNote ? { ruleNote } : {}) });
   }
   return { moves, ltcgExemptionPaise: LTCG_EXEMPTION_PER_FY };
 }

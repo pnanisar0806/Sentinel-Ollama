@@ -8,6 +8,7 @@ import { loadSizingInput } from '../domain/sizing-input.js';
 import { sizeCandidates } from '../domain/sizing.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
 import { monthlySipBlock } from '../domain/sip-advice.js';
+import { stopEventsInForce } from '../domain/life-events.js';
 import { openDb, type Db } from '../db/client.js';
 import { runMigrations } from '../db/migrate.js';
 import { loadEnv, type Purpose } from '../config/env.js';
@@ -211,6 +212,19 @@ Lump sum ${remaining} (${lump.from}): ${r.decision}. Review it on the Advisor pa
 }
 
 /**
+ * Batch C: one line per IPS stop-event in force (a flag, never an action). '' when none, or on
+ * any failure — logged; the weekly report never fails for this.
+ */
+export async function stopEventLines(db: Db, generatedAt: string): Promise<string> {
+  try {
+    return (await stopEventsInForce(db, generatedAt)).map((s) => `\n\n${s.text}`).join('');
+  } catch (error) {
+    console.error(`stop-event check failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
+}
+
+/**
  * Has a weekly report already been delivered for this business date?
  *
  * GitHub Actions treats `schedule` as best-effort and drops runs under load — the
@@ -256,7 +270,9 @@ if (isMainModule(import.meta.url)) {
   const lumpLines = escapeMarkdown(await lumpSumAdvice(db, asOf, input.generatedAt,
     { apiKey: process.env.LLM_API_KEY, model: process.env.WEEKLY_LLM_MODEL }));
   // Batch B §5: the monthly SIP block (first weekly report of the month). Escaped whole: it carries fund names and no markdown of its own.
-  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt)) + adviceLine + lumpLines;
+  // Batch C: IPS stop-events in force, right after the SIP block they concern. Escaped: plain text.
+  const text = composeReport(input) + escapeMarkdown(await monthlySipBlock(db, asOf, input.generatedAt))
+    + escapeMarkdown(await stopEventLines(db, input.generatedAt)) + adviceLine + lumpLines;
 
   const digest = await buildDigestInput(db, input.generatedAt);
 

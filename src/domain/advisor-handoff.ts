@@ -3,6 +3,7 @@ import { decideProposal, loadProposals } from '../advisor/proposals.js';
 import { buildRecommendation, persistRecommendation, type RecLeg } from './recommendations.js';
 import { draftPendingOrders } from './order-drafting.js';
 import { loadExitCandidates } from './sell-triggers.js';
+import { ruleLabel } from './holding-rules.js';
 import { promoteExitCandidate } from './exit-promotion.js';
 import { TRANCHE_USED, type Candidate } from './sizing.js';
 import { snapshotBenchmark } from './scoring.js';
@@ -42,8 +43,12 @@ export async function signAdvice(
   if (decision !== 'BUY' && decision !== 'SELL') throw new Error(`advice ${proposalId} is ${decision}: nothing to sign`);
 
   if (decision === 'SELL') {
-    const exit = (await loadExitCandidates(db, createdOn.slice(0, 7))).find((e) => e.instrumentId === d['instrumentId']);
+    const exit = (await loadExitCandidates(db, createdOn.slice(0, 7), now.toISOString())).find((e) => e.instrumentId === d['instrumentId']);
     if (!exit) throw new Error(`the exit for ${String(d['instrumentId'])} is no longer a candidate this month`);
+    // Batch C: the owner's hold-until rule wins; the exit stays a warning, never a recommendation.
+    if (exit.heldByRule) {
+      throw new Error(`not signed: withheld — your ${ruleLabel({ kind: 'HOLD_UNTIL', untilOn: exit.heldByRule.untilOn, capBps: null })} rule on ${exit.instrumentId}`);
+    }
     const r = await promoteExitCandidate(db, exit, createdOn);
     if (r.id === null) throw new Error(`not signed: ${r.reason}`);
     await draftPendingOrders(db, now);

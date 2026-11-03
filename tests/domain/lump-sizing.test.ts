@@ -132,7 +132,7 @@ describe('loadLumpSizingInput + sizeLumpSum', () => {
 
 describe('sizeLumpSum (pure)', () => {
   const input = (over: Partial<SizingInput> = {}): LumpSizingInput => ({
-    lumpSumId: '7', remainingPaise: LUMP, fundTotalPaise: 100_000_000n, typeValuePaise: {}, newFunds: [], gold: null,
+    lumpSumId: '7', remainingPaise: LUMP, fundTotalPaise: 100_000_000n, typeValuePaise: {}, newFunds: [], gold: null, rules: [], month: '2026-10', aliases: {}, held: {},
     sizing: {
       asOf: AS_OF, tacticalBudgetPaise: 0n, envelopeReason: null, maxOrderPaise: 10_000_000n, cashAvailablePaise: 20_000_000n,
       reservedPaise: 0n, portfolioPaise: 1_000_000_000n, singleStockCapPct: 10, holdings: [],

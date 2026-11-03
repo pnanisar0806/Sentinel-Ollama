@@ -5,6 +5,9 @@ import { IPS_V1_TEXT, getIpsClauseIndex } from './ips.js';
 import type { FalsificationCondition } from './sell-triggers.js';
 import type { Redemption } from './redemptions.js';
 import { MIN_HOLD_MONTHS, isFundTopUp, lastRecommendedOn, monthsBetween } from './repeat-buy-hold.js';
+import { loadActiveHoldingRules, ruleBlock } from './holding-rules.js';
+import { fundAliases, sameFund } from './fund-mix.js';
+import { loadPositions } from './networth.js';
 
 /**
  * FR-11 / FR-12 recommendation objects, and FR-55 paper mode.
@@ -267,6 +270,40 @@ export function announceMaturity(
 interface GateResult {
   allowed: boolean;
   reason: string | null;
+  by: 'FR-12' | 'HOLDING_RULE' | null;
+  /** Rule exception ids this allowance relied on. */
+  waived: string[];
+}
+
+/**
+ * Owner holding rules (batch C) for one leg: BUY is a buy, SELL/TRIM/REDEEM a sell; a leg with
+ * no instrument or any other action moves no money in or out of a fund. Rules and positions
+ * load once per checker. Held is every position on the same fund (aliases); the portfolio
+ * total is null with no positions, which a cap rule reads as "unknown" and refuses.
+ */
+export async function holdingRuleChecker(db: Db): Promise<
+  (leg: Pick<RecLeg, 'instrumentId' | 'action' | 'amountPaise'>, month: string, lumpSumId: string | null) => Promise<ReturnType<typeof ruleBlock>>
+> {
+  const rules = await loadActiveHoldingRules(db, new Date().toISOString());
+  let positions: Promise<{ aliases: string[]; valuePaise: bigint }[]> | null = null;
+  return async (leg, month, lumpSumId) => {
+    const action = leg.action === 'BUY' ? 'BUY' : ['SELL', 'TRIM', 'REDEEM'].includes(leg.action) ? 'SELL' : null;
+    if (rules.length === 0 || leg.instrumentId === null || action === null) return null;
+    const aliases = await fundAliases(db, leg.instrumentId);
+    if (!rules.some((r) => sameFund(r.aliases, aliases))) return null;
+    positions ??= loadPositions(db).then((ps) => Promise.all(ps.map(async (p) =>
+      ({ aliases: await fundAliases(db, p.instrumentId), valuePaise: p.valuePaise as bigint }))));
+    const ps = await positions;
+    return ruleBlock(rules, {
+      aliases,
+      action,
+      amountPaise: leg.amountPaise === null ? null : BigInt(leg.amountPaise),
+      heldPaise: ps.filter((p) => sameFund(p.aliases, aliases)).reduce((s, p) => s + p.valuePaise, 0n),
+      portfolioPaise: ps.length === 0 ? null : ps.reduce((s, p) => s + p.valuePaise, 0n),
+      month,
+      lumpSumId,
+    });
+  };
 }
 
 const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
@@ -306,6 +343,8 @@ export async function gateRecommendation(
     return {
       allowed: false,
       reason: `FR-12: ${month} already carries ${n} recommendations, the cap is ${MAX_RECS_PER_MONTH}`,
+      by: 'FR-12',
+      waived: [],
     };
   }
 
@@ -321,16 +360,28 @@ export async function gateRecommendation(
             reason:
               `FR-12: ${rec.primary.instrumentId} was last recommended on ${priorIso}, ` +
               `${months} months ago — inside the ${MIN_HOLD_MONTHS}-month hold and no override event was given`,
+            by: 'FR-12',
+            waived: [],
           };
         }
         if (!OVERRIDE_EVENTS.includes(opts.override)) {
-          return { allowed: false, reason: `FR-12: '${opts.override}' is not an override event` };
+          return { allowed: false, reason: `FR-12: '${opts.override}' is not an override event`, by: 'FR-12', waived: [] };
         }
       }
     }
   }
 
-  return { allowed: true, reason: null };
+  // Owner holding rules bind every leg, not just the primary: an alternate the owner could pick
+  // must not be one their own rule forbids. Checked after the caps, so a cap refusal stays FR-12.
+  const check = await holdingRuleChecker(db);
+  const waived: string[] = [];
+  for (const leg of [rec.primary, ...rec.alternates]) {
+    const block = await check(leg, month, opts.lumpSumId ?? null);
+    if (block === null) continue;
+    if (block.waivedBy === null) return { allowed: false, reason: block.reason, by: 'HOLDING_RULE', waived: [] };
+    if (!waived.includes(block.waivedBy)) waived.push(block.waivedBy);
+  }
+  return { allowed: true, reason: null, by: null, waived };
 }
 
 export interface PersistResult {
@@ -377,9 +428,9 @@ export async function persistRecommendation(
   if (!gate.allowed) {
     await db.query(
       `insert into suppressed_actions (logged_on, action, reason, suppressed_by)
-       values ($1, $2, $3, 'FR-12')
+       values ($1, $2, $3, $4)
        on conflict (logged_on, action) do nothing`,
-      [rec.createdOn, action, gate.reason],
+      [rec.createdOn, action, gate.reason, gate.by],
     );
     return { id: null, suppressed: true, reason: gate.reason };
   }
@@ -401,7 +452,7 @@ export async function persistRecommendation(
       JSON.stringify(rec.primary),
       JSON.stringify(rec.alternates),
       JSON.stringify(clauses),
-      JSON.stringify({ ...rec.engineEvidence, paperMode: rec.paperMode, override: opts.override ?? null }),
+      JSON.stringify({ ...rec.engineEvidence, paperMode: rec.paperMode, override: opts.override ?? null, waivedRules: gate.waived }),
       lumpSumId,
     ],
   );

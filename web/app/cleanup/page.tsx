@@ -43,6 +43,7 @@ export default async function CleanupPage() {
     ips: c.ipsClauseRefs.join(', '),
     rawTrigger: c.trigger,
     heldByIps: c.blockedByMinimumHold,
+    heldByRule: c.heldByRule !== null,
   }));
 
   const redemptionRows = redemptions.map((r) => ({
@@ -247,6 +248,7 @@ export default async function CleanupPage() {
                         instrumentId={r.instrument}
                         trigger={r.rawTrigger}
                         blocked={r.heldByIps}
+                        heldByRule={r.heldByRule}
                       />
                     ),
                   },

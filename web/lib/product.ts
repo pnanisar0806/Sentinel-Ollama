@@ -36,6 +36,22 @@ export const AREAS: Area[] = [
     missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'Sale and redemption proceeds do not become a lump sum by themselves (log them as money received)', 'No capital-gains tax on a logged sale'],
   },
   {
+    slug: 'life-events',
+    name: 'Life events',
+    stage: 'live',
+    what: 'A change in the owner’s life (salary, job loss, new dependent, windfall, retirement age, major medical expense) leaves a list of the numbers it may have made stale, until each is reviewed.',
+    works: ['“Life event” tab on /log, fields per kind; a windfall hands off to Money received, prefilled', 'Review lines on the Overview with today’s value: Still right, or Needs changing with the new value', 'Rail lines (budget, goal set-aside) change only through the signed editor on Cleanup, and close when a change is proposed', '“Waiting on a code change” list on the Overview for constants that need a new value', 'IPS stop-events (job loss over 3 months, medical expense over ₹30,00,000) shown on the Overview and in the weekly report: pausing SIPs is permitted, never automatic', 'Job loss / medical expense marked Ended on /log; every event reversible on the timeline'],
+    missing: ['A constant marked “needs changing” waits for a code change; the app never edits it', 'No emergency-fund runway figure (nothing computes one)'],
+  },
+  {
+    slug: 'holding-rules',
+    name: 'Holding rules',
+    stage: 'live',
+    what: 'A standing instruction on one holding — no new money, hold until a date, never buy again, or cap its weight — that advice must respect, with a one-off "Allow once" where a rule blocked something.',
+    works: ['Add rule on Holdings (stocks, ETFs, funds, gold) and on the Mutual funds ranking; active rules shown as badges', 'Suggested SIPs, the switch check, lump-sum splits and the monthly advisor’s candidates (buys and exit sales) respect the rules, and the signing gate checks again; refused money goes to the other funds', 'Allow once on a ruled Suggested SIP row, a ruled switch-check row and a monthly candidate withheld on /advisor (this IST month), and on a withheld lump-sum part (that lump sum), note required; the rule stays on', '“Withheld by your rules” on Recommendations (last 60 days), and “your rule waived by you” on a recommendation that relied on an Allow once', 'Exit signals a hold-until rule holds back shown on Holdings as a warning with their evidence, never promoted', '“Holding rules” tab on /log: End now on a rule, Undo on an Allow once, each a reversal with a reason'],
+    missing: ['Rules and Allow onces are not on the /log timeline; they are listed only under Holding rules', 'A withheld lump-sum part is re-sized live on /advisor; the stored advice keeps only the reason text', 'No Allow once on the Recommendations page: a monthly recommendation a rule refused is listed there, but an exception for it is given on /funds or /advisor where the ruled item shows'],
+  },
+  {
     slug: 'overview',
     name: 'Net worth & day-over-day',
     stage: 'live',

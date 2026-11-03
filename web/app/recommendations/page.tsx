@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getInstrumentKinds, getInstrumentNames, getRecommendations, type RecommendationRow } from '../../lib/data';
+import { getInstrumentKinds, getInstrumentNames, getRecommendations, getRuleSuppressions, type RecommendationRow } from '../../lib/data';
 import { Badge, Card, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import { humanize, killCondition, kindLabel, sentence, type Names } from '../../lib/plain';
@@ -34,6 +34,12 @@ function Option({ leg, label, names, kinds, primary }: { leg: RecLeg; label: str
   );
 }
 
+/** Batch C: how many owner exceptions (`engine_evidence.waivedRules`) a stored recommendation relied on. */
+function waivedRules(evidence: unknown): number {
+  const w = evidence !== null && typeof evidence === 'object' ? (evidence as { waivedRules?: unknown }).waivedRules : undefined;
+  return Array.isArray(w) ? w.length : 0;
+}
+
 function Rec({ r, names, kinds }: { r: RecommendationRow; names: Names; kinds: Map<string, string> }) {
   if (typeof r.primary === 'string') {
     return <Card title={`Recommendation #${r.id}`}><Notice tone="amber">This recommendation could not be read: {r.primary}</Notice></Card>;
@@ -49,6 +55,9 @@ function Rec({ r, names, kinds }: { r: RecommendationRow; names: Names; kinds: M
         ? <Notice tone="amber"><strong>Not acted on.</strong> {r.suppressedReason ?? 'No reason was recorded.'}</Notice>
         : null}
       {r.done ? <Notice tone="green"><strong>Done.</strong> {r.done}</Notice> : null}
+      {waivedRules(r.evidence) > 0
+        ? <p style={{ margin: '0 0 8px' }}><Badge tone="indigo">your rule waived by you</Badge> <span className="dim">This relies on {waivedRules(r.evidence) === 1 ? 'an Allow once' : `${waivedRules(r.evidence)} Allow onces`} you gave a holding rule; the rule itself stays on.</span></p>
+        : null}
       <div className="options">
         <Option leg={r.primary} label="What the advisor recommends" names={names} kinds={kinds} primary />
         {alternates.map((leg, i) => <Option key={i} leg={leg} label={`Option ${i + 2}`} names={names} kinds={kinds} />)}
@@ -64,6 +73,7 @@ export default async function RecommendationsPage() {
   const recs = await getRecommendations();
   const names = await getInstrumentNames();
   const kinds = await getInstrumentKinds();
+  const ruleWithheld = await getRuleSuppressions();
   const live = recs.filter((r) => !r.suppressed && r.done === null);
   const done = recs.filter((r) => !r.suppressed && r.done !== null);
   const suppressed = recs.filter((r) => r.suppressed);
@@ -101,6 +111,27 @@ export default async function RecommendationsPage() {
               </>
             )}
           </>
+        )}
+
+      <h2 className="section-title">Withheld by your rules ({ruleWithheld.length})</h2>
+      <p className="dim" style={{ marginTop: 0 }}>
+        What the advisor wanted and one of your holding rules refused, last 60 days. A rule-breaking alternative withholds the whole
+        recommendation; nothing is swapped in. Rules are added on <Link href="/holdings">Holdings</Link> and <Link href="/funds">Mutual funds</Link>, and ended on <Link href="/log">Log what I did</Link> → Holding rules.
+      </p>
+      {ruleWithheld.length === 0
+        ? <Notice>Nothing withheld by a rule in the last 60 days — either no rule is on, or none refused a recommendation. A refusal is recorded here when a recommendation is about to be stored: when you sign monthly or lump-sum advice on <Link href="/advisor">Advisor</Link>, promote an exit on <Link href="/cleanup">Cleanup</Link>, or the cleanup job drafts one. Advice a rule withholds before you sign is shown on Advisor instead.</Notice>
+        : (
+          <Card title="Refused by a rule">
+            <ul className="timeline">
+              {ruleWithheld.map((s) => (
+                <li key={`${s.on}:${s.action}`}>
+                  <span className="tnum dim">{s.on}</span>
+                  <span><Badge tone="amber">withheld</Badge></span>
+                  <span>{s.reason}<br /><span className="mono dim" style={{ overflowWrap: 'anywhere' }}>{s.action}</span></span>
+                </li>
+              ))}
+            </ul>
+          </Card>
         )}
     </>
   );

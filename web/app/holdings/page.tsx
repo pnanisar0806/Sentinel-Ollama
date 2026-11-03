@@ -1,11 +1,20 @@
-import { getHoldings } from '../../lib/data';
+import { getHoldings, getRuleHeldExits, getRulesFor } from '../../lib/data';
 import type { Paise } from '../../../src/money/paise.js';
-import { Badge, ClassChip, DataTable, Money, Notice, PageHead, Stat } from '../../lib/ui';
+import { ruleLabel } from '../../../src/domain/holding-rules.js';
+import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead, Stat } from '../../lib/ui';
+import { RuleButton } from '../rule-button';
 
 export const dynamic = 'force-dynamic';
 
+/** What a holding rule can sensibly bind: something bought and sold, not a bond, deposit or cash. */
+const RULEABLE = ['EQUITY', 'ETF', 'MF', 'GOLD'];
+
 export default async function HoldingsPage() {
   const { positions, blocked, businessDate } = await getHoldings();
+  const rules = await getRulesFor(positions.filter((p) => RULEABLE.includes(p.kind)).map((p) => p.instrumentId));
+  const heldExits = await getRuleHeldExits();
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const nameOf = new Map(positions.map((p) => [p.instrumentId, p.name]));
 
   const rows = positions.map((p) => ({
     key: p.instrumentId,
@@ -36,6 +45,19 @@ export default async function HoldingsPage() {
         <div className="span-3"><Stat label="Cost basis unknown" value={rows.filter((r) => r.avgCostPaise === null).length} sub="shown as unknown, never ₹0" accent="amber" /></div>
         <div className="span-3"><Stat label="Blocked by stale data" value={rows.filter((r) => r.blocked).length} accent={rows.some((r) => r.blocked) ? 'red' : 'green'} /></div>
       </div>
+      {heldExits.length > 0 && (
+        <Card title="Exit signals your rules hold back" aside="not promoted to a recommendation while the rule stands">
+          <ul className="notyet-points">
+            {heldExits.map((e) => (
+              <li key={`${e.instrumentId}:${e.trigger}`}>
+                <Badge tone="amber">exit signal — held by your rule</Badge>{' '}
+                <strong>{nameOf.get(e.instrumentId) ?? e.instrumentId}</strong> · {e.trigger.replace('-', ' ')} ({e.month}): {e.evidence}.{' '}
+                <span className="dim">Your hold runs until {e.heldByRule!.untilOn}. To act on it sooner, end the rule on Log what I did → Holding rules.</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {rows.length === 0
         ? <Notice>No positions loaded.</Notice>
         : (
@@ -51,6 +73,13 @@ export default async function HoldingsPage() {
                 { label: 'Cur', value: (r) => r.currency },
                 { label: 'Avg cost', value: (r) => (r.avgCostPaise === null ? <span className="dim">unknown</span> : <Money p={r.avgCostPaise} />) },
                 { label: 'Value', align: 'right', value: (r) => <Money p={r.valuePaise} /> },
+                {
+                  label: 'Rule',
+                  value: (r) => (!RULEABLE.includes(r.kind) ? <span className="dim">—</span> : <>
+                    {(rules.get(r.instrumentId) ?? []).map((x) => <Badge key={x.id} tone="indigo">{ruleLabel(x)}</Badge>)}
+                    <RuleButton instrumentId={r.instrumentId} name={r.name} today={today} />
+                  </>),
+                },
                 { label: 'As of', value: (r) => <span className="dim">{r.asOf}</span> },
                 { label: 'Source', value: (r) => <span className="dim">{r.source}</span> },
               ]}

@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../../src/money/paise.js';
-import { getLog, getSipMoveOptions } from '../../lib/data';
+import { getEndableLifeEvents, getHoldingRules, getLog, getSipMoveOptions } from '../../lib/data';
+import { ruleLabel } from '../../../src/domain/holding-rules.js';
+import { monthLabel } from '../../lib/funds';
 import { canReverse } from '../../lib/log';
 import { Badge, Card, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
@@ -11,6 +13,7 @@ export const dynamic = 'force-dynamic';
 const KIND_TONE: Record<string, Tone> = {
   Goal: 'green', Purchase: 'indigo', Bond: 'amber', Milestone: 'indigo', Note: 'gray', RSU: 'indigo',
   Earmark: 'green', Spend: 'amber', Sale: 'indigo', SIP: 'indigo', 'SIP move': 'indigo', 'Lump sum': 'green',
+  'Life event': 'amber',
 };
 
 const inr = (p: bigint) => formatInr(p as Paise);
@@ -18,7 +21,18 @@ const inr = (p: bigint) => formatInr(p as Paise);
 export default async function LogPage() {
   const { timeline, buckets, openMilestones, bonds, holdings, sellable, pots, spLabels, idleBankCashPaise, openLumpSums } = await getLog();
   const sipMoves = await getSipMoveOptions();
+  const lifeEvents = (await getEndableLifeEvents()).map((e) => ({
+    id: e.id, on: e.on, label: e.kind === 'JOB_LOSS' ? 'Job loss / career break' : `Medical expense ${e.amountPaise === null ? '' : inr(e.amountPaise)}`.trim(),
+  }));
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const lumpFrom = new Map(openLumpSums.map((l) => [l.id, l.from]));
+  const rules = (await getHoldingRules()).map((r) => ({
+    id: r.id, name: r.name, label: ruleLabel(r), note: r.note, on: r.on,
+    exceptions: r.exceptions.map((e) => ({
+      id: e.id,
+      scope: e.month !== null ? `for ${monthLabel(e.month)}` : `for the lump sum ${lumpFrom.has(e.lumpSumId!) ? `“${lumpFrom.get(e.lumpSumId!)}”` : '(no money left in it)'}`,
+    })),
+  }));
 
   return (
     <>
@@ -37,6 +51,8 @@ export default async function LogPage() {
               idleCash={idleBankCashPaise === null ? 'unknown' : inr(idleBankCashPaise)}
               sipMoves={sipMoves}
               lumpSums={openLumpSums.map((l) => ({ id: l.id, label: `${l.from} · ${inr(l.remainingPaise)} left` }))}
+              lifeEvents={lifeEvents}
+              rules={rules}
             />
           </Card>
         </div>
@@ -51,6 +67,8 @@ export default async function LogPage() {
               <li>A sale or redemption you made yourself: <em>A sale I made</em>. A fund switch is a sale plus a purchase.</li>
               <li>A monthly SIP moved to another fund in the same category: <em>Move a SIP</em>.</li>
               <li>Money you want invested on top of the month, like bond interest: <em>Money received</em>. A buy paid from it says so under <em>Purchase outside Sentinel</em>.</li>
+              <li>A salary change, job loss, new dependent, retirement-age change or big medical bill: <em>Life event</em>. What it touches is listed on the <Link href="/">Overview</Link> to review.</li>
+              <li>A standing instruction on one holding — no new money, hold until a date, never buy again, a cap: <em>Add rule</em> on <Link href="/holdings">Holdings</Link> or <Link href="/funds">Mutual funds</Link>; end it under <em>Holding rules</em>.</li>
               <li>A wrong entry: <em>Reverse</em> it on the timeline below, then log the right one.</li>
             </ul>
           </Card>

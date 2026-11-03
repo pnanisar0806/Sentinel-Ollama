@@ -45,7 +45,17 @@ export interface SizingInput {
   funds: FundCandidates;
   /** IPS §3.5, of `portfolioPaise` (the base the single-stock cap uses): 35. */
   singleSchemeCapPct: number;
+  /**
+   * Owner holding rules (batch C), built by `ruleChecker` in sizing-input.ts; absent = no rule active.
+   * A closure, not the rules: this module stays free of `holding-rules.ts` (it reaches fund-mix.ts,
+   * which the advisor firewall forbids, and the advisor imports this module's types).
+   */
+  ruleCheck?: RuleCheck;
 }
+
+/** Does an owner rule refuse this? `waiver` is the copy when an exception allows it; null result = no rule breaks. */
+export type RuleCheck = (q: { instrumentId: string; action: 'BUY' | 'SELL'; amountPaise: bigint | null }) =>
+  { reason: string; ruleId: string; waiver: string | null } | null;
 
 export interface Candidate {
   id: string;
@@ -65,6 +75,8 @@ export interface Candidate {
   /** BUY: where it came from. SELL/TRIM: FUND for MF and ETF kinds, STOCK otherwise. */
   vehicle: 'FUND' | 'STOCK';
   fund: { fundType: FundType; actualBps: number; midBps: number; minBps: number; maxBps: number; quality: string } | null;
+  /** The owner holding rule that withheld this candidate (for "Allow once"). */
+  ruleId?: string;
 }
 
 const days = (a: string, b: string): number => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
@@ -106,6 +118,17 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
 
   const withholder = (base: BuyBase) => (reason: string, basis = '') =>
     out.push(withId({ ...base, status: 'WITHHELD', withheldReason: reason, basis }, input.asOf));
+  /**
+   * An owner rule refusing this candidate withholds it (with the rule, for "Allow once") before it
+   * takes any tranche; an exception lets it through with the waiver in its constraints. True = withheld.
+   */
+  const ruled = (base: BuyBase, amountPaise: bigint | null): boolean => {
+    const hit = input.ruleCheck?.({ instrumentId: base.instrumentId, action: base.action === 'BUY' ? 'BUY' : 'SELL', amountPaise }) ?? null;
+    if (hit === null) return false;
+    if (hit.waiver !== null) { base.constraints = [...base.constraints, hit.waiver]; return false; }
+    out.push(withId({ ...base, status: 'WITHHELD', withheldReason: hit.reason, basis: '', ruleId: hit.ruleId }, input.asOf));
+    return true;
+  };
   /** Why this month has no tranche left, or null. */
   const noTranche = (): string | null => {
     if (input.envelopeReason !== null && budget <= 0n) return input.envelopeReason;
@@ -131,6 +154,7 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
   for (const f of [...input.funds.buys].sort(byGap)) {
     const base: BuyBase = { action: 'BUY', instrumentId: f.instrumentId, name: f.name, amountPaise: null, units: null, pricePaise: null, quoteAsOf: null,
       constraints: [], vehicle: 'FUND', fund: { fundType: f.fundType, actualBps: f.actualBps, midBps: f.midBps, minBps: f.minBps, maxBps: f.maxBps, quality: f.quality } };
+    if (ruled(base, cashLeft === null || budget <= 0n ? null : min(budget, cashLeft))) continue;
     const withhold = withholder(base);
     if (cashLeft === null) { withhold('cash available cannot be established'); continue; }
     const blocked = noTranche();
@@ -149,6 +173,8 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
       constraints: [], vehicle: 'STOCK', fund: null };
     const withhold = withholder(base);
     if (wait !== null) { withhold(wait); continue; }
+    const held0 = holding.get(b.instrumentId)?.valuePaise ?? 0n;
+    if (ruled(base, cashLeft === null || budget <= 0n ? null : min(budget, cashLeft, cap - held0))) continue;
     if (cashLeft === null) { withhold('cash available cannot be established'); continue; }
     const blocked = noTranche();
     if (blocked !== null) { withhold(blocked); continue; }
@@ -166,6 +192,7 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
       constraints: h && !h.costKnown ? ['tax on this sale cannot be estimated: cost basis unknown'] : [],
       vehicle: s.kind === 'MF' || s.kind === 'ETF' ? 'FUND' as const : 'STOCK' as const, fund: null };
     const withhold = (reason: string) => out.push(withId({ ...base, status: 'WITHHELD', withheldReason: reason, basis: s.reason }, input.asOf));
+    if (ruled(base, h?.valuePaise ?? null)) continue;
     if (s.blockedByMinimumHold) { withhold('inside the 12-month minimum hold (IPS §3.7)'); continue; }
     if (!h) { withhold('not held'); continue; }
     const wanted = s.action === 'SELL' ? h.valuePaise : min(s.amountPaise ?? h.valuePaise, h.valuePaise);

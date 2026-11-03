@@ -1,4 +1,5 @@
 import type { Db } from '../db/client.js';
+import { formatInr, type Paise } from '../money/paise.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
 import { CAPS } from './allocation.js';
 import { loadMfMetadata } from './mf-metadata.js';
@@ -179,9 +180,12 @@ export interface SipSuggestion {
   currentPaise: bigint; suggestedPaise: bigint; reason: string;
   /** A logged SIP move's new fund the feed does not show yet (fund switch §3). */
   logged: boolean;
+  /** The holding rule that kept this SIP from new money (batch C), for the web's Allow once. */
+  ruleId?: string;
 }
 
-export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint; logged?: boolean }
+/** `ruled`: a holding rule refuses this fund new money (batch C) — the reason, e.g. "your no new money rule on X". */
+export interface SipInput { instrumentId: string; fundName: string; type: FundType | null; topUp: boolean; amountPaise: bigint; logged?: boolean; ruled?: string; ruleId?: string }
 
 const ROUND_PAISE = 10_000n; // ₹100
 const NON_CORE_CAP_BPS = 3_000n;
@@ -198,10 +202,12 @@ const newFundLabel = (t: FundType, names: Partial<Record<FundType, string>>): st
  * LARGE_ACTIVE) capped at 30% with core scaled up. Within a type: pro rata to its top-uppable
  * SIPs, else the largest held top-uppable fund, else a new-fund row. Each row is floored to
  * ₹100; the remainder goes to the largest Nifty 50 row (the anchor).
+ * A `ruled` SIP (batch C, owner decision 1) keeps its amount and its type's money above it goes
+ * to the type's other funds by that same order; a ruled held fund is skipped the same way.
  */
 export function suggestSips(i: {
   sips: SipInput[]; ranges: RangeRow[]; actualBps: Record<FundType, number>;
-  heldByType: Record<FundType, { instrumentId: string; name: string; valuePaise: bigint; topUp: boolean }[]>;
+  heldByType: Record<FundType, { instrumentId: string; name: string; valuePaise: bigint; topUp: boolean; ruled?: string }[]>;
   /** The new fund to open per type, e.g. `chooseIndexFund(...).top.name` for US and NEXT50. */
   newFundNames?: Partial<Record<FundType, string>>;
   /** Held funds the switch check says to leave → the switch pick's name (owner, 2026-10-28). */
@@ -228,6 +234,7 @@ export function suggestSips(i: {
 
   const rows: SipSuggestion[] = [];
   let anchor: SipSuggestion | null = null;
+  let beyond = 0n;
   for (const t of ALL_TYPES) {
     const mine = typed.filter((s) => s.type === t);
     if (weight(t) === 0n) {
@@ -239,10 +246,23 @@ export function suggestSips(i: {
       rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: why, logged: s.logged ?? false });
     }
     const amount = typePaise(t);
-    let to: { instrumentId: string | null; fundName: string; amountPaise: bigint; logged?: boolean }[] = mine.filter((x) => x.topUp && leaving[x.instrumentId] === undefined);
+    const open = mine.filter((x) => x.topUp && leaving[x.instrumentId] === undefined);
+    // A ruled SIP holds on to its pro-rata share up to its amount; the refused rest goes to the others.
+    // Kept above its share (where the re-split would cut it), the excess is outside the total, as `neverCut`.
+    const openPaise = open.reduce((a, s) => a + s.amountPaise, 0n);
+    let rest = amount;
+    for (const s of open.filter((x) => x.ruled !== undefined)) {
+      const share = openPaise === 0n ? 0n : (amount * s.amountPaise) / openPaise;
+      const kept = share < s.amountPaise ? share : s.amountPaise;
+      rest -= kept;
+      // Only a cut is kept beyond the total: the shown amount over the floored share it would have had.
+      if (share < s.amountPaise) beyond += s.amountPaise - (share / ROUND_PAISE) * ROUND_PAISE;
+      rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: s.amountPaise, reason: share > s.amountPaise ? `kept — ${s.ruled}; ${formatInr(((share - s.amountPaise) / 100n) * 100n as Paise)} went to the others` : `kept — ${s.ruled}`, logged: s.logged ?? false, ...(s.ruleId === undefined ? {} : { ruleId: s.ruleId }) });
+    }
+    let to: { instrumentId: string | null; fundName: string; amountPaise: bigint; logged?: boolean }[] = open.filter((x) => x.ruled === undefined);
     if (to.length === 0) {
-      if (amount === 0n) continue;
-      const held = i.heldByType[t].filter((h) => h.topUp && leaving[h.instrumentId] === undefined).sort((a, b) => (b.valuePaise > a.valuePaise ? 1 : b.valuePaise < a.valuePaise ? -1 : 0))[0];
+      if (rest === 0n) continue;
+      const held = i.heldByType[t].filter((h) => h.topUp && h.ruled === undefined && leaving[h.instrumentId] === undefined).sort((a, b) => (b.valuePaise > a.valuePaise ? 1 : b.valuePaise < a.valuePaise ? -1 : 0))[0];
       const pick = i.heldByType[t].map((h) => leaving[h.instrumentId]).find((n) => n !== undefined);
       to = [held ? { instrumentId: held.instrumentId, fundName: held.name, amountPaise: 0n } : { instrumentId: null, fundName: pick ?? newFundLabel(t, i.newFundNames ?? {}), amountPaise: 0n }];
     }
@@ -251,14 +271,14 @@ export function suggestSips(i: {
     const why = `${bpsText(Number((amount * 10_000n) / (total || 1n)))} of SIPs to ${FUND_TYPE_LABEL[t]} `
       + `(midpoint ${bpsText(midBps(r))}, actual ${bpsText(i.actualBps[t])}${capped && isNonCore(t) ? '; non-core capped at 30%' : ''})`;
     for (const s of to) {
-      const share = current === 0n ? amount : (amount * s.amountPaise) / current;
+      const share = current === 0n ? rest : (rest * s.amountPaise) / current;
       const row: SipSuggestion = { fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: (share / ROUND_PAISE) * ROUND_PAISE, reason: why, logged: s.logged ?? false };
       rows.push(row);
       if (t === 'NIFTY50' && (anchor === null || row.currentPaise > anchor.currentPaise)) anchor = row;
     }
   }
   if (anchor !== null) {
-    anchor.suggestedPaise += total - rows.reduce((a, r) => a + r.suggestedPaise, 0n);
+    anchor.suggestedPaise += total + beyond - rows.reduce((a, r) => a + r.suggestedPaise, 0n);
     anchor.reason += '; takes the ₹100 rounding remainder';
   }
   for (const s of i.sips.filter((x) => x.type === null)) {
@@ -474,7 +494,9 @@ export async function loadFundCandidates(db: Db, asOf: string, opts: { upToMax?:
         if (actualBps >= r.maxBps) { out(`at or above max (${bpsText(actualBps)} vs ${bpsText(r.maxBps)})`); continue; }
       } else if (!below(t)) { out(`at or above midpoint (${bpsText(actualBps)} vs ${bpsText(midBps(r))})`); continue; }
       // The /funds switch check (active and index, fund switch §4) is the one verdict on leaving a fund.
-      leaving ??= new Map((await loadFundMoves(db, asOf)).moves.flatMap((f) => (f.units.kind === 'move' ? [[f.instrumentId, f.units.toName] as const] : [])));
+      // The SIP answer too: a hold-until rule (batch C) keeps the units, but the fund still takes no new money.
+      leaving ??= new Map((await loadFundMoves(db, asOf)).moves.flatMap((f) => (f.sip.kind === 'move' ? [[f.instrumentId, f.sip.toName] as const]
+        : f.units.kind === 'move' ? [[f.instrumentId, f.units.toName] as const] : [])));
       const pick = leaving.get(h.instrumentId);
       if (pick !== undefined) { out(`flagged for a switch to ${pick}`); continue; }
       let quality: string;

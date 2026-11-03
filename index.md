@@ -110,7 +110,8 @@ docs/SETUP.md   step-by-step deploy guide (Supabase, Telegram, secrets, workflow
 | `src/domain/report-runs.ts` | `alreadyReportedFor`, `recordReportRun`, `loadReportRuns`, `ReportRunRecord` — the delivered weekly report and what it said (narration, engine bullets, sent text) in the `audit_log` row that already recorded the run. **Lives in `domain` because the web reads it**: importing `jobs/report.ts` pulls in `runMigrations` and `next build` cannot resolve its dynamic `../../migrations` import — **added 2026-09-21** |
 | `src/jobs/cleanup.ts` | CLI entrypoint — `pnpm cleanup`. Generates paper cleanup recommendations (smallcase termination, micro-orphans, thesis-less consolidation, Groww RPOWER manual closure, bond credit review, Sammaan maturity routing, LTCG harvest calendar) and persists as FR-11 paper recommendations. Loads `[]` env (DATABASE_URL only) |
 | `src/jobs/schedule.ts` | CLI entrypoint — `pnpm schedule`. Daily scheduled tasks: expire orders past expiry, resurface deferred orders, record T+2/T+7 advisory reminders. All idempotent via idempotency keys. Loads `[]` env |
-
+| `src/domain/holding-rules.ts` | Batch C: `RuleKind`, `HoldingRule`, `ruleLabel`, `logHoldingRule`, `logRuleException`, `loadActiveHoldingRules(db, now)`, `ruleBlock(rules, q)` (pure; first unwaived breaking rule; `waivedBy` = exception id) |
+| `src/domain/life-events.ts` | Batch C: `logLifeEvent`, `endLifeEvent`, `REVIEW_ITEMS`, `loadReviewLines`, `openReviewLines`, `reviewLine`, `stopEventsInForce`. No goal reads (goal lines: `web/lib/life-events.ts` `goalReviewLines`) |
 
 ## Web app (`web/` — Next.js 15, pulled forward 2026-09-05)
 
@@ -143,6 +144,8 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `web/app/api/import/route.ts` | POST multipart → archive + extract (or `unusable` when `LLM_API_KEY` absent) |
 | `web/app/api/import/[id]/confirm/route.ts` | POST `{indexes?}` → write via existing platform functions + audit |
 | `web/app/api/import/[id]/reject/route.ts` | POST → mark rejected + audit |
+| `web/app/rule-button.tsx`, `web/app/allow-once.tsx`, `web/app/log/rules-panel.tsx`, `web/lib/rules.ts` (`capBps`) | Batch C holding-rule UI |
+| `web/app/log/life-event-form.tsx`, `web/app/review-lines.tsx`, `web/lib/life-events.ts` | Batch C life-event UI (Overview review cards, stop-event notice) |
 
 ## Migrations
 
@@ -163,6 +166,7 @@ platform functions). Details/gotchas in `MEMORY.md § Local web app`.
 | `migrations/0011_fundamentals_as_of.sql` | `fundamentals.as_of` + drops its append-only UPDATE trigger (re-import must be able to correct a row) |
 | `migrations/0013_holiday_special_sessions.sql` | `holidays.is_special_session` — the exchange is OPEN on a day the weekend rule would skip |
 | `migrations/0012_benchmark_evals.sql` | `sentinel_benchmarks_immutable()` — UPDATE allowed on `benchmarks` **only** for the eval columns; the creation snapshot (`benchmark_as_of`, `benchmark_jsonb`) can never be rewritten, DELETE/TRUNCATE still refused. Same shape as `sentinel_lots_immutable` |
+| `migrations/0042_rules_events.sql` | Batch C: `holding_rules`, `holding_rule_exceptions`, `life_events`, `life_event_reviews` — append-only + RLS; `log_reversals` gains holding_rule / holding_rule_exception / life_event |
 
 ## Phase 1 (planned — see `2026-09-05-sentinel-phase-1.md`)
 

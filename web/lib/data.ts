@@ -19,7 +19,7 @@ import { projectVests, type VestEvent } from '../../src/domain/rsu.js';
 import { fetchLiveRsuInputs } from '../../src/sources/rsu-live.js';
 import { ASSUMPTIONS } from '../../src/config/assumptions.js';
 import { listRedemptionsUntil, type Redemption } from '../../src/domain/redemptions.js';
-import { evaluateExits, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
+import { evaluateExits, loadExitCandidates, type ExitCandidate, type ExitState } from '../../src/domain/sell-triggers.js';
 import { loadReportRuns, type ReportRunRecord } from '../../src/domain/report-runs.js';
 import { pendingRailChanges, type PendingRailChange } from '../../src/domain/controls.js';
 import { DEFAULT_OWNER_RAILS } from '../../src/domain/rail-values.js';
@@ -38,10 +38,10 @@ import { loadOpenLumpSums, type LumpSum } from '../../src/domain/lump-sums.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
-import { loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
+import { istMonth, loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
 import {
-  FUND_TYPE_LABEL, loadActualMix, loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
+  FUND_TYPE_LABEL, fundAliases, loadActualMix, sameFund,loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
   type ActualMix, type Finding, type FundCandidates, type FundType, type RangeRow, type SignedMix,
 } from '../../src/domain/fund-mix.js';
 import { loadSipSuggestions, type SipSuggestions } from '../../src/domain/sip-advice.js';
@@ -49,6 +49,12 @@ import { chooseIndexFund, loadIndexFundRows, type IndexFundChoice } from '../../
 import { sipMoveFunds } from '../../src/domain/owner-log.js';
 import { loadUniverse } from '../../src/domain/mf-universe.js';
 import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
+import { loadReviewLines, stopEventsInForce, type ReviewLine } from '../../src/domain/life-events.js';
+import { goalReviewLines } from './life-events';
+import { loadActiveHoldingRules, ruleBlock, type HoldingRule } from '../../src/domain/holding-rules.js';
+import { loadLumpSizingInput, sizeLumpSum } from '../../src/domain/lump-sizing.js';
+import { loadSizingInput } from '../../src/domain/sizing-input.js';
+import { sizeCandidates } from '../../src/domain/sizing.js';
 
 let dbPromise: Promise<Db> | null = null;
 export function db(): Promise<Db> {
@@ -401,16 +407,25 @@ export async function getCleanupCalendar(): Promise<CleanupCalendarData> {
        from exit_candidates group by 1, 2`,
   );
   const firstSeen = new Map(history.map((h) => [`${h.instrument_id}|${h.trigger_code}`, h.first_seen]));
-  
+  // A hold-until rule holds an exit back (the promote gate refuses it too): the button says so instead.
+  const nowIso = new Date().toISOString();
+  const rules = await loadActiveHoldingRules(d, nowIso);
+  const heldByRule = async (instrumentId: string): Promise<ExitCandidate['heldByRule']> => {
+    if (rules.length === 0) return null;
+    const hit = ruleBlock(rules, { aliases: await fundAliases(d, instrumentId), action: 'SELL', amountPaise: null, heldPaise: 0n, portfolioPaise: null, month: istMonth(nowIso), lumpSumId: null });
+    return hit === null || hit.waivedBy !== null ? null : { ruleId: hit.rule.id, untilOn: hit.rule.untilOn! };
+  };
+
   return {
     redemptions,
     freezeState,
     breakerState,
     railChanges,
-    exitCandidates: exitCandidates.map((c) => ({
+    exitCandidates: await Promise.all(exitCandidates.map(async (c) => ({
       ...c,
+      heldByRule: await heldByRule(c.instrumentId),
       firstSeen: firstSeen.get(`${c.instrumentId}|${c.trigger}`) ?? null,
-    })),
+    }))),
     // numeric arrives as a string from postgres
     drawdownPct: drawdown ? Number(drawdown.current_pct) : null,
   };
@@ -1022,4 +1037,103 @@ export async function getInvestmentControls(): Promise<InvestmentControls> {
   const values = Object.fromEntries(Object.entries(DEFAULT_OWNER_RAILS).map(([key, value]) => [key, Number(value)]));
   for (const row of rows) values[row.key] = Number(row.value);
   return { values, pending: await pendingRailChanges(d), budgetMonth: await loadBudgetMonth(d, new Date().toISOString()) };
+}
+
+export type StopEvent = Awaited<ReturnType<typeof stopEventsInForce>>[number];
+
+/**
+ * Batch C: what life events left to review. `open` lines await Still right (or, for a rail,
+ * a signed change); `waiting` are NEEDS_CHANGE lines until the constant ships and the owner
+ * presses Still right. Goal lines are web-only (the normal plan never reads goal status).
+ */
+export async function getLifeEventReview(): Promise<{ open: ReviewLine[]; waiting: ReviewLine[]; stops: StopEvent[] }> {
+  const d = await db();
+  const now = new Date().toISOString();
+  const lines = [...await loadReviewLines(d, now), ...await goalReviewLines(d, now)]
+    .sort((a, b) => a.eventOn.localeCompare(b.eventOn) || Number(a.eventId) - Number(b.eventId));
+  return {
+    open: lines.filter((l) => l.state === 'OPEN'),
+    waiting: lines.filter((l) => l.state === 'NEEDS_CHANGE'),
+    stops: await stopEventsInForce(d, now),
+  };
+}
+
+/** Live job losses and medical expenses not yet ended: /log offers **Ended** on each. */
+export async function getEndableLifeEvents(): Promise<{ id: string; kind: 'JOB_LOSS' | 'MEDICAL_EXPENSE'; on: string; amountPaise: bigint | null }[]> {
+  const live = (a: string) => `not exists (select 1 from log_reversals r where r.entity = 'life_event' and r.entity_id = ${a}.id::text)`;
+  const rows = await (await db()).query<{ id: string; kind: 'JOB_LOSS' | 'MEDICAL_EXPENSE'; on: string; amount_paise: string | null }>(
+    `select e.id::text, e.kind, e.occurred_on::text as "on", e.amount_paise::text from life_events e
+      where e.kind in ('JOB_LOSS', 'MEDICAL_EXPENSE') and ${live('e')}
+        and not exists (select 1 from life_events x where x.ends_event_id = e.id and ${live('x')})
+      order by e.occurred_on, e.id`);
+  return rows.map((r) => ({ id: r.id, kind: r.kind, on: r.on, amountPaise: r.amount_paise === null ? null : BigInt(r.amount_paise) }));
+}
+
+/** Batch C: the owner's active holding rules (not ended, not past their date), each with its live exceptions. */
+export async function getHoldingRules(): Promise<HoldingRule[]> {
+  return loadActiveHoldingRules(await db(), new Date().toISOString());
+}
+
+/** Active rules per instrument id, matched through the fund's aliases (an MF:/IND: row of one scheme is one fund). */
+export async function getRulesFor(instrumentIds: string[]): Promise<Map<string, HoldingRule[]>> {
+  const d = await db();
+  const rules = await loadActiveHoldingRules(d, new Date().toISOString());
+  const out = new Map<string, HoldingRule[]>();
+  if (rules.length === 0) return out;
+  for (const id of new Set(instrumentIds)) {
+    const own = await fundAliases(d, id);
+    const hit = rules.filter((r) => sameFund(r.aliases, own));
+    if (hit.length > 0) out.set(id, hit);
+  }
+  return out;
+}
+
+/** /recommendations "Withheld by your rules": what a holding rule refused, last 60 days, newest first. */
+export async function getRuleSuppressions(): Promise<{ on: string; action: string; reason: string }[]> {
+  return (await db()).query<{ on: string; action: string; reason: string }>(
+    `select logged_on::text as "on", action, reason from suppressed_actions
+      where suppressed_by = 'HOLDING_RULE' and logged_on >= current_date - 60
+      order by logged_on desc, action`);
+}
+
+/** The latest month's exit signals a hold-until rule holds back: a warning with its evidence, never a recommendation. */
+export async function getRuleHeldExits(): Promise<ExitCandidate[]> {
+  return (await loadExitCandidates(await db())).filter((e) => e.heldByRule !== null);
+}
+
+/**
+ * /advisor: this month's candidates a holding rule withholds, sized live exactly as the weekly
+ * advisor and signing size them, with the IST month an Allow once covers. Sizing failure → none, logged.
+ */
+export async function getMonthRuleHolds(): Promise<{ month: string; holds: { action: string; name: string; reason: string; ruleId: string }[] }> {
+  const d = await db();
+  const now = new Date();
+  const month = istMonth(now.toISOString());
+  if ((await loadActiveHoldingRules(d, now.toISOString())).length === 0) return { month, holds: [] };
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  const candidates = await loadSizingInput(d, today, now).then(sizeCandidates).catch((e: unknown) => {
+    console.error(`advisor: could not size this month's candidates: ${why(e)}`);
+    return [];
+  });
+  return { month, holds: candidates.flatMap((c) => (c.ruleId === undefined ? [] : [{ action: c.action, name: c.name, reason: c.withheldReason ?? '', ruleId: c.ruleId }])) };
+}
+
+/**
+ * /advisor: per open lump sum, the parts a holding rule withholds today, sized live as signing
+ * does (the stored advice keeps only the reason text). A lump that cannot be sized lists none.
+ */
+export async function getLumpRuleHolds(): Promise<Map<string, { name: string; reason: string; ruleId: string }[]>> {
+  const d = await db();
+  const out = new Map<string, { name: string; reason: string; ruleId: string }[]>();
+  if ((await loadActiveHoldingRules(d, new Date().toISOString())).length === 0) return out;
+  const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
+  for (const lump of await loadOpenLumpSums(d)) {
+    const parts = await loadLumpSizingInput(d, lump.id, today).then(sizeLumpSum).catch((e: unknown) => {
+      console.error(`advisor: could not size lump sum ${lump.id}: ${why(e)}`);
+      return [];
+    });
+    const ruled = parts.flatMap((c) => (c.ruleId === undefined ? [] : [{ name: c.name, reason: c.withheldReason ?? '', ruleId: c.ruleId }]));
+    if (ruled.length > 0) out.set(lump.id, ruled);
+  }
+  return out;
 }

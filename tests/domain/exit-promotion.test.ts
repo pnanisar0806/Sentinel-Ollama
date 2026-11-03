@@ -24,6 +24,7 @@ const candidate = (over: Partial<ExitCandidate> = {}): ExitCandidate => ({
   blockedByMinimumHold: false,
   amountPaise: 9_000_000n,
   paper: true,
+  heldByRule: null,
   ...over,
 });
 
