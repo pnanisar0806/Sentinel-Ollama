@@ -3,6 +3,9 @@ import type { ReactNode } from 'react';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import Nav from './nav';
 import './globals.css';
+import './mobile-shell.css';
+import './mobile-table.css';
+import './mobile-forms.css';
 
 const plex = IBM_Plex_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-plex' });
 const plexMono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-plex-mono' });
