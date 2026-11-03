@@ -6,14 +6,14 @@ MEMORY.md; the code map lives in index.md.
 
 ## Next up
 - [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
-  - [ ] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px.
+  - [x] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px. (migration applied 2026-11-03; browser-check still pending)
   - [ ] /log "Start a new SIP" tab + /funds "Started" button (API route ready) — UI follow-up.
 - [x] **BATCH C SHIPPED 2026-11-03** — holding rules (no new money / hold until / never buy again / cap %), one-off
       Allow once (month or lump sum), life events with review lines + IPS stop-event flags. 0042 applied to prod
       2026-11-03 (recorded, 8 triggers, RLS). Spec `2026-10-31-batch-c-design.md`, plan `2026-10-31-batch-c.md`. 1723 tests.
   - [ ] **Session start:** check Overview → "Waiting on a code change" (life-event lines the owner marked Needs changing).
-  - [ ] Owner to confirm: CAP_PCT measures against the WHOLE portfolio (EPF, bonds, cash, RSU included) — same basis as sizing.
-  - [ ] Owner flag: when every US/Next 50 pick is ruled, that money sits on a "no allowed alternative" row (not spread).
+  - [x] Owner to confirm: CAP_PCT measures against the WHOLE portfolio (EPF, bonds, cash, RSU included) — same basis as sizing.
+  - [x] Owner flag: when every US/Next 50 pick is ruled, that money sits on a "no allowed alternative" row (not spread). (confirmed 2026-11-03; US money spreads until Indian S&P fund exists)
   - Deferred minors (next fix wave): see `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` batch C line.
 - [x] **MOBILE PASS SHIPPED 2026-11-03** (spec `2026-11-03-mobile-design.md`): phone top bar + drawer nav, DataTable → cards < 640px, 44px controls, wrap overflow; prod 390px audit 2026-11-03: all 22 pages fit (scrollWidth ≤ viewport) after #8 badge wrap. Screenshots not captured (Chrome CDP screenshot times out) — owner to eyeball on phone. Deferred: DataTable role attrs for VoiceOver.
 - [ ] ~~NEXT: MOBILE PASS (owner-approved 2026-11-02)~~ — app-wide phone layout: nav → top bar + drawer; DataTable →
@@ -22,7 +22,7 @@ MEMORY.md; the code map lives in index.md.
 - [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
       SIP move in place (same `logSipMove` checks); "Undo" reverses it. The chosen month now drives labels: before
       it the old SIP shows "running ₹X, moves to Y from Mon"; from it, "stopped — moved to Y". Feed rows untouched.
-  - [ ] Owner: move ICICI Nifty 50 → Navi Nifty 50 in INDmoney, then press Done on /funds.
+  - [x] Owner: move ICICI Nifty 50 → Navi Nifty 50 in INDmoney, then press Done on /funds.
 - [x] **FUND SWITCH BUILT 2026-10-29** on `fix/sip-suggestions` (local, not pushed): `46184c2` SIP-card
       fix + T1–T6 (SIP moves on /log, Nifty 50 index switch check, per-fund SIP and units answers on
       `/funds`, SIP card follows moves). Ledger `.superpowers/sdd/2026-10-29-fund-switch/progress.md`. Ship:
@@ -50,9 +50,9 @@ MEMORY.md; the code map lives in index.md.
 - [x] **Piece 3 (funds first) SHIPPED 2026-10-27** — squashed `c426bdf` pushed; migrations 0037+0038
       applied to prod (in `schema_migrations`, 4 triggers, RLS on); Vercel deploy green; `/funds` and
       `/advisor` load on prod. Spec `2026-10-23-funds-first-design.md`. **Next: batch B** (3,4,8). Open:
-  - [ ] **Owner:** sign the fund mix on `/funds` (until then stocks are withheld and no fund is topped up).
+  - [x] **Owner:** sign the fund mix on `/funds` (until then stocks are withheld and no fund is topped up). (done 2026-11-03)
   - [ ] **Owner:** add the Screener columns (Pledged %, Promoter holding, CFO 5Y, PAT 5Y) and send one export.
-  - [ ] **Owner:** open the Nifty Next 50 index fund (and a US one when any reopens to SIPs).
+  - [x] **Owner:** open the Nifty Next 50 index fund (and a US one when any reopens to SIPs). (Edelweiss Next 50 started 2026-11-03, first instalment 12th Nov; US pending)
   - [x] **Owner question:** exempt fund top-ups from FR-12's 12-month repeat-buy hold? — yes, 2026-10-27, gold included (stocks keep it).
 - [x] **Log batch A (2,5,6,13) SHIPPED 2026-10-23** — squashed onto `main`; migration 0036 applied to prod
       2026-10-23 (recorded in `schema_migrations`). Owner to push; then browser-test /log with refused inputs only. Spec
@@ -78,7 +78,7 @@ MEMORY.md; the code map lives in index.md.
         Invesco ₹3,001 = ₹30,254 → free ₹19,746. Gaps fixed 2026-10-15: the system now
         reads ₹19,746 free (departed HDFC counted) and ₹24 remaining once the gold ETF is logged. Proposals run in the WEEKLY report (Sundays); unknown SIPs hold
         rebalance + advisor without consuming the month, retry next weekly run.
-  - [ ] **Piece 2 (goal plan)** — branch `feat/goal-plan`, Tasks 1–7 committed locally, NOT pushed.
+  - [ ] **Piece 2 (goal plan)** — branch `feat/goal-plan`, Tasks 1–7 committed locally, pushed (not merged to main).
         Spec `2026-10-21-goal-plan-design.md`. Release: whole-branch review → squash → owner pushes.
     - [x] Goal tracker on `/buckets`, verdict lines on Overview, goal plan beside the normal
           plan on `/advisor` (raise budget, sign/revoke equity ceiling), "Keep ₹X this month".
@@ -99,7 +99,7 @@ MEMORY.md; the code map lives in index.md.
 - [x] **Owner: log the Zerodha Gold ETF purchase on /log** — done; prod reads ₹19,724 spent
       (the note above said ₹19,722 — the logged figure stands).
 - [ ] **Owner SIP payments + rupee budget editor (branch `fix/monthly-investing-controls`,
-      2026-10-16, committed locally, NOT pushed).** After deploy: apply migration 0034 to
+      2026-10-16, committed locally, pushed (not merged to main).** After deploy: apply migration 0034 to
       Supabase, then the controller records HDFC Mid Cap ₹3,001 paid 2026-10-12 via
       `recordSipPayment(..., source: 'owner-chat')` → Overview reads SIPs ₹30,254, remaining ₹22.
 - [ ] **Later batch: upcoming SIPs / pending mandates** (Invesco ₹3,001, first instalment Nov
