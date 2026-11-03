@@ -384,7 +384,7 @@ a:hover { color: #f0abfc; }
 /* Table row tones (blocked positions, etc.). */
 .table tr.tr-red td { color: var(--red); }
 .table tr.tr-red td .mono, .table tr.tr-red td .dim { color: inherit; opacity: 0.85; }
-.table tr.tr-warn td { color: var(--amber); }
+.table tr.tr-warn td, .table tr.tr-amber td { color: var(--amber); }
 .table tr.tr-green td { color: var(--green); }
 
 /* ── Text utilities ──────────────────────────────────────────────────────── */
