@@ -231,7 +231,6 @@ a:hover { color: #f0abfc; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
-  .nav { position: static; height: auto; }
   .main { padding: 22px 18px 64px; }
   .grid,
   .grid.cols-2,

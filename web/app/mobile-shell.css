@@ -1,1 +1,115 @@
-/* mobile-shell — mobile pass 2026-11-03 (spec docs/superpowers/specs/2026-11-03-mobile-design.md). */
+/* mobile-shell — mobile pass 2026-11-03 (spec docs/superpowers/specs/2026-11-03-mobile-design.md).
+   Phone (≤ 900px, the globals.css breakpoint): sticky top bar + native <dialog> drawer.
+   Desktop: .topbar hidden, sidebar untouched. Transitions are killed under prefers-reduced-motion by
+   the global rule in globals.css. */
+
+.topbar { display: none; }
+
+@media (max-width: 900px) {
+  html { scroll-padding-top: calc(72px + env(safe-area-inset-top)); }
+
+  /* Without this the single-column grid splits min-height:100vh across both rows. */
+  .shell { grid-template-rows: auto 1fr; }
+  .nav-side { display: none; }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) max(6px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    background: rgba(26, 26, 26, 0.92);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .topbar-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 16px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .main {
+    padding: 20px max(16px, env(safe-area-inset-right)) calc(56px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+}
+
+.topbar-menu,
+.drawer-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.12s ease;
+}
+.topbar-menu:active,
+.drawer-close:active { background: var(--panel-hover); }
+
+.drawer-close { color: var(--text-dim); margin: -11px -6px -11px 2px; }
+
+/* ── Drawer ──────────────────────────────────────────────────────────────── */
+
+.drawer {
+  position: fixed;
+  inset: 0 auto 0 0;
+  margin: 0;
+  width: min(320px, 86vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  overscroll-behavior: contain;
+  transform: translateX(-100%);
+  /* exit: quicker, ease-in */
+  transition: transform 0.18s ease-in, overlay 0.18s allow-discrete, display 0.18s allow-discrete;
+}
+.drawer[open] {
+  transform: none;
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), overlay 0.24s allow-discrete, display 0.24s allow-discrete;
+}
+@starting-style {
+  .drawer[open] { transform: translateX(-100%); }
+}
+
+.drawer::backdrop {
+  background: rgba(0, 0, 0, 0);
+  transition: background 0.18s ease, overlay 0.18s allow-discrete, display 0.18s allow-discrete;
+}
+.drawer[open]::backdrop { background: rgba(0, 0, 0, 0.6); }
+@starting-style {
+  .drawer[open]::backdrop { background: rgba(0, 0, 0, 0); }
+}
+
+.drawer .nav {
+  position: static;
+  height: 100%;
+  border-right: 0;
+  padding: calc(18px + env(safe-area-inset-top)) 12px calc(18px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  overscroll-behavior: contain;
+}
+
+.drawer .nav nav a { min-height: 44px; font-size: 15px; }
+
+/* Body scroll lock while the drawer is open. */
+html:has(.drawer[open]) { overflow: hidden; }

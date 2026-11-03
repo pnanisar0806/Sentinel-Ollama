@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import Nav from './nav';
@@ -14,6 +14,9 @@ export const metadata: Metadata = {
   title: 'Sentinel — Investment Intelligence',
   description: 'Personal investment intelligence agent — local preview',
 };
+
+// viewport-fit=cover makes env(safe-area-inset-*) non-zero on notched phones (mobile-shell.css).
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#1a1a1a' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
