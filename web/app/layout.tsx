@@ -1,8 +1,11 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { IBM_Plex_Mono, IBM_Plex_Sans } from 'next/font/google';
 import Nav from './nav';
 import './globals.css';
+import './mobile-shell.css';
+import './mobile-table.css';
+import './mobile-forms.css';
 
 const plex = IBM_Plex_Sans({ subsets: ['latin'], weight: ['400', '500', '600', '700'], variable: '--font-plex' });
 const plexMono = IBM_Plex_Mono({ subsets: ['latin'], weight: ['400', '500'], variable: '--font-plex-mono' });
@@ -11,6 +14,9 @@ export const metadata: Metadata = {
   title: 'Sentinel — Investment Intelligence',
   description: 'Personal investment intelligence agent — local preview',
 };
+
+// viewport-fit=cover makes env(safe-area-inset-*) non-zero on notched phones (mobile-shell.css).
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#1a1a1a' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

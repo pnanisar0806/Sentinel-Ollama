@@ -231,7 +231,6 @@ a:hover { color: #f0abfc; }
 
 @media (max-width: 900px) {
   .shell { grid-template-columns: 1fr; }
-  .nav { position: static; height: auto; }
   .main { padding: 22px 18px 64px; }
   .grid,
   .grid.cols-2,
@@ -384,7 +383,7 @@ a:hover { color: #f0abfc; }
 /* Table row tones (blocked positions, etc.). */
 .table tr.tr-red td { color: var(--red); }
 .table tr.tr-red td .mono, .table tr.tr-red td .dim { color: inherit; opacity: 0.85; }
-.table tr.tr-warn td { color: var(--amber); }
+.table tr.tr-warn td, .table tr.tr-amber td { color: var(--amber); }
 .table tr.tr-green td { color: var(--green); }
 
 /* ── Text utilities ──────────────────────────────────────────────────────── */
