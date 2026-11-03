@@ -1,1 +1,67 @@
-/* mobile-forms — mobile pass 2026-11-03 (spec docs/superpowers/specs/2026-11-03-mobile-design.md). */
+/* mobile-forms — mobile pass 2026-11-03 (spec docs/superpowers/specs/2026-11-03-mobile-design.md).
+   Forms, controls and page-level overflow. Desktop untouched: every rule sits behind a max-width query.
+   Tables and the nav/shell are owned by mobile-table.css and mobile-shell.css. */
+
+@media (max-width: 900px) {
+  /* Flex rows whose children can outgrow a phone: let them wrap instead of widening the page. */
+  .card-head, .goal-top, .provider, .provider-actions, .option-what, .page-title { flex-wrap: wrap; }
+  .card-head > *, .goal-top > *, .provider > * { min-width: 0; }
+
+  /* Long ids, mono strings and pasted text wrap instead of widening the page.
+     break-word on prose keeps min-content sizing intact; `anywhere` only on mono outside tables. */
+  .main { overflow-wrap: break-word; }
+  .main .mono:not(td *), .upload-summary, .ips-text { overflow-wrap: anywhere; }
+
+  /* Nothing a form holds is wider than its container. */
+  .main input, .main select, .main textarea { max-width: 100%; }
+  .import-kind { max-width: 100%; flex-wrap: wrap; }
+  .import-file { max-width: 100%; }
+
+  /* The 110px/96px timeline columns (700–900px) must not push their text column past the card. */
+  .timeline li > * { min-width: 0; }
+}
+
+@media (max-width: 640px) {
+  /* Forms: one column, full width. */
+  .form-row,
+  .control-form { grid-template-columns: minmax(0, 1fr); max-width: none; }
+  .field input, .field select, .field textarea,
+  .control-field input, .control-field select { width: 100%; min-width: 0; }
+
+  /* 16px text in inputs stops iOS zooming the page on focus; 44px is the tap floor. */
+  .main input:not([type='checkbox']):not([type='radio']):not([type='file']),
+  .main select,
+  .main textarea { font-size: 16px; min-height: 44px; }
+
+  /* Every button is a 44px target, including the small ones. */
+  .btn, .btn-sm { min-height: 44px; }
+  .btn-sm { padding: 8px 14px; font-size: 13.5px; }
+  .import-kind button { min-height: 44px; }
+  .import-file::file-selector-button { min-height: 44px; }
+
+  /* A form's primary action spans the column; secondary buttons share the row. */
+  .form > .btn,
+  .control-form > .btn,
+  .import-form > .btn { width: 100%; justify-content: center; justify-self: stretch; }
+  .btn-row { gap: 8px; }
+  .btn-row > .btn { flex: 1 1 auto; justify-content: center; }
+  .btn-row > .dim, .btn-row > .muted, .btn-row > span { flex-basis: 100%; }
+
+  /* Tabs wrap rather than scroll: /log has 11 choices and the selected one must always be visible
+     (it can change from code — the windfall prefill), which a sideways strip cannot promise. */
+  .tabs { gap: 8px; }
+  .tabs button { min-height: 44px; padding: 8px 14px; }
+  .tabs-sm button { min-height: 44px; padding: 8px 14px; font-size: 13px; }
+
+  /* Inline forms in table cells (rule button, allow once, SIP move) stack full width. */
+  .rule-ctl { max-width: 100%; align-items: stretch; }
+  .rule-ctl .btn-row > .btn { flex: 1 1 0; }
+  td .btn-row { flex-direction: column; align-items: stretch; }
+  td .btn-row > .tabs { width: 100%; }
+
+  /* Unstyled label > input pairs (login, cleanup controls) get the field look's size. */
+  .main label > input:not([type='checkbox']):not([type='radio']) { display: block; width: 100%; }
+
+  .notyet { padding: 18px 16px; }
+  .notyet-actions .btn { width: 100%; justify-content: center; }
+}
