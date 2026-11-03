@@ -1,1 +1,101 @@
 /* mobile-table — mobile pass 2026-11-03 (spec docs/superpowers/specs/2026-11-03-mobile-design.md). */
+
+/* ── DataTable → stacked cards below 640px ──────────────────────────────────
+   One markup: each <td> carries data-label (web/lib/ui.tsx). First cell is the
+   card title; the rest are `label · value` rows, value right-aligned. */
+@media (max-width: 639.98px) {
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  /* Header row is replaced by per-cell labels; kept for screen readers. */
+  .table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  }
+  .table tr {
+    position: relative;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 14px;
+    margin-bottom: 10px;
+  }
+  .table tr:last-child { margin-bottom: 0; }
+  .table td {
+    display: flow-root;
+    padding: 8px 0;
+    border-bottom: none;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+  /* Divider above each cell after the first; a hidden empty cell leaves no stray line. */
+  .table td + td { border-top: 1px solid var(--border); }
+  .table tbody tr:hover td { background: none; }
+  .table td::before {
+    content: attr(data-label);
+    float: left;
+    max-width: 50%;
+    padding-right: 12px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    line-height: 1.9;
+    color: var(--text-faint);
+  }
+  .table td[data-label='']::before { content: none; }
+  .table td:empty { display: none; }
+
+  /* Card title: first column, full width, emphasised, no label. */
+  .table td:first-child {
+    text-align: left;
+    font-size: 15px;
+    font-weight: 650;
+    padding: 10px 0;
+  }
+  .table td:first-child::before { content: none; }
+  /* Unlabelled leading control (e.g. /import's checkbox): sits beside the title, which is the next cell. */
+  .table td:first-child[data-label=''] { float: left; width: auto; padding-right: 10px; }
+  .table td:first-child[data-label=''] + td { width: auto; border-top: none; text-align: left; font-size: 15px; font-weight: 650; padding: 10px 0; }
+  .table td:first-child[data-label=''] + td::before { content: none; }
+
+  /* Row tones: text colour comes from globals.css; add an edge so the card reads at a glance. */
+  .table tr.tr-red { border-color: rgba(248, 113, 113, 0.4); box-shadow: inset 3px 0 0 var(--red); }
+  .table tr.tr-amber, .table tr.tr-warn { border-color: rgba(251, 191, 36, 0.4); box-shadow: inset 3px 0 0 var(--amber); }
+  .table tr.tr-green { border-color: rgba(52, 211, 153, 0.35); box-shadow: inset 3px 0 0 var(--green); }
+  .table tr.tr-indigo { border-color: rgba(129, 140, 248, 0.4); box-shadow: inset 3px 0 0 var(--indigo); }
+  .table tr.tr-red td::before, .table tr.tr-amber td::before,
+  .table tr.tr-warn td::before, .table tr.tr-green td::before { color: var(--text-faint); }
+}
+
+/* ── Content primitives on phone ─────────────────────────────────────────── */
+@media (max-width: 639.98px) {
+  .page-head { margin-bottom: 18px; }
+  .page-title { gap: 8px; }
+  .page-title h1 { font-size: 22px; line-height: 1.25; }
+  .page-sub { font-size: 14px; line-height: 1.55; }
+
+  .card { padding: 14px 16px; margin-bottom: 14px; }
+  .card-head { flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }
+  .grid { gap: 14px; margin-bottom: 14px; }
+  .grid > div { gap: 14px; }
+
+  /* Stat tiles 2-up; bento cells single column except stat tiles. */
+  .stats, .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+  .bento { gap: 12px; margin-bottom: 14px; }
+  .bento > [class*='span-'] { grid-column: span 12; }
+  .bento > .span-3:has(> .stat) { grid-column: span 6; }
+  .stat { padding: 14px; }
+  .stat-label { font-size: 10.5px; letter-spacing: 0.08em; margin-bottom: 6px; }
+  .stat-value { font-size: 20px; overflow-wrap: anywhere; }
+
+  .notice { width: 100%; box-sizing: border-box; }
+  .ips-text { padding: 14px; }
+
+  .mono, .card-body, .page-sub, .notice, .stat-sub, .muted { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 359.98px) {
+  .stats, .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  .bento > .span-3:has(> .stat) { grid-column: span 12; }
+}

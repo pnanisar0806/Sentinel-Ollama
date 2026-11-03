@@ -68,7 +68,7 @@ export function DataTable<T extends { key: string }>({
           const tone = rowTone?.(r);
           return (
             <tr key={r.key} className={tone ? `tr-${tone}` : undefined}>
-              {cols.map((c) => <td key={c.label} className={c.align === 'right' ? 'ta-right' : 'ta-left'}>{c.value(r)}</td>)}
+              {cols.map((c) => <td key={c.label} data-label={c.label} className={c.align === 'right' ? 'ta-right' : 'ta-left'}>{c.value(r)}</td>)}
             </tr>
           );
         })}
