@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
 import {
-  completeMilestone, logEarmark, logGoalMove, logLumpSum, logNote, logPurchase, logSale, logSipMove, logSpend, type EarmarkEnd, type GoalMoveKind,
+  completeMilestone, logEarmark, logGoalMove, logLumpSum, logNote, logPurchase, logSale, logSipMove, logSipStart, logSpend, type EarmarkEnd, type GoalMoveKind,
 } from '../../../../src/domain/owner-log';
 import { reverseEntry, type ReversalEntity } from '../../../../src/domain/reversals';
 import { loadGoalTracker } from '../../../../src/domain/goal-plan';
@@ -29,6 +29,7 @@ type Body =
   | { action: 'spend'; on: string; rupees: string; purpose: string; from: 'B2' | 'B3' | 'B4' | 'SP' | 'BANK'; label?: string; note?: string }
   | { action: 'earmark'; on: string; rupees: string; from: EarmarkEnd; to: EarmarkEnd; label?: string; expectedOn?: string; note?: string }
   | { action: 'sip_move'; on: string; fromInstrumentId: string; toInstrumentId: string; rupees: string; firstMonth: string; note?: string }
+  | { action: 'sip_start'; on: string; instrumentId: string; rupees: string; firstMonth: string; note?: string }
   | { action: 'reverse'; entity: ReversalEntity; entityId: string; reason: string }
   // Batch C life events: nothing here changes a rail or pauses a SIP.
   | { action: 'life_event'; kind: LifeEventKind; on: string; rupees?: string; expectedOn?: string; fiTargetAge?: string; from?: string; note?: string }
@@ -115,12 +116,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           note: body.note ?? '', fiCorpusPaise: body.from === 'FI' ? await fiCorpus(d) : null,
         });
         return NextResponse.json({ ok: true, message: 'Earmark recorded.' });
-      case 'sip_move':
+       case 'sip_move':
         await logSipMove(d, {
           on: body.on, fromInstrumentId: body.fromInstrumentId ?? '', toInstrumentId: body.toInstrumentId ?? '',
           amountPaise: paise(body.rupees ?? ''), firstMonth: body.firstMonth ?? '', note: body.note ?? '',
         });
         return NextResponse.json({ ok: true, message: 'SIP move recorded.' });
+      case 'sip_start':
+        await logSipStart(d, {
+          on: body.on, instrumentId: body.instrumentId ?? '', amountPaise: paise(body.rupees ?? ''),
+          firstMonth: body.firstMonth ?? '', note: body.note ?? '',
+        });
+        return NextResponse.json({ ok: true, message: 'SIP start recorded.' });
       case 'reverse':
         await reverseEntry(d, { entity: body.entity, entityId: body.entityId ?? '', reason: body.reason ?? '' }, new Date().toISOString());
         return NextResponse.json({ ok: true, message: 'Reversed. The original stays on the timeline, struck through.' });

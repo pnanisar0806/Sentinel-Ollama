@@ -12,13 +12,13 @@ import { formatInr, type Paise } from '../money/paise.js';
  * balance reader sees them. Only entries whose audit payload carries `rowId`/`rowIds` —
  * those written since batch A — can be reversed.
  */
-export const REVERSAL_ENTITIES = ['bucket_flow', 'owner_purchase', 'owner_sip_payment', 'owner_sale', 'earmark', 'spend', 'sip_move', 'lump_sum',
+export const REVERSAL_ENTITIES = ['bucket_flow', 'owner_purchase', 'owner_sip_payment', 'owner_sale', 'earmark', 'spend', 'sip_move', 'sip_start', 'lump_sum',
   'holding_rule', 'holding_rule_exception', 'life_event'] as const;
 export type ReversalEntity = typeof REVERSAL_ENTITIES[number];
 
 const TABLES: Partial<Record<ReversalEntity, string>> = {
   bucket_flow: 'bucket_flows', owner_purchase: 'owner_purchases', owner_sip_payment: 'owner_sip_payments', owner_sale: 'owner_sales',
-  sip_move: 'sip_moves', lump_sum: 'lump_sums',
+  sip_move: 'sip_moves', sip_start: 'sip_starts', lump_sum: 'lump_sums',
   holding_rule: 'holding_rules', holding_rule_exception: 'holding_rule_exceptions', life_event: 'life_events',
 };
 export const GROUPS: ReadonlySet<ReversalEntity> = new Set(['earmark', 'spend', 'owner_sale']);

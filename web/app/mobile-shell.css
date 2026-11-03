@@ -118,3 +118,6 @@ html:has(.drawer[open]) { overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
   .drawer::backdrop { transition: none; }
 }
+
+/* Tapping the brand / title goes to Overview (owner, 2026-11-03). */
+.topbar-home { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; min-height: 44px; color: inherit; text-decoration: none; }

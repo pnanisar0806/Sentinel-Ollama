@@ -20,7 +20,9 @@
  * Text jobs: watchlist shortlisting, weekly narration, any future advisory prose.
  * Owner decision 2026-09-13: finance-tuned, text-only.
  */
-export const TEXT_MODEL = 'inclusionai/ling-3.0-flash-fin:free';
+// 2026-11-03: OpenRouter retired the free `ling-3.0-flash-fin:free` (HTTP 404 on every call since
+// 2026-09-28). Owner chose the paid `ling-3.1-flash` (~₹30/month at current volume; needs OpenRouter credit).
+export const TEXT_MODEL = 'inclusionai/ling-3.1-flash';
 
 /**
  * Vision jobs: statement and RSU screenshots. The previously-tuned free chain (gemma-led),
