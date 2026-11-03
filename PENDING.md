@@ -5,7 +5,16 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
-- [ ] **BATCH C (holding rules + life events)** — design `docs/superpowers/specs/2026-10-31-batch-c-design.md`, awaiting owner sign-off; then plan → opus SDD → one squashed push.
+- [x] **BATCH C SHIPPED 2026-11-03** — holding rules (no new money / hold until / never buy again / cap %), one-off
+      Allow once (month or lump sum), life events with review lines + IPS stop-event flags. 0042 applied to prod
+      2026-11-03 (recorded, 8 triggers, RLS). Spec `2026-10-31-batch-c-design.md`, plan `2026-10-31-batch-c.md`. 1723 tests.
+  - [ ] **Session start:** check Overview → "Waiting on a code change" (life-event lines the owner marked Needs changing).
+  - [ ] Owner to confirm: CAP_PCT measures against the WHOLE portfolio (EPF, bonds, cash, RSU included) — same basis as sizing.
+  - [ ] Owner flag: when every US/Next 50 pick is ruled, that money sits on a "no allowed alternative" row (not spread).
+  - Deferred minors (next fix wave): see `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` batch C line.
+- [ ] **NEXT: MOBILE PASS (owner-approved 2026-11-02)** — app-wide phone layout: nav → top bar + drawer; DataTable →
+      stacked cards < 640px; forms/tabs/stats; per-page fixes at 390px; phone screenshots to owner before ship.
+      Standing rule: every web change is browser-checked at 390px too.
 - [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
       SIP move in place (same `logSipMove` checks); "Undo" reverses it. The chosen month now drives labels: before
       it the old SIP shows "running ₹X, moves to Y from Mon"; from it, "stopped — moved to Y". Feed rows untouched.
