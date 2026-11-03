@@ -5,6 +5,9 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
+  - [ ] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px.
+  - [ ] /log "Start a new SIP" tab + /funds "Started" button (API route ready) — UI follow-up.
 - [x] **BATCH C SHIPPED 2026-11-03** — holding rules (no new money / hold until / never buy again / cap %), one-off
       Allow once (month or lump sum), life events with review lines + IPS stop-event flags. 0042 applied to prod
       2026-11-03 (recorded, 8 triggers, RLS). Spec `2026-10-31-batch-c-design.md`, plan `2026-10-31-batch-c.md`. 1723 tests.

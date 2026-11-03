@@ -112,14 +112,14 @@ describe('loadSipSuggestions', () => {
     if (r.rows === null) throw new Error(r.reason);
     // Captured from the pre-move web getSipSuggestions on this exact fixture (2026-10-30).
     expect(r.rows.map((s) => [s.fundType, s.instrumentId, s.currentPaise, s.suggestedPaise, s.logged])).toEqual([
-      ['NIFTY50', 'IND:5536', 1_400_100n, 1_400_100n, false],
-      ['NEXT50', null, 0n, 200_000n, false],
-      ['FLEXI', 'IND:3229', 1_100_100n, 1_100_100n, false],
-      ['MID', 'MFU:120505', 300_100n, 530_000n, true],
-      ['SMALL', 'IND:1005544', 225_100n, 300_000n, false],
-      ['US', null, 0n, 300_000n, false],
+      ['NIFTY50', 'IND:5536', 1_400_100n, 1_820_000n, false],
+      ['NEXT50', null, 0n, 0n, false],
+      ['FLEXI', 'IND:3229', 1_100_100n, 1_690_000n, false],
+      ['MID', 'MFU:120505', 300_100n, 950_000n, true],
+      ['SMALL', 'IND:1005544', 225_100n, 540_000n, false],
+      ['US', null, 0n, 0n, false],
     ]);
-    expect(r).toMatchObject({ currentPaise: 3_025_400n, suggestedPaise: 3_830_200n, budgetPaise: 5_000_000n, setAsidePaise: 0n, capped: false });
+    expect(r).toMatchObject({ currentPaise: 3_025_400n, suggestedPaise: 5_000_000n, budgetPaise: 5_000_000n, setAsidePaise: 0n, capped: false });
 
     // Set-aside ruling: the SIP card stays within budget − set-aside (₹50,000 default budget rail).
     const setAside = (v: number) => d.query(`insert into settings_rails (key, value) values ('goal_setaside_monthly_paise', $1::jsonb)

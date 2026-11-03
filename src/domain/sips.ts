@@ -27,7 +27,7 @@ export function inferStepUp(raw: number | null): { kind: StepUpKind | null; infe
 export interface ActiveSip {
   sipId: string; instrumentId: string; fundName: string; fundType: string | null; category: string | null;
   amountPaise: bigint; stepUpRaw: number | null; stepUpKind: StepUpKind | null; stepUpInferred: boolean;
-  stepUpFreq: string | null; startDate: string; asOf: string;
+  stepUpFreq: string | null; startDate: string; asOf: string; logged?: boolean;
 }
 
 /**
@@ -225,9 +225,84 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   const asOf = new Date(snap.as_of).toISOString();
   // Fails closed: an unparseable clock gives NaN, and NaN reads stale, never fresh.
   const stale = !(Date.parse(nowIso) - Date.parse(asOf) <= SIP_MAX_AGE_DAYS * 86_400_000);
-  const sips = rows.map((r) => toSip(r, asOf));
+  const month = Number.isFinite(Date.parse(nowIso)) ? istMonth(nowIso) : null;
+  // Active logged moves and starts (not reversed), read directly to avoid a module cycle with owner-log.
+  const activeMoves = await db.query<{ id: string; from_id: string; to_id: string; amount_paise: string; first_month: string; to_name: string }>(
+    `select m.id::text, m.from_instrument_id from_id, m.to_instrument_id to_id, m.amount_paise::text,
+            m.first_month, t.name to_name
+       from sip_moves m join instruments t on t.id = m.to_instrument_id
+      where not exists (select 1 from log_reversals r where r.entity = 'sip_move' and r.entity_id = m.id::text)`);
+  const activeStarts = await db.query<{ id: string; instrument_id: string; name: string; amount_paise: string; first_month: string }>(
+    `select s.id::text, s.instrument_id, i.name, s.amount_paise::text, s.first_month
+       from sip_starts s join instruments i on i.id = s.instrument_id
+      where not exists (select 1 from log_reversals r where r.entity = 'sip_start' and r.entity_id = s.id::text)`);
+  const moveFromKeys = new Set<string>();
+  const moveStandins: { toId: string; toName: string; amount: bigint; firstMonth: string; id: string }[] = [];
+  for (const m of activeMoves) {
+    if (month !== null && m.first_month <= month) moveFromKeys.add(await sipInstrumentKey(db, m.from_id));
+    if (month !== null && m.first_month <= month) moveStandins.push({ toId: m.to_id, toName: m.to_name, amount: BigInt(m.amount_paise), firstMonth: m.first_month, id: m.id });
+  }
+  const startStandins = activeStarts
+    .filter((s) => month !== null && s.first_month <= month!)
+    .map((s) => ({ toId: s.instrument_id, toName: s.name, amount: BigInt(s.amount_paise), firstMonth: s.first_month, id: s.id }));
+  // Feed SIPs: drop a move's "from" fund from the first month onward.
+  let feedSips = rows.map((r) => toSip(r, asOf));
+  if (month !== null) {
+    feedSips = feedSips.filter(async () => true);
+    const filtered: ActiveSip[] = [];
+    for (const s of feedSips) {
+      const key = await sipInstrumentKey(db, s.instrumentId);
+      if (moveFromKeys.has(key)) continue;
+      filtered.push(s);
+    }
+    feedSips = filtered;
+  }
   const departed = await departedThisMonth(db, snap.id, nowIso);
+  // Drop departed "from" funds too.
+  if (month !== null) {
+    const filteredDep: ActiveSip[] = [];
+    for (const s of departed.sips) {
+      const key = await sipInstrumentKey(db, s.instrumentId);
+      if (moveFromKeys.has(key)) continue;
+      filteredDep.push(s);
+    }
+    departed.sips = filteredDep;
+  }
   const odd = [...rows.filter((r) => r.frequency !== 'MONTHLY'), ...departed.odd].map((r) => `${r.fund_name} (${r.frequency})`);
+  // Stand-ins: logged SIPs (starts + move "to") from their first month, while the feed does not list the fund.
+  // Feed identifiers for alias matching: sipInstrumentKey + any ISIN (from sips or instruments).
+  const feedIdents = new Set<string>();
+  for (const s of [...feedSips, ...departed.sips]) {
+    feedIdents.add(await sipInstrumentKey(db, s.instrumentId));
+    const [i] = await db.query<{ isin: string | null }>(`select isin from instruments where id = $1`, [s.instrumentId]);
+    if (i?.isin) feedIdents.add(i.isin);
+  }
+  // ISINs recorded on the feed's sips rows (the snapshot may list a fund under an id we have no instrument for).
+  const feedIsins = await db.query<{ isin: string }>(`select distinct isin from sips where snapshot_id = $1 and isin is not null`, [snap.id]);
+  for (const r of feedIsins) feedIdents.add(r.isin);
+  // Also gather ISINs from all feed sips rows by sip_id? Simpler: query sips table for isins of feed snapshot.
+  const standins: ActiveSip[] = [];
+  const seenStandin = new Set<string>();
+  for (const st of [...moveStandins, ...startStandins]) {
+    const idents = new Set<string>([await sipInstrumentKey(db, st.toId)]);
+    const [i] = await db.query<{ isin: string | null }>(`select isin from instruments where id = $1`, [st.toId]);
+    if (i?.isin) idents.add(i.isin);
+    // alias instruments sharing isin/canonical
+    const more = await db.query<{ isin: string | null }>(`select distinct isin from instruments where canonical_id = (select canonical_id from instruments where id = $1) and isin is not null`, [st.toId]);
+    for (const m of more) if (m.isin) idents.add(m.isin);
+    let inFeed = false;
+    for (const id of idents) if (feedIdents.has(id)) { inFeed = true; break; }
+    if (inFeed) continue; // feed wins
+    const key = await sipInstrumentKey(db, st.toId);
+    if (seenStandin.has(key)) continue;
+    seenStandin.add(key);
+    standins.push({
+      sipId: `logged:${st.id}`, instrumentId: st.toId, fundName: st.toName, fundType: null, category: null,
+      amountPaise: st.amount, stepUpRaw: null, stepUpKind: null, stepUpInferred: false, stepUpFreq: null,
+      startDate: `${st.firstMonth}-01`, asOf, logged: true,
+    });
+  }
+  const sips = [...feedSips, ...standins];
   // Per fund (aliases joined by sipInstrumentKey): the feed's amount, topped up to an owner-recorded
   // monthly total only by what the feed does not already carry — never counted on top of it.
   // No owner payment (the usual month): the plain feed sum, with no per-SIP alias queries.

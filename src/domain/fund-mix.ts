@@ -212,14 +212,30 @@ export function suggestSips(i: {
   newFundNames?: Partial<Record<FundType, string>>;
   /** Held funds the switch check says to leave → the switch pick's name (owner, 2026-10-28). */
   leaving?: Record<string, string>;
+  /** Target total to plan toward; defaults to today's typed SIP total. */
+  targetPaise?: bigint;
 }): SipSuggestion[] {
   const leaving = i.leaving ?? {};
   const typed = i.sips.filter((s) => s.type !== null);
-  const total = typed.reduce((a, s) => a + s.amountPaise, 0n);
+  const total = i.targetPaise ?? typed.reduce((a, s) => a + s.amountPaise, 0n);
   const range = new Map(i.ranges.map((r) => [r.type, r]));
+  const hasReceiver = (t: FundType): boolean => {
+    const r = range.get(t);
+    if (r === undefined || !r.newMoney) return false;
+    const mine = typed.filter((s) => s.type === t);
+    if (mine.some((s) => s.topUp && leaving[s.instrumentId] === undefined)) return true;
+    if ((i.heldByType[t] ?? []).some((h) => h.topUp && h.ruled === undefined && leaving[h.instrumentId] === undefined)) return true;
+    if (i.newFundNames?.[t] !== undefined) return true;
+    // A switch pick (leaving fund) can receive the type's money.
+    if (mine.some((s) => leaving[s.instrumentId] !== undefined)) return true;
+    if ((i.heldByType[t] ?? []).some((h) => leaving[h.instrumentId] !== undefined)) return true;
+    return false;
+  };
   const weight = (t: FundType): bigint => {
     const r = range.get(t);
-    return r === undefined || !r.newMoney ? 0n : BigInt(midBps(r) + Math.max(0, midBps(r) - i.actualBps[t]));
+    if (r === undefined || !r.newMoney) return 0n;
+    if (!hasReceiver(t)) return 0n;
+    return BigInt(midBps(r) + Math.max(0, midBps(r) - i.actualBps[t]));
   };
   const isNonCore = (t: FundType) => (NON_CORE_TYPES as readonly FundType[]).includes(t);
   const all = ALL_TYPES.reduce((a, t) => a + weight(t), 0n);
@@ -238,7 +254,15 @@ export function suggestSips(i: {
   for (const t of ALL_TYPES) {
     const mine = typed.filter((s) => s.type === t);
     if (weight(t) === 0n) {
-      for (const s of mine) rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason: '0% new money — held, never topped up', logged: s.logged ?? false });
+      const r = range.get(t);
+      const noReceiver = r !== undefined && r.newMoney && !hasReceiver(t);
+      const reason = noReceiver ? `${FUND_TYPE_LABEL[t]}: no fund open to SIPs — its share went to the others` : '0% new money — held, never topped up';
+      for (const s of mine) rows.push({ fundType: t, instrumentId: s.instrumentId, fundName: s.fundName, currentPaise: s.amountPaise, suggestedPaise: 0n, reason, logged: s.logged ?? false });
+      if (noReceiver && mine.length === 0) {
+        const pick = (i.heldByType[t] ?? []).map((h) => leaving[h.instrumentId]).find((n) => n !== undefined);
+        const fundName = pick ?? i.newFundNames?.[t] ?? newFundLabel(t, i.newFundNames ?? {});
+        rows.push({ fundType: t, instrumentId: null, fundName, currentPaise: 0n, suggestedPaise: 0n, reason, logged: false });
+      }
       continue;
     }
     for (const s of mine.filter((x) => !x.topUp || leaving[x.instrumentId] !== undefined)) {

@@ -83,13 +83,9 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     // A moved SIP was stopped: the feed may still list it (lag), but its money now runs in the "to" fund.
     if (moves.some((m) => sameFund(m.from, aliases))) continue;
     const t = await typed(s.instrumentId, isin.get(s.sipId) ?? null, aliases);
-    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise, ...ruled(aliases) });
+    sips.push({ instrumentId: s.instrumentId, fundName: s.fundName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: s.amountPaise, logged: s.logged ?? false, ...ruled(aliases) });
   }
-  // A move whose new fund the feed does not show yet: its logged amount stands in until the feed does.
-  for (const m of moves.filter((x) => !feed.some((f) => sameFund(f, x.to)))) {
-    const t = await typed(m.toInstrumentId, null, m.to);
-    sips.push({ instrumentId: m.toInstrumentId, fundName: m.toName, type: t?.type ?? null, topUp: t?.topUp ?? false, amountPaise: m.amountPaise, logged: true, ...ruled(m.to) });
-  }
+  // Logged stand-ins (move "to" funds and new SIP starts) now come from loadSipCommitment, flagged logged.
   const actual = await loadActualMix(d);
   const types = Object.keys(FUND_TYPE_LABEL) as FundType[];
   // A US / Next 50 new-fund row is named from the chooser's top pick (Task 10).
@@ -118,11 +114,13 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     rules.length === 0 ? h : { ...h, ...ruled(await fundAliases(d, h.instrumentId)) })))]))) as Parameters<typeof suggestSips>[0]['heldByType'];
   const budgetPaise = await railPaise(d, 'monthly_budget_paise');
   const setAsidePaise = await railPaise(d, 'goal_setaside_monthly_paise');
+  const investable = investablePaise(budgetPaise, setAsidePaise);
   const { rows, capped } = capToBudget(neverCut(suggestSips({
     sips, ranges: signed.ranges,
     actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
     heldByType, newFundNames, leaving,
-  })), investablePaise(budgetPaise, setAsidePaise));
+    targetPaise: investable,
+  })), investable);
   return {
     rows, capped, budgetPaise, setAsidePaise,
     currentPaise: sips.reduce((a, s) => a + s.amountPaise, 0n),

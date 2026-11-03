@@ -62,7 +62,7 @@ describe('suggestSips', () => {
 
   it('with actual at the midpoints, each type gets its normalised midpoint share', () => {
     const actual = bps(Object.fromEntries(ranges.map((r) => [r.type, midBps(r)])));
-    const rows = suggestSips({ sips: liveSips, ranges, actualBps: actual, heldByType: noneHeld() });
+    const rows = suggestSips({ sips: liveSips, ranges, actualBps: actual, heldByType: noneHeld(), newFundNames: { NIFTY50: 'N50', NEXT50: 'Next Fund', FLEXI: 'Flexi', MID: 'Mid', SMALL: 'Small', US: 'US Fund' } });
     const total = sum(rows);
     const norm = normalisedMidpointsBps(ranges);
     for (const t of TYPES) {
@@ -150,7 +150,7 @@ describe('suggestSips', () => {
 
 describe('neverCut (owner, 2026-10-28)', () => {
   it('keeps every SIP at least at its current amount; additions are untouched', () => {
-    const rows = neverCut(suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: noneHeld() }));
+    const rows = neverCut(suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: noneHeld(), newFundNames: { US: 'US Fund' } }));
     for (const r of rows) expect(r.suggestedPaise >= r.currentPaise).toBe(true);
     const n50 = rows.find((r) => r.fundType === 'NIFTY50')!;
     expect(n50.suggestedPaise).toBe(n50.currentPaise);

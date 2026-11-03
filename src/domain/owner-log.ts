@@ -5,7 +5,7 @@ import { GROUPS, type ReversalEntity } from './reversals.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
 import { loadPositions } from './networth.js';
 import { fromMicro, heldAfterSales, instrumentMeta, loadLiveSales, toMicro } from './owner-sales.js';
-import { typeOf } from './fund-mix.js';
+import { typeOf, fundAliases, sameFund } from './fund-mix.js';
 import { FUND_TYPE_LABEL } from './fund-types.js';
 import { loadLumpSum } from './lump-sums.js';
 
@@ -456,6 +456,72 @@ export async function loadActiveSipMoves(db: Db): Promise<SipMove[]> {
   }));
 }
 
+export interface SipStart {
+  id: string; instrumentId: string; fundName: string; amountPaise: bigint; firstMonth: string; on: string; note: string;
+}
+
+/** Every SIP start not reversed, newest first. */
+export async function loadActiveSipStarts(db: Db): Promise<SipStart[]> {
+  const rows = await db.query<{
+    id: string; instrument_id: string; name: string; amount_paise: string; first_month: string; on: string; note: string;
+  }>(
+    `select s.id::text, s.instrument_id, i.name, s.amount_paise::text, s.first_month, s.occurred_on::text "on", s.note
+       from sip_starts s join instruments i on i.id = s.instrument_id
+      where not exists (select 1 from log_reversals r where r.entity = 'sip_start' and r.entity_id = s.id::text)
+      order by s.id desc`);
+  return rows.map((r) => ({
+    id: r.id, instrumentId: r.instrument_id, fundName: r.name, amountPaise: BigInt(r.amount_paise),
+    firstMonth: r.first_month, on: r.on, note: r.note,
+  }));
+}
+
+export async function logSipStart(
+  db: Db,
+  m: { on: string; instrumentId: string; amountPaise: bigint; firstMonth: string; note: string },
+  now = new Date().toISOString(),
+): Promise<{ id: string }> {
+  if (m.amountPaise <= 0n) throw new Error('the amount must be positive');
+  assertDate(m.on, now);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(m.firstMonth)) throw new Error(`not a month: ${m.firstMonth}`);
+  const earliest = prevMonth(istMonth(now));
+  if (m.firstMonth < earliest) throw new Error(`the first month cannot be before ${earliest}`);
+  const note = m.note.trim();
+  return db.withTransaction(async (tx) => {
+    const [inst] = await tx.query<{ kind: string; name: string }>(`select kind, name from instruments where id = $1`, [m.instrumentId]);
+    if (!inst) throw new Error(`no fund ${m.instrumentId}`);
+    if (inst.kind !== 'MF') throw new Error('a SIP can only be started on a mutual fund');
+    const own = await fundAliases(tx, m.instrumentId);
+    // Active feed SIP on the same fund.
+    const [snap] = await tx.query<{ id: string | number }>(`select id from sip_snapshots order by as_of desc, id desc limit 1`);
+    if (snap) {
+      const feedRows = await tx.query<{ instrument_id: string }>(`select distinct instrument_id from sips where snapshot_id = $1`, [snap.id]);
+      const feedAliases = await Promise.all(feedRows.map((r) => fundAliases(tx, r.instrument_id)));
+      if (feedAliases.some((a) => sameFund(a, own))) throw new Error('an active SIP on this fund is already in the feed');
+    }
+    // Active logged start on the same fund.
+    const starts = await loadActiveSipStarts(tx);
+    for (const s of starts) {
+      const a = await fundAliases(tx, s.instrumentId);
+      if (sameFund(a, own)) throw new Error('a logged SIP start on this fund already exists; reverse it first');
+    }
+    // Active move "to" on the same fund.
+    const moves = await loadActiveSipMoves(tx);
+    for (const mv of moves) {
+      const a = await fundAliases(tx, mv.toInstrumentId);
+      if (sameFund(a, own)) throw new Error('a logged SIP move into this fund already exists; reverse it first');
+    }
+    const [row] = await tx.query<{ id: string }>(
+      `insert into sip_starts (instrument_id, amount_paise, first_month, note, occurred_on, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, 'owner-web') returning id::text`,
+      [m.instrumentId, m.amountPaise.toString(), m.firstMonth, note, m.on, now]);
+    await audit(tx, 'sip_start', row!.id, 'LOGGED', {
+      on: m.on, instrumentId: m.instrumentId, fundName: inst.name, amountPaise: m.amountPaise.toString(),
+      firstMonth: m.firstMonth, note, rowId: row!.id, source: 'owner-web',
+    });
+    return { id: row!.id };
+  });
+}
+
 export async function completeMilestone(db: Db, id: string, on: string, now = new Date().toISOString()): Promise<void> {
   assertDate(on, now);
   const [m] = await db.query<{ completed_on: string | null; name: string }>(
@@ -514,6 +580,11 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       const month = y && mo ? `${MONTHS[Number(mo) - 1] ?? mo} ${y}` : 'unknown month';
       return { kind: 'SIP move', summary: `SIP moved: ${String(p['fromName'] ?? '')} → ${String(p['toName'] ?? '')}, ${money(p['amountPaise'])}/month from ${month}` };
     }
+    case 'sip_start/LOGGED': {
+      const [y, mo] = String(p['firstMonth'] ?? '').split('-');
+      const month = y && mo ? `${MONTHS[Number(mo) - 1] ?? mo} ${y}` : 'unknown month';
+      return { kind: 'SIP', summary: `Started a SIP: ${String(p['fundName'] ?? '')}, ${money(p['amountPaise'])}/month from ${month}` };
+    }
     case 'lump_sum/LOGGED': return { kind: 'Lump sum', summary: `Money received: ${money(p['amountPaise'])} from ${String(p['from'] ?? '')}` };
     case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
@@ -546,7 +617,7 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
       where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
-        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'lump_sum', 'life_event')
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'sip_start', 'lump_sum', 'life_event')
       order by at desc, id desc limit $1`,
     [limit],
   );

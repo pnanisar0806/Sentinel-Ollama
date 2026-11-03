@@ -100,6 +100,12 @@
   numbered tasks; coverage-empty vs failed, capability firewall and point-in-time/model limits
   corrected. Bot statement confirmations preserved; no application edits in this handoff.
 
+## 2026-11-03 (SIP full-budget + logged-SIP accounting)
+
+- Part A: `suggestSips` now plans toward `targetPaise` (= investable = budget − set-aside) instead of re-splitting today's SIP total; a type with no receiving fund (no top-uppable SIP, no held top-uppable fund, no chooser pick, no switch pick) gets weight 0 and its share spreads; row says why. `loadSipSuggestions` passes `investable`. Removed now-duplicate move stand-in loop (commitment provides logged stand-ins).
+- Part B: migration 0043 `sip_starts` (append-only + RLS; reversal entity `sip_start`). `logSipStart` with refusals (non-MF, active feed SIP, active logged start/move-to alias-matched, first month before previous IST month). `loadSipCommitment` drops a move's "from" SIP from the first month onward and adds logged stand-ins (sip_starts + move "to") flagged `logged: true` from their first month while the feed doesn't list the fund (alias + ISIN match); feed wins. `ActiveSip.logged` added. `/api/log` gains `sip_start` action. Overview/funds logged badge surfaces stand-ins.
+- Tests: sip-suggest 11, sip-advice 14, funds-sips-shape 7, sips 103 all green; full suite 1727 passed. Root + web typecheck clean. Branch `feat/sip-full-budget`, local only, not pushed.
+
 Phase 0: COMPLETE — plan executed through the whole-branch fix wave + scoped re-review;
 PR #1 merged to `main` (2026-08-24). Entries below are post-merge sessions, newest last.
 One line per task / defect / decision; details live in MEMORY.md, not here.

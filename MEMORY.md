@@ -3400,3 +3400,8 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` Â
   OPEN BUY blocks.
 - SIP card cap = `monthly_budget_paise âˆ’ goal_setaside_monthly_paise` (a rail, not goal status). SIP news/advice is
   monthly (owner): first weekly report of the IST month, `monthly_review` kind `sip`.
+
+## SIP full-budget + logged-SIP accounting (2026-11-03)
+- suggestSips accepts 	argetPaise (defaults to typed SIP total); Part A plans toward investable = budget - set-aside. No-receiver types (no top-uppable SIP/held fund/chooser/switch pick) get weight 0 and their share spreads.
+- ActiveSip.logged?: boolean; sip_starts table (migration 0043) + reversal entity sip_start. loadSipCommitment drops a move's from-SIP from its first month and adds logged stand-ins (sip_starts + move to) from their first month while the feed doesn't list the fund (alias + ISIN match); feed wins. logSipStart refuses non-MF, active feed SIP, active logged start/move-to, first month before previous IST month.
+
