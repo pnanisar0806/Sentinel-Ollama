@@ -16,7 +16,7 @@ MEMORY.md; the code map lives in index.md.
   - [x] Owner flag: when every US/Next 50 pick is ruled, that money sits on a "no allowed alternative" row (not spread). (confirmed 2026-11-03; US money spreads until Indian S&P fund exists)
   - Deferred minors (next fix wave): see `.superpowers/sdd/2026-08-12-sentinel-phase-0/progress.md` batch C line.
 - [x] **MOBILE PASS SHIPPED 2026-11-03** (spec `2026-11-03-mobile-design.md`): phone top bar + drawer nav, DataTable → cards < 640px, 44px controls, wrap overflow; prod 390px audit 2026-11-03: all 22 pages fit (scrollWidth ≤ viewport) after #8 badge wrap. Screenshots not captured (Chrome CDP screenshot times out) — owner to eyeball on phone. Deferred: DataTable role attrs for VoiceOver.
-- [ ] ~~NEXT: MOBILE PASS (owner-approved 2026-11-02)~~ — app-wide phone layout: nav → top bar + drawer; DataTable →
+- [x] ~~NEXT: MOBILE PASS (owner-approved 2026-11-02)~~ — app-wide phone layout: nav → top bar + drawer; DataTable →
       stacked cards < 640px; forms/tabs/stats; per-page fixes at 390px; phone screenshots to owner before ship.
       Standing rule: every web change is browser-checked at 390px too.
 - [x] **SWITCH BUTTONS 2026-10-31** — /funds Switch check: "Done · first SIP in [this/next month]" logs the
@@ -102,7 +102,7 @@ MEMORY.md; the code map lives in index.md.
       2026-10-16, committed locally, pushed (not merged to main).** After deploy: apply migration 0034 to
       Supabase, then the controller records HDFC Mid Cap ₹3,001 paid 2026-10-12 via
       `recordSipPayment(..., source: 'owner-chat')` → Overview reads SIPs ₹30,254, remaining ₹22.
-- [ ] **Later batch: upcoming SIPs / pending mandates** (Invesco ₹3,001, first instalment Nov
+- [x] **Later batch: upcoming SIPs / pending mandates** (now active at ₹6,101 in INDmoney; feed sync pending) (Invesco ₹3,001, first instalment Nov
       2026) — dropped from 0034 by owner decision 2026-10-16; the feed counts it once live.
 - [ ] **PRE-EXISTING DEFECT — deferred orders never resurface.** `resurfaceDeferredOrder`
       reads `order_intents.defer_until`, which `deferOrder` never writes; the scheduler reads
