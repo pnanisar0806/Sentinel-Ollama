@@ -59,14 +59,14 @@ MEMORY.md; the code map lives in index.md.
       `2026-10-22-log-batch-a-design.md`. **Browser QA 2026-10-23 found two prod bugs (reversals refused;
       synced oversell unchecked) — fixed on `fix/log-batch-a-prod`. After deploy: reverse test sale
       (999999 Alphabet, ₹1,000) on /log, then finish the refused-input QA.** Tell owner: §3.3 FI→SP/B3 is covered by idle bank cash.
-- [ ] **WORK ORDER (owner, 2026-10-16):** finish SIP piece 1 (branch `fix/monthly-investing-controls`:
+- [x] **WORK ORDER (owner, 2026-10-16):** finish SIP piece 1 (functionality already on main; branch obsolete, deleted) (branch `fix/monthly-investing-controls`:
       owner SIP payments + rupee budget editor; migration 0034 → prod, push, record HDFC ₹3,001
       2026-10-12 via `recordSipPayment` source `owner-chat`) → **piece 2** (goal tracker + goal plan;
       brainstorm opens with the five spec §2.5 owner inputs) → **log batch A** (2,5,6,13) →
       ~~**piece 3** (funds-first)~~ (committed 2026-10-26) → **batch B** ← next (3,4,8; Invesco/mandates live here) → **batch C** (9,10).
       Each: design for owner approval → opus SDD → one squashed push. Migration 0035 (drop the 18
       permissive `using (true)` RLS policies) already applied to prod 2026-10-16.
-- [ ] **SIPs → goals → funds-first (owner, 2026-10-13/14).** Spec:
+- [x] **SIPs → goals → funds-first (owner, 2026-10-13/14).** Spec:
       `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` — approved.
   - [x] **Piece 1 (SIP tracking) — SHIPPED 2026-10-15**, branch `feat/sip-tracking`,
         squashed. Live 2026-10-14: snapshot id 1 = ICICI Nifty 50 ₹14,001, PPFAS Flexi
@@ -78,7 +78,7 @@ MEMORY.md; the code map lives in index.md.
         Invesco ₹3,001 = ₹30,254 → free ₹19,746. Gaps fixed 2026-10-15: the system now
         reads ₹19,746 free (departed HDFC counted) and ₹24 remaining once the gold ETF is logged. Proposals run in the WEEKLY report (Sundays); unknown SIPs hold
         rebalance + advisor without consuming the month, retry next weekly run.
-  - [ ] **Piece 2 (goal plan)** — branch `feat/goal-plan`, Tasks 1–7 committed locally, pushed (not merged to main).
+  - [x] **Piece 2 (goal plan)** — branch `feat/goal-plan`, Tasks 1–7 committed locally, pushed (not merged to main).
         Spec `2026-10-21-goal-plan-design.md`. Release: whole-branch review → squash → owner pushes.
     - [x] Goal tracker on `/buckets`, verdict lines on Overview, goal plan beside the normal
           plan on `/advisor` (raise budget, sign/revoke equity ceiling), "Keep ₹X this month".
@@ -98,7 +98,7 @@ MEMORY.md; the code map lives in index.md.
       (`owner_purchases`, migration 0033 applied to prod 2026-10-15; "remaining to invest").
 - [x] **Owner: log the Zerodha Gold ETF purchase on /log** — done; prod reads ₹19,724 spent
       (the note above said ₹19,722 — the logged figure stands).
-- [ ] **Owner SIP payments + rupee budget editor (branch `fix/monthly-investing-controls`,
+- [x] **Owner SIP payments + rupee budget editor (branch `fix/monthly-investing-controls`, (functionality already on main; branch obsolete, deleted)
       2026-10-16, committed locally, pushed (not merged to main).** After deploy: apply migration 0034 to
       Supabase, then the controller records HDFC Mid Cap ₹3,001 paid 2026-10-12 via
       `recordSipPayment(..., source: 'owner-chat')` → Overview reads SIPs ₹30,254, remaining ₹22.
