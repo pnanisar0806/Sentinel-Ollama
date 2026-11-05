@@ -5,6 +5,12 @@ every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
 ## Next up
+- [x] **SIP START UI + ACCOUNTING FIXES 2026-11-05** — /log "Start a new SIP", /funds Started/Undo, logged badges; logged starts and
+      move-to funds count in the commitment from their first month and retire once INDmoney lists them; a move stops only SIPs
+      listed or logged before it. Fixed: 0043 unrecorded on prod (sync/schedule crashed 11-03..11-05), CI web deps, IST window.
+  - [ ] Watch: if INDmoney gives a moved-from SIP a NEW sip_id while still listing it, it counts as a restart (over by its amount). Code cannot tell; check the first feed after a move.
+  - [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it (else "type unknown").
+  - [ ] Owner: top up OpenRouter credit — advisor now on paid `ling-3.1-flash`; confirm first OK call in `llm_calls`.
 - [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
   - [x] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px. (migration applied 2026-11-03; browser-check still pending)
   - [x] /log "Start a new SIP" tab + /funds "Started"/Undo + "logged, not yet in INDmoney" badges (branch `sip/ui`, 2026-11-05). Commitment now matches feed rows by their own ISIN (a move's stale "from" was double-counted when its IND:* id was no instrument).
