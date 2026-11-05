@@ -40,6 +40,7 @@ export const FUND_TYPE_BY_ISIN: Record<string, FundTyping> = {
   INF109K012M7: { type: 'NIFTY50', topUp: true },       // ICICI Pru Nifty 50 Index Direct
   INF732E01037: { type: 'NIFTY50', topUp: true },       // Nippon Nifty BeES
   INF879O01027: { type: 'FLEXI', topUp: true },         // Parag Parikh Flexi Cap Direct
+  INF209K01XX1: { type: 'FLEXI', topUp: true },         // Aditya Birla Sun Life Flexi Cap Fund (AMFI 120564)
   INF109K016L0: { type: 'LARGE_ACTIVE', topUp: true },  // ICICI Pru Large Cap Direct
   INF179K01XQ0: { type: 'MID', topUp: true },           // HDFC Mid Cap Direct
   INF247L01445: { type: 'MID', topUp: true },           // Motilal Oswal Midcap Direct

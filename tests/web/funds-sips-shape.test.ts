@@ -123,4 +123,15 @@ describe('getSipSuggestions', () => {
     expect(navi).toEqual([expect.objectContaining({ fundType: 'NIFTY50', instrumentId: null, currentPaise: 0n })]);
     expect(navi[0]!.suggestedPaise > 0n).toBe(true);
   });
+
+  // Owner, 2026-11-05: the switch pick's row had no instrument id, so /funds showed no Started button
+  // for a new SIP in it. A registered pick carries its id; an unregistered one stays null.
+  it('a switch pick that is a registered instrument carries its id, so the row can be marked Started', async () => {
+    const d = await db();
+    await d.query(`insert into instruments (id, kind, name, currency) values ('MFU:149999', 'MF', 'Navi Nifty 50 Index Fund', 'INR')`);
+    const r = await getSipSuggestions();
+    if (r.rows === null) throw new Error(r.reason);
+    expect(r.rows.filter((s) => s.fundName === 'Navi Nifty 50 Index Fund'))
+      .toEqual([expect.objectContaining({ instrumentId: 'MFU:149999', currentPaise: 0n })]);
+  });
 });
