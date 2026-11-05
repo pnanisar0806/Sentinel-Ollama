@@ -262,16 +262,23 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   const standins: ActiveSip[] = [];
   // Funds match by alias (`fundAliases`) plus the feed row's own ISIN: a feed id (IND:*) need not be an instrument.
   if (logged.length > 0) {
-    const isinOf = new Map((await db.query<{ sip_id: string; isin: string }>(
-      `select distinct sip_id, isin from sips where isin is not null and sip_id = any($1::text[])`,
-      [[...feedSips, ...departed.sips].map((s) => s.sipId)])).map((r) => [r.sip_id, r.isin]));
-    const froms = await Promise.all(logged.flatMap((l) => (l.fromId === null ? [] : [fundAliases(db, l.fromId)])));
+    // Every feed SIP ever seen, by sip_id: its fund (alias + own ISIN) and when it was first and last listed.
+    // ponytail: groups the whole sips table (a few rows per daily snapshot); bound it by date if it grows large.
+    const history = new Map(await Promise.all((await db.query<{ sip_id: string; instrument_id: string; isin: string | null; first: string | Date; last: string | Date }>(
+      `select x.sip_id, max(x.instrument_id) instrument_id, max(x.isin) isin, min(s.as_of) first, max(s.as_of) last
+         from sips x join sip_snapshots s on s.id = x.snapshot_id group by x.sip_id`))
+      .map(async (r) => [r.sip_id, { first: new Date(r.first).toISOString(), last: new Date(r.last).toISOString(),
+        aliases: await fundAliases(db, r.instrument_id, r.isin) }] as const)));
+    // A move stops its "from" SIP: the feed SIP listed by then (a stale row while INDmoney lags), and any stand-in
+    // logged before the move. A SIP on that fund first listed after the move, or logged after it, is a restart and counts.
+    const froms = await Promise.all(logged.flatMap((l) => (l.fromId === null ? [] : [fundAliases(db, l.fromId).then((aliases) => ({ aliases, at: l.loggedAt }))])));
+    const stoppedFeed = (sipId: string) => {
+      const h = history.get(sipId);
+      return h !== undefined && froms.some((f) => h.first <= f.at && sameFund(f.aliases, h.aliases));
+    };
     const keep = async (list: ActiveSip[]) => {
       const out: { s: ActiveSip; aliases: string[] }[] = [];
-      for (const s of list) {
-        const aliases = await fundAliases(db, s.instrumentId, isinOf.get(s.sipId) ?? null);
-        if (!froms.some((f) => sameFund(f, aliases))) out.push({ s, aliases });
-      }
+      for (const s of list) if (!stoppedFeed(s.sipId)) out.push({ s, aliases: history.get(s.sipId)?.aliases ?? await fundAliases(db, s.instrumentId) });
       return out;
     };
     const feed = await keep(feedSips);
@@ -279,17 +286,13 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
     feedSips = feed.map((x) => x.s);
     departed.sips = dep.map((x) => x.s);
     const seen = [...feed, ...dep].map((x) => x.aliases);
-    // Every fund any snapshot listed after the earliest log, with when it was last listed: a stand-in retires
-    // once the feed has shown its fund after it was logged, even if a later stop drops it from the active-only feed.
-    const earliest = logged.reduce((a, l) => (l.loggedAt < a ? l.loggedAt : a), logged[0]!.loggedAt);
-    const listed = await Promise.all((await db.query<{ instrument_id: string; isin: string | null; last: string | Date }>(
-      `select x.instrument_id, x.isin, max(s.as_of) last from sips x join sip_snapshots s on s.id = x.snapshot_id
-        where s.as_of > $1::timestamptz group by x.instrument_id, x.isin`, [earliest]))
-      .map(async (r) => ({ last: new Date(r.last).toISOString(), aliases: await fundAliases(db, r.instrument_id, r.isin) })));
+    // A stand-in retires once the feed listed its fund after it was logged — by a SIP no move stopped — even if a
+    // later stop drops it from the active-only feed.
+    const listed = [...history].filter(([sipId]) => !stoppedFeed(sipId)).map(([, h]) => h);
     for (const st of logged) {
       const aliases = await fundAliases(db, st.toId);
       if (seen.some((f) => sameFund(f, aliases))) continue; // the feed (or an earlier stand-in) wins
-      if (froms.some((f) => sameFund(f, aliases))) continue; // moved on again: its money runs in the newer "to"
+      if (froms.some((f) => f.at >= st.loggedAt && sameFund(f.aliases, aliases))) continue; // moved on (at or after it was logged): the newer "to" runs it
       if (listed.some((x) => x.last > st.loggedAt && sameFund(x.aliases, aliases))) continue; // the feed took it over
       seen.push(aliases);
       standins.push({

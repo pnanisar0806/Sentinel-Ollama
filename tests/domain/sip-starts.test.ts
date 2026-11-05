@@ -142,6 +142,39 @@ describe('loadSipCommitment with logged SIPs', () => {
     expect(c.sips.filter((s) => s.logged).map((s) => s.instrumentId)).toEqual(['MFU:150001']);
   });
 
+  describe('a fund moved away earlier and restarted later', () => {
+    const SEP = '2026-09-10T06:00:00.000Z';
+    const LATER = '2026-11-05T07:00:00.000Z';
+    const NO_HDFC = FEED.filter((s) => s.sipId !== 'HDFC-1');
+    const moveAway = async () => {
+      await persistSipSnapshot(db, FEED, '2026-09-01T06:00:00.000Z'); // HDFC-1 was running before the move
+      await logSipMove(db, { on: '2026-09-10', fromInstrumentId: 'MF:HDFC-MIDCAP', toInstrumentId: INVESCO, amountPaise: R(3_001), firstMonth: '2026-09', note: '' }, SEP);
+    };
+
+    it('a start logged after the move counts the restarted fund', async () => {
+      await moveAway();
+      await persistSipSnapshot(db, NO_HDFC, '2026-11-05T06:30:00.000Z');
+      await start({ instrumentId: 'MF:HDFC-MIDCAP', amountPaise: R(3_500), firstMonth: '2026-11' }, LATER);
+      const c = await loadSipCommitment(db, LATER);
+      expect(c.totalPaise).toBe(FEED_TOTAL - R(3_001) + R(3_001) + R(3_500)); // Invesco ₹3,001 + restarted HDFC ₹3,500
+      expect(c.sips.filter((s) => s.logged).map((s) => s.instrumentId).sort()).toEqual([INVESCO, 'MF:HDFC-MIDCAP'].sort());
+    });
+
+    it('a round trip A → B → A counts A once, and B not at all', async () => {
+      await moveAway();
+      await logSipMove(db, { on: '2026-11-05', fromInstrumentId: INVESCO, toInstrumentId: 'MF:HDFC-MIDCAP', amountPaise: R(3_001), firstMonth: '2026-11', note: '' }, LATER);
+      const c = await loadSipCommitment(db, LATER);
+      expect(c.totalPaise).toBe(FEED_TOTAL); // the stale HDFC-1 row is dropped; the logged HDFC ₹3,001 stands in
+      expect(c.sips.filter((s) => s.logged).map((s) => s.instrumentId)).toEqual(['MF:HDFC-MIDCAP']);
+    });
+
+    it('restarted directly in INDmoney: a new SIP id listed after the move counts', async () => {
+      await moveAway();
+      await persistSipSnapshot(db, [...NO_HDFC, { ...FEED[1]!, sipId: 'HDFC-2', amountPaise: R(4_000) }], LATER);
+      expect(await total(LATER)).toBe(FEED_TOTAL - R(3_001) + R(3_001) + R(4_000));
+    });
+  });
+
   it('a stand-in retires once a later snapshot listed the fund, even after the SIP leaves the feed', async () => {
     await start({ firstMonth: '2026-11' });
     await persistSipSnapshot(db, [...FEED, EDEL_FEED], '2026-11-05T07:00:00.000Z');

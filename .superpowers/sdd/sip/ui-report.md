@@ -49,3 +49,13 @@ focused 121/121; full vitest 1737/1737 (171 files); tsc root + web clean; next b
 4. /funds: no Started on a row the switch check says to leave.
 Verify: covering SIP tests 109/109; tsc root + web clean; next build OK; full vitest below.
 Full vitest: NOT completed this round. Claude Code stopped the run because the machine ran low on memory; per its instruction it was not restarted. Run `pnpm vitest run` once memory allows.
+
+## Fix round 2 (branch sip/ui-fix2 on a8c0c64)
+- Order-aware "from": a move drops a stand-in only if the move was logged at or after it (`>=`: same-instant
+  start-then-move still counts once), and drops a feed SIP only if that sip_id was first listed at or before the move.
+  A start after a move, a round trip A→B→A, and a SIP restarted directly in INDmoney (new sip_id) all count.
+- Feed path done (it was cheap): one grouped query over `sips` gives per-sip_id first/last listing + aliases; it also
+  feeds the retire rule, which now ignores listings by a SIP a move stopped (a stale old row no longer retires A).
+- Tests (16 in sip-starts): start after move counts A; round trip counts A once, B not; restart via new sip_id counts;
+  start-then-move still exact. Mutation-checked: order ignored for stand-ins (2 red), first-listing ignored (1 red).
+- Covering SIP/fund tests 139/139; tsc root + web clean. Full vitest not rerun this round.
