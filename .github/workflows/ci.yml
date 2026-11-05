@@ -14,6 +14,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - run: pnpm install --frozen-lockfile
+      # tests/web render web/lib/ui.tsx with web's own React (web/ is not a workspace package).
+      - run: pnpm --dir web install --frozen-lockfile
       # The entire safety argument for this branch is "the suite is green and tsc is
       # clean". Nothing enforced that on push until now.
       - run: pnpm exec tsc --noEmit

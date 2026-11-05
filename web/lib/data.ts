@@ -38,7 +38,7 @@ import { loadOpenLumpSums, type LumpSum } from '../../src/domain/lump-sums.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
 import { loadBudgetMonth, type BudgetMonth } from '../../src/domain/controls.js';
-import { istMonth, loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
+import { istDate, istMonth, loadFreeEnvelope, loadSipCommitment, nextStepUp, sipAssetClass } from '../../src/domain/sips.js';
 import { loadStockChecks, type StockChecks } from '../../src/domain/stock-checks.js';
 import {
   FUND_TYPE_LABEL, fundAliases, loadActualMix, sameFund,loadFindings, loadFundCandidates, loadSignedMix, midBps, newProposalReady, proposeMix,
@@ -1092,8 +1092,10 @@ export async function getRulesFor(instrumentIds: string[]): Promise<Map<string, 
 export async function getRuleSuppressions(): Promise<{ on: string; action: string; reason: string }[]> {
   return (await db()).query<{ on: string; action: string; reason: string }>(
     `select logged_on::text as "on", action, reason from suppressed_actions
-      where suppressed_by = 'HOLDING_RULE' and logged_on >= current_date - 60
-      order by logged_on desc, action`);
+      where suppressed_by = 'HOLDING_RULE' and logged_on >= $1::date - 60
+      order by logged_on desc, action`,
+    // The 60 days count from today in IST: the DB's current_date is UTC and is a day behind before 05:30 IST.
+    [istDate(new Date().toISOString())]);
 }
 
 /** The latest month's exit signals a hold-until rule holds back: a warning with its evidence, never a recommendation. */
