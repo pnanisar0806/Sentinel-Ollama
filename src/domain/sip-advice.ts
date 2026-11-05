@@ -128,15 +128,9 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
     heldByType, newFundNames, leaving,
     targetPaise: investable,
   })), investable);
-  const nameToId = new Map((await d.query<{ id: string; name: string }>(
-    `select id, name from instruments where name = any($1::text[])`, [planned.map((r) => r.fundName)],
-  )).map((r) => [r.name, r.id]));
   const rows = planned.map((r) => {
     const id = r.fundType === null ? undefined : newFundIds[r.fundType];
-    if (r.instrumentId !== null) return r;
-    if (id !== undefined && known.has(id) && r.fundName === newFundNames[r.fundType!]) return { ...r, instrumentId: id };
-    const byName = nameToId.get(r.fundName);
-    return byName === undefined ? r : { ...r, instrumentId: byName };
+    return r.instrumentId === null && id !== undefined && known.has(id) && r.fundName === newFundNames[r.fundType!] ? { ...r, instrumentId: id } : r;
   });
   return {
     rows, capped, budgetPaise, setAsidePaise,
