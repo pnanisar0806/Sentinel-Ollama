@@ -8,7 +8,9 @@ import { evaluateSwitches } from './mf-switch.js';
 import { loadFundMoves } from './fund-moves.js';
 import { loadPositions, type Position } from './networth.js';
 import { loadActiveSipMoves } from './owner-log.js';
-import { sipInstrumentKey } from './sips.js';
+import { fundAliases, sameFund } from './sips.js';
+
+export { fundAliases, sameFund };
 import { FUND_TYPE_LABEL, byGap, midBps, type FundBuy, type FundCandidates, type FundType, type RangeRow } from './fund-types.js';
 
 export { FUND_TYPE_LABEL, byGap, midBps, type FundBuy, type FundCandidates, type FundType, type RangeRow };
@@ -340,19 +342,6 @@ export async function typeOf(db: Db, instrumentId: string): Promise<FundTyping |
   return FUND_TYPE_BY_ID[instrumentId] ?? null;
 }
 
-/**
- * What identifies a fund across sources: its alias key (`sipInstrumentKey`) and every ISIN on it
- * or a one-hop alias, plus a feed row's own ISIN. Two funds are one when the lists share an entry —
- * a move's "to" may be MFU:* or MF:* while the feed and holdings say IND:*.
- */
-export async function fundAliases(db: Db, instrumentId: string, isin: string | null = null): Promise<string[]> {
-  const isins = await db.query<{ isin: string }>(
-    `select distinct b.isin from instruments a join instruments b on b.id=a.id
-       or (a.canonical_id is not null and b.canonical_id=a.canonical_id)
-       or (a.isin is not null and b.isin=a.isin) where a.id=$1 and b.isin is not null`, [instrumentId]);
-  return [await sipInstrumentKey(db, instrumentId), ...isins.map((r) => r.isin), ...(isin === null ? [] : [isin])];
-}
-export const sameFund = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
 
 export interface ActualMix {
   totalPaise: bigint;

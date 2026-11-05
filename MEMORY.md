@@ -868,6 +868,8 @@ it overstates flow closure ~1/max (biased toward REDIRECT, away from sales). Not
   move's "from" feed SIP is **dropped** even while the feed still lists it, and the "to" stands in
   (logged amount until the feed shows it, then the feed amount): the money is counted once. Moves and
   SIPs join funds by `fundAliases`/`sameFund` (canonical id + ISINs + feed ISIN), never raw id.
+  Logged starts (`sip_starts`) and moves stand in from their first month only (`loadSipCommitment`, sipId `logged:start:N` / `logged:move:N`);
+  feed rows match by their own `sips.isin` (an IND:* feed id is often no instrument). `fundAliases`/`sameFund` live in sips.ts, re-exported by fund-mix.
 - **Switch check** (`loadFundMoves`): one challenger and one bar decide both the SIP and the units
   answer. Active funds: `SWITCH_MARGIN`. Index funds (Nifty 50 / Next 50 / US): same-index peers
   only, on expense ratio, **bar `INDEX_SWITCH_MIN_BPS` = 10 bps**. No tax rupee figure (no fund
