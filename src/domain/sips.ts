@@ -248,7 +248,6 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   // Feed SIPs: drop a move's "from" fund from the first month onward.
   let feedSips = rows.map((r) => toSip(r, asOf));
   if (month !== null) {
-    feedSips = feedSips.filter(async () => true);
     const filtered: ActiveSip[] = [];
     for (const s of feedSips) {
       const key = await sipInstrumentKey(db, s.instrumentId);
@@ -280,7 +279,6 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   // ISINs recorded on the feed's sips rows (the snapshot may list a fund under an id we have no instrument for).
   const feedIsins = await db.query<{ isin: string }>(`select distinct isin from sips where snapshot_id = $1 and isin is not null`, [snap.id]);
   for (const r of feedIsins) feedIdents.add(r.isin);
-  // Also gather ISINs from all feed sips rows by sip_id? Simpler: query sips table for isins of feed snapshot.
   const standins: ActiveSip[] = [];
   const seenStandin = new Set<string>();
   for (const st of [...moveStandins, ...startStandins]) {
