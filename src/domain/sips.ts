@@ -241,20 +241,20 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
   const stale = !(Date.parse(nowIso) - Date.parse(asOf) <= SIP_MAX_AGE_DAYS * 86_400_000);
   const month = Number.isFinite(Date.parse(nowIso)) ? istMonth(nowIso) : null;
   // Active logged moves and starts (not reversed), read directly to avoid a module cycle with owner-log.
-  const activeMoves = await db.query<{ id: string; from_id: string; to_id: string; amount_paise: string; first_month: string; to_name: string }>(
+  const activeMoves = await db.query<{ id: string; from_id: string; to_id: string; amount_paise: string; first_month: string; to_name: string; as_of: string | Date }>(
     `select m.id::text, m.from_instrument_id from_id, m.to_instrument_id to_id, m.amount_paise::text,
-            m.first_month, t.name to_name
+            m.first_month, t.name to_name, m.as_of
        from sip_moves m join instruments t on t.id = m.to_instrument_id
       where not exists (select 1 from log_reversals r where r.entity = 'sip_move' and r.entity_id = m.id::text)`);
-  const activeStarts = await db.query<{ id: string; instrument_id: string; name: string; amount_paise: string; first_month: string }>(
-    `select s.id::text, s.instrument_id, i.name, s.amount_paise::text, s.first_month
+  const activeStarts = await db.query<{ id: string; instrument_id: string; name: string; amount_paise: string; first_month: string; as_of: string | Date }>(
+    `select s.id::text, s.instrument_id, i.name, s.amount_paise::text, s.first_month, s.as_of
        from sip_starts s join instruments i on i.id = s.instrument_id
       where not exists (select 1 from log_reversals r where r.entity = 'sip_start' and r.entity_id = s.id::text)`);
   // From its first month a logged SIP stands in, and a move's "from" stops (even while the feed still lists it).
   const started = (firstMonth: string) => month !== null && firstMonth <= month;
   const logged = [
-    ...activeMoves.filter((m) => started(m.first_month)).map((m) => ({ toId: m.to_id, toName: m.to_name, amount: BigInt(m.amount_paise), firstMonth: m.first_month, id: `move:${m.id}`, fromId: m.from_id as string | null })),
-    ...activeStarts.filter((s) => started(s.first_month)).map((s) => ({ toId: s.instrument_id, toName: s.name, amount: BigInt(s.amount_paise), firstMonth: s.first_month, id: `start:${s.id}`, fromId: null })),
+    ...activeMoves.filter((m) => started(m.first_month)).map((m) => ({ toId: m.to_id, toName: m.to_name, amount: BigInt(m.amount_paise), firstMonth: m.first_month, id: `move:${m.id}`, fromId: m.from_id as string | null, loggedAt: new Date(m.as_of).toISOString() })),
+    ...activeStarts.filter((s) => started(s.first_month)).map((s) => ({ toId: s.instrument_id, toName: s.name, amount: BigInt(s.amount_paise), firstMonth: s.first_month, id: `start:${s.id}`, fromId: null, loggedAt: new Date(s.as_of).toISOString() })),
   ];
   let feedSips = rows.map((r) => toSip(r, asOf));
   const departed = await departedThisMonth(db, snap.id, nowIso);
@@ -279,9 +279,18 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
     feedSips = feed.map((x) => x.s);
     departed.sips = dep.map((x) => x.s);
     const seen = [...feed, ...dep].map((x) => x.aliases);
+    // Every fund any snapshot listed after the earliest log, with when it was last listed: a stand-in retires
+    // once the feed has shown its fund after it was logged, even if a later stop drops it from the active-only feed.
+    const earliest = logged.reduce((a, l) => (l.loggedAt < a ? l.loggedAt : a), logged[0]!.loggedAt);
+    const listed = await Promise.all((await db.query<{ instrument_id: string; isin: string | null; last: string | Date }>(
+      `select x.instrument_id, x.isin, max(s.as_of) last from sips x join sip_snapshots s on s.id = x.snapshot_id
+        where s.as_of > $1::timestamptz group by x.instrument_id, x.isin`, [earliest]))
+      .map(async (r) => ({ last: new Date(r.last).toISOString(), aliases: await fundAliases(db, r.instrument_id, r.isin) })));
     for (const st of logged) {
       const aliases = await fundAliases(db, st.toId);
       if (seen.some((f) => sameFund(f, aliases))) continue; // the feed (or an earlier stand-in) wins
+      if (froms.some((f) => sameFund(f, aliases))) continue; // moved on again: its money runs in the newer "to"
+      if (listed.some((x) => x.last > st.loggedAt && sameFund(x.aliases, aliases))) continue; // the feed took it over
       seen.push(aliases);
       standins.push({
         sipId: `logged:${st.id}`, instrumentId: st.toId, fundName: st.toName, fundType: null, category: null,

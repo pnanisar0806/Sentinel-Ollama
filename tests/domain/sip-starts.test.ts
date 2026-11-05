@@ -130,6 +130,37 @@ describe('loadSipCommitment with logged SIPs', () => {
     expect(dec.sips.filter((s) => s.logged).map((s) => [s.instrumentId, s.amountPaise])).toEqual([[INVESCO, R(3_500)]]);
   });
 
+  it('a started fund moved on again counts once: the move\'s "to" replaces the start', async () => {
+    const IDX = 'Other Scheme - Index Funds';
+    await db.query(`update instruments set metadata = metadata || jsonb_build_object('category', $1::text) where id = $2`, [IDX, EDEL]);
+    await db.query(`insert into instruments (id, kind, name, currency, scheme_code, metadata) values ('MFU:150001', 'MF', 'UTI Nifty Next 50 Index Fund', 'INR', '150001', $1::jsonb)`,
+      [JSON.stringify({ indexChallenger: true, category: IDX, indexType: 'NEXT50' })]);
+    await start({ firstMonth: '2026-11' });
+    await logSipMove(db, { on: '2026-11-05', fromInstrumentId: EDEL, toInstrumentId: 'MFU:150001', amountPaise: R(2_000), firstMonth: '2026-11', note: '' }, NOV);
+    const c = await loadSipCommitment(db, NOV);
+    expect(c.totalPaise).toBe(FEED_TOTAL + R(2_000));
+    expect(c.sips.filter((s) => s.logged).map((s) => s.instrumentId)).toEqual(['MFU:150001']);
+  });
+
+  it('a stand-in retires once a later snapshot listed the fund, even after the SIP leaves the feed', async () => {
+    await start({ firstMonth: '2026-11' });
+    await persistSipSnapshot(db, [...FEED, EDEL_FEED], '2026-11-05T07:00:00.000Z');
+    // Stopped in INDmoney: gone from the active-only feed next month (this month it still counts as departed).
+    await persistSipSnapshot(db, FEED, DEC);
+    const c = await loadSipCommitment(db, DEC);
+    expect(c.totalPaise).toBe(FEED_TOTAL);
+    expect(c.sips.some((s) => s.logged)).toBe(false);
+  });
+
+  it('a listing from before the start was logged does not retire it', async () => {
+    // An earlier log on another fund: the listing below is after it, but before the Edelweiss start.
+    await start({ instrumentId: INVESCO, on: '2026-11-01', firstMonth: '2026-11', amountPaise: R(1_000) }, '2026-11-01T00:00:00.000Z');
+    await persistSipSnapshot(db, [...FEED, EDEL_FEED], '2026-11-01T07:00:00.000Z');
+    await persistSipSnapshot(db, FEED, '2026-11-05T05:00:00.000Z');
+    await start({ firstMonth: '2026-11' });
+    expect(await total()).toBe(FEED_TOTAL + R(1_000) + R(2_000));
+  });
+
   it('a reversal removes the start from the commitment', async () => {
     const { id } = await start({ firstMonth: '2026-11' });
     expect(await total()).toBe(FEED_TOTAL + R(2_000));

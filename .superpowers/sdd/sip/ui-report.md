@@ -37,3 +37,15 @@ focused 121/121; full vitest 1737/1737 (171 files); tsc root + web clean; next b
 - Once INDmoney lists Edelweiss under its own ISIN, the SIP card types it "type unknown" until that ISIN is
   in FUND_TYPE_BY_ISIN (not added: unverified ISIN). Listed in product.ts missing + PENDING.
 - 390px browser check still owed (controls use rule-ctl / tabs-sm, which are 44px on mobile).
+
+## Fix round 1 (branch sip/ui-fix1 off feat/sip-start-ui 8f1e391; the main checkout is off-limits to this worktree agent)
+1. Stand-ins are now also dropped when a move active this month has them as its "from" (start Edelweiss, then
+   move Edelweiss → X: only X counts). Test: exact total FEED + ₹2,000.
+2. A logged start / move-to retires once any snapshot taken after the log (`sip_starts.as_of` / `sip_moves.as_of`)
+   listed the fund (alias + feed ISIN), so a SIP stopped later in INDmoney does not come back. Tests: listed in a
+   later snapshot then absent next month → not counted; a listing from before the log does not retire it.
+   Mutation-checked: no froms check (1 red), no retire (1 red), retire ignoring log time (1 red).
+3. /funds: starts matched to rows by alias (`getSipStartsFor(ids)`), so a /log start under another id shows badge + Undo.
+4. /funds: no Started on a row the switch check says to leave.
+Verify: covering SIP tests 109/109; tsc root + web clean; next build OK; full vitest below.
+Full vitest: NOT completed this round. Claude Code stopped the run because the machine ran low on memory; per its instruction it was not restarted. Run `pnpm vitest run` once memory allows.

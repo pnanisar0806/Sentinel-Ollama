@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getRulesFor, getSipStarts, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getRulesFor, getSipStartsFor, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
 import { ruleLabel } from '../../../src/domain/holding-rules';
 import { AllowOnce } from '../allow-once';
 import { RuleButton } from '../rule-button';
@@ -52,7 +52,10 @@ export default async function FundsPage() {
   const rupees = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padStart(2, '0')}`;
   const rules = await getRulesFor(ranked.map((r) => r.instrumentId));
   // Logged SIP starts (Part B): Undo on their row; one whose first month is still ahead is not counted yet.
-  const startOf = new Map((await getSipStarts()).map((s) => [s.instrumentId, s]));
+  const startOf = await getSipStartsFor([
+    ...(suggested.rows ?? []).flatMap((s) => (s.instrumentId === null ? [] : [s.instrumentId])), ...ranked.map((r) => r.instrumentId)]);
+  // The switch check says to leave these: no Started (they take no new money).
+  const leavingIds = new Set(fundMoves.moves.filter((m) => m.sip.kind === 'move' || m.units.kind === 'move').map((m) => m.instrumentId));
   const loggedSip = new Set(sips.rows.filter((r) => r.logged).map((r) => r.instrumentId));
   const thisMonth = `for ${monthLabel(month)}`;
 
@@ -186,7 +189,7 @@ export default async function FundsPage() {
                       const m = movedTo.get(s.instrumentId);
                       return <>{s.fundName} <Badge tone="indigo">{m && !moveStarted(m, month) ? `logged, starts ${monthLabel(m.firstMonth)}` : 'logged, not yet in INDmoney'}</Badge>{undo}</>;
                     }
-                    if (s.currentPaise !== 0n) return s.fundName;
+                    if (s.currentPaise !== 0n || (!st && leavingIds.has(s.instrumentId))) return s.fundName;
                     // A new fund, or a held fund with no SIP: log the SIP once it is set up in INDmoney.
                     return st
                       ? <>{s.fundName} <Badge tone="indigo">logged, starts {monthLabel(st.firstMonth)}</Badge>{undo}</>

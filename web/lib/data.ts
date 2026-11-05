@@ -894,9 +894,22 @@ export async function getSipStartOptions(): Promise<{ held: { instrumentId: stri
   };
 }
 
-/** Logged SIP starts not reversed (spec 2026-11-03 Part B), for /funds Started / Undo. */
-export async function getSipStarts(): Promise<SipStart[]> {
-  return loadActiveSipStarts(await db());
+/**
+ * Logged SIP starts not reversed (spec 2026-11-03 Part B), for /funds Started / Undo: each of `ids` mapped to
+ * the start on the same fund by alias, so a start logged on /log under another id still finds its row.
+ */
+export async function getSipStartsFor(ids: string[]): Promise<Map<string, SipStart>> {
+  const d = await db();
+  const starts = await loadActiveSipStarts(d);
+  const out = new Map<string, SipStart>();
+  if (starts.length === 0) return out;
+  const own = await Promise.all(starts.map((s) => fundAliases(d, s.instrumentId)));
+  for (const id of new Set(ids)) {
+    const aliases = await fundAliases(d, id);
+    const i = own.findIndex((a) => sameFund(a, aliases));
+    if (i >= 0) out.set(id, starts[i]!);
+  }
+  return out;
 }
 
 /** Open Planned-spending labels for the Overview's one line. */
