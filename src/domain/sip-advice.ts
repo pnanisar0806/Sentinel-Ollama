@@ -10,7 +10,7 @@ import { loadFundMoves, type FundMove } from './fund-moves.js';
 import { loadActiveHoldingRules, ruleBlock, ruleLabel } from './holding-rules.js';
 import { universeInstrumentId } from './mf-universe.js';
 import { loadPositions } from './networth.js';
-import { loadActiveSipMoves } from './owner-log.js';
+import { loadActiveSipMoves, sipMoveFunds } from './owner-log.js';
 import { auditPayload } from './owner-sales.js';
 import { railPaise } from './rail-values.js';
 import {
@@ -58,7 +58,10 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   const typed = async (instrumentId: string, isinOf: string | null, aliases: string[]) => {
     const t = FUND_TYPE_BY_ISIN[isinOf ?? ''] ?? await typeOf(d, instrumentId);
     const m = t === null ? moves.find((x) => sameFund(x.to, aliases)) : undefined;
-    return m ? await typeOf(d, m.fromInstrumentId) : t;
+    if (m) return typeOf(d, m.fromInstrumentId);
+    // A logged start on an index challenger (MFU:*, no typed ISIN) is its index's type, open to new money.
+    const indexType = t === null ? (await sipMoveFunds(d, [instrumentId]))[0]?.indexType ?? null : null;
+    return indexType === null ? t : { type: indexType, topUp: true };
   };
   const rules = await loadActiveHoldingRules(d, now);
   const positions = rules.length === 0 ? [] : await loadPositions(d);
@@ -93,13 +96,16 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   const choices = (['US', 'NEXT50'] as const).map((t) => chooseIndexFund(indexRows, t));
   // A pick a rule refuses is skipped for the next; none left names the first refusing rule.
   const newFundNames: Partial<Record<FundType, string>> = {};
+  // The pick's MFU:* instrument, so the card can log the new SIP as started (registered by `registerIndexChallengers`).
+  const newFundIds: Partial<Record<FundType, string>> = {};
   for (const x of choices) {
     let name: string | undefined;
     let refusedBy: string | undefined;
     for (const pick of x.top ? [x.top, ...x.alternatives] : []) {
       // A ranked pick is always a verified AMFI Direct Growth scheme (`chooseIndexFund`).
-      const b = rules.length === 0 ? null : refusal(await fundAliases(d, universeInstrumentId(pick.amfiSchemeCode!)));
-      if (b === null) { name = pick.name; break; }
+      const id = universeInstrumentId(pick.amfiSchemeCode!);
+      const b = rules.length === 0 ? null : refusal(await fundAliases(d, id));
+      if (b === null) { name = pick.name; newFundIds[x.fundType] = id; break; }
       refusedBy ??= `no allowed alternative (your ${ruleLabel(b.rule)} rule on ${pick.name})`;
     }
     const shown = name ?? refusedBy;
@@ -115,12 +121,17 @@ export async function loadSipSuggestions(d: Db, now: string): Promise<SipSuggest
   const budgetPaise = await railPaise(d, 'monthly_budget_paise');
   const setAsidePaise = await railPaise(d, 'goal_setaside_monthly_paise');
   const investable = investablePaise(budgetPaise, setAsidePaise);
-  const { rows, capped } = capToBudget(neverCut(suggestSips({
+  const known = new Set((await d.query<{ id: string }>(`select id from instruments where id = any($1::text[])`, [Object.values(newFundIds)])).map((r) => r.id));
+  const { rows: planned, capped } = capToBudget(neverCut(suggestSips({
     sips, ranges: signed.ranges,
     actualBps: Object.fromEntries(types.map((t) => [t, actual.byType[t].shareBps])) as Record<FundType, number>,
     heldByType, newFundNames, leaving,
     targetPaise: investable,
   })), investable);
+  const rows = planned.map((r) => {
+    const id = r.fundType === null ? undefined : newFundIds[r.fundType];
+    return r.instrumentId === null && id !== undefined && known.has(id) && r.fundName === newFundNames[r.fundType!] ? { ...r, instrumentId: id } : r;
+  });
   return {
     rows, capped, budgetPaise, setAsidePaise,
     currentPaise: sips.reduce((a, s) => a + s.amountPaise, 0n),

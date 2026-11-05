@@ -46,7 +46,7 @@ import {
 } from '../../src/domain/fund-mix.js';
 import { loadSipSuggestions, type SipSuggestions } from '../../src/domain/sip-advice.js';
 import { chooseIndexFund, loadIndexFundRows, type IndexFundChoice } from '../../src/sources/index-funds.js';
-import { sipMoveFunds } from '../../src/domain/owner-log.js';
+import { loadActiveSipStarts, sipMoveFunds, type SipStart } from '../../src/domain/owner-log.js';
 import { loadUniverse } from '../../src/domain/mf-universe.js';
 import { loadFundMoves, type FundMove } from '../../src/domain/fund-moves.js';
 import { loadReviewLines, stopEventsInForce, type ReviewLine } from '../../src/domain/life-events.js';
@@ -873,6 +873,45 @@ export async function getSipMoveOptions(): Promise<SipMoveOptions> {
   return { from: fromList, toByCategory };
 }
 
+/**
+ * The "Start a new SIP" picker on /log: held funds (one per fund), then the registered universe and
+ * index-fund picks (MFU:*) — the funds the SIP card can suggest. `logSipStart` refuses one already running.
+ */
+export async function getSipStartOptions(): Promise<{ held: { instrumentId: string; name: string }[]; other: { instrumentId: string; name: string }[] }> {
+  const d = await db();
+  const positions = (await loadPositions(d, new Date().toISOString().slice(0, 10))).filter((p) => p.kind === 'MF');
+  const canon = new Map((await d.query<{ id: string; canonical_id: string | null }>(
+    `select id, canonical_id from instruments where id = any($1::text[])`, [positions.map((p) => p.instrumentId)])).map((r) => [r.id, r.canonical_id]));
+  const held = new Map<string, { instrumentId: string; name: string }>();
+  for (const p of positions) {
+    const key = canon.get(p.instrumentId) ?? p.instrumentId;
+    if (!held.has(key)) held.set(key, { instrumentId: p.instrumentId, name: p.name });
+  }
+  const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
+  return {
+    held: [...held.values()].sort(byName),
+    other: (await loadUniverse(d)).map((u) => ({ instrumentId: u.instrumentId, name: u.name })).sort(byName),
+  };
+}
+
+/**
+ * Logged SIP starts not reversed (spec 2026-11-03 Part B), for /funds Started / Undo: each of `ids` mapped to
+ * the start on the same fund by alias, so a start logged on /log under another id still finds its row.
+ */
+export async function getSipStartsFor(ids: string[]): Promise<Map<string, SipStart>> {
+  const d = await db();
+  const starts = await loadActiveSipStarts(d);
+  const out = new Map<string, SipStart>();
+  if (starts.length === 0) return out;
+  const own = await Promise.all(starts.map((s) => fundAliases(d, s.instrumentId)));
+  for (const id of new Set(ids)) {
+    const aliases = await fundAliases(d, id);
+    const i = own.findIndex((a) => sameFund(a, aliases));
+    if (i >= 0) out.set(id, starts[i]!);
+  }
+  return out;
+}
+
 /** Open Planned-spending labels for the Overview's one line. */
 export async function getPlannedSpending(): Promise<{ label: string; balancePaise: bigint }[]> {
   return loadSpLabels(await db());
@@ -979,6 +1018,8 @@ export interface SipsData {
   /** Active SIPs, then SIPs stopped this month after their instalment (`departed`, still counted). */
   rows: { key: string; fund: string; instrumentId: string; assetClass: string; amountPaise: bigint; departed: boolean;
           ownerPaid: boolean; paidOn?: string;
+          /** An owner-logged SIP (start or move "to") the feed does not list yet; counted. */
+          logged?: boolean;
           /** Owner-recorded rows: the full amount recorded; `amountPaise` is only the part beyond the feed. */
           recordedPaise?: bigint;
           stepUp: string | null; stepUpInferred: boolean; nextOn: string | null; nextAmountPaise: bigint | null }[];
@@ -999,7 +1040,7 @@ export async function getSips(): Promise<SipsData> {
       // Rupee step-ups to paise exactly, as nextStepUp does; rounding to the rupee would invent paise.
       stepUp: s.stepUpKind === null ? null : s.stepUpKind === 'percent' ? `${s.stepUpRaw}%`
         : s.stepUpKind === 'rupees' ? formatInr(paise(Math.round(s.stepUpRaw! * 100))) : 'unknown',
-      stepUpInferred: s.stepUpInferred, nextOn: n.on, nextAmountPaise: n.amountPaise, departed: false, ownerPaid: false,
+      stepUpInferred: s.stepUpInferred, nextOn: n.on, nextAmountPaise: n.amountPaise, departed: false, ownerPaid: false, logged: s.logged ?? false,
     };
   });
   const first = rows.map((r) => r.nextOn).filter((x): x is string => x !== null).sort()[0];

@@ -494,8 +494,9 @@ export async function logSipStart(
     // Active feed SIP on the same fund.
     const [snap] = await tx.query<{ id: string | number }>(`select id from sip_snapshots order by as_of desc, id desc limit 1`);
     if (snap) {
-      const feedRows = await tx.query<{ instrument_id: string }>(`select distinct instrument_id from sips where snapshot_id = $1`, [snap.id]);
-      const feedAliases = await Promise.all(feedRows.map((r) => fundAliases(tx, r.instrument_id)));
+      // The feed row's own ISIN too: its IND:* id need not be an instrument.
+      const feedRows = await tx.query<{ instrument_id: string; isin: string | null }>(`select distinct instrument_id, isin from sips where snapshot_id = $1`, [snap.id]);
+      const feedAliases = await Promise.all(feedRows.map((r) => fundAliases(tx, r.instrument_id, r.isin)));
       if (feedAliases.some((a) => sameFund(a, own))) throw new Error('an active SIP on this fund is already in the feed');
     }
     // Active logged start on the same fund.

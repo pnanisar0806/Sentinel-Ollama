@@ -32,7 +32,7 @@ export const AREAS: Area[] = [
     name: 'Log what I did',
     stage: 'live',
     what: 'The owner tells Sentinel what they did outside it, in the app instead of a chat.',
-    works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'Earmark money between FI, the goals and Planned spending (per-label pots, e.g. a trip); into the emergency fund or Planned spending it needs idle bank cash', 'Money spent from a pot, a goal or the bank', 'A sale or redemption (units required except for a fund), optionally into a pot; a sold manual-seed RSU share stops counting toward the house', 'A purchase made outside Sentinel (counts against that month’s remaining to invest)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry; Reverse with a reason on entries logged since batch A, struck through, never edited', 'Planned spending line on the Overview goals card', 'Move a SIP to another fund in the same AMFI category (stop the old, start the new), reversible', 'Money received (a lump sum, e.g. bond interest), reversible; a purchase outside Sentinel can be marked as paid from it and then counts against it, not the month'],
+    works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'Earmark money between FI, the goals and Planned spending (per-label pots, e.g. a trip); into the emergency fund or Planned spending it needs idle bank cash', 'Money spent from a pot, a goal or the bank', 'A sale or redemption (units required except for a fund), optionally into a pot; a sold manual-seed RSU share stops counting toward the house', 'A purchase made outside Sentinel (counts against that month’s remaining to invest)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry; Reverse with a reason on entries logged since batch A, struck through, never edited', 'Planned spending line on the Overview goals card', 'Move a SIP to another fund in the same AMFI category (stop the old, start the new), reversible', 'Start a new SIP (held fund or any registered universe / index fund, amount, first month this or next), reversible; it counts in SIPs this month, the envelope and the SIP card from its first month until INDmoney lists the fund', 'Money received (a lump sum, e.g. bond interest), reversible; a purchase outside Sentinel can be marked as paid from it and then counts against it, not the month'],
     missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'Sale and redemption proceeds do not become a lump sum by themselves (log them as money received)', 'No capital-gains tax on a logged sale'],
   },
   {
@@ -212,6 +212,8 @@ export const AREAS: Area[] = [
       'Switch check gives two answers per held fund: SIP (keep running / move SIP to B / moved to B from a month / no SIP / unknown when the SIP feed is stale or unknown, with why) and units (keep / move to B, with gain if sold now)',
       'Index funds are switch-checked against funds tracking the same index (Nifty 50, Next 50, US), on cost, with a 0.10-point bar',
       'A SIP move logged on /log shows as moved, and its stale feed row is counted once',
+      'Started on a Suggested SIPs row with no SIP yet (a new index fund or a held fund) logs the new SIP with the suggested amount and a first month; Undo reverses it',
+      'Logged SIPs show “logged, not yet in INDmoney” on the SIP card, the ranking and the Overview, and count once: the feed amount replaces them when INDmoney lists the fund',
     ],
     missing: [
       'Fund tenure and style drift have no source — 25 of the 100 points are unreachable, so 75 is full marks',
@@ -221,6 +223,7 @@ export const AREAS: Area[] = [
       'No tax rupee figure on a units move: no fund purchase dates, so the long/short-term split is unknown',
       "Cost finding needs universe peers' expense ratios (`pnpm mf:universe`)",
       'Tracking error has no source',
+      'A new fund the feed lists under an ISIN Sentinel has no type for (e.g. a new Next 50 fund) shows as type unknown on the SIP card until its ISIN is added to the fund-type table',
     ],
   },
   {
