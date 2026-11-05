@@ -23,7 +23,7 @@ Code fixes
 14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
 
 Owner actions / decisions
-15. [ ] Top up OpenRouter credit (advisor HTTP 402 since the switch to `ling-3.1-flash`).
+15. [x] Top up OpenRouter credit — $8 loaded 2026-11-05; first `ling-3.1-flash` OK rows in `llm_calls` (sentiment, id > 342). Note: ~10k reasoning tokens per 20-event batch, ~2 min each.
 16. [ ] Screener export with Pledged %, Promoter holding, CFO 5Y, PAT 5Y; plus the screener gate decision.
 17. [ ] Fresh Fidelity statement (unblocks US:NOW under FR-31 and tests the vest flow).
 18. [ ] Free amount is also capped by `tactical_monthly_paise` (₹50k): raise budget and tactical together.
@@ -46,7 +46,7 @@ Actionability package (larger builds)
       listed or logged before it. Fixed: 0043 unrecorded on prod (sync/schedule crashed 11-03..11-05), CI web deps, IST window.
   - [ ] Watch: if INDmoney gives a moved-from SIP a NEW sip_id while still listing it, it counts as a restart (over by its amount). Code cannot tell; check the first feed after a move.
   - [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it (else "type unknown").
-  - [ ] Owner: top up OpenRouter credit — advisor now on paid `ling-3.1-flash`; confirm first OK call in `llm_calls`.
+  - [x] Owner: top up OpenRouter credit — done 2026-11-05, OK calls confirmed in `llm_calls`.
 - [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
   - [x] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px. (migration applied 2026-11-03; browser-check still pending)
   - [x] /log "Start a new SIP" tab + /funds "Started"/Undo + "logged, not yet in INDmoney" badges (branch `sip/ui`, 2026-11-05). Commitment now matches feed rows by their own ISIN (a move's stale "from" was double-counted when its IND:* id was no instrument).
