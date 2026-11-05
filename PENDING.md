@@ -4,6 +4,42 @@ One screen of what's open, so a new session doesn't have to re-read anything. Up
 every session end alongside MEMORY.md / progress.md. Contracts & gotchas live in
 MEMORY.md; the code map lives in index.md.
 
+## Open list — owner-agreed 2026-11-05, tackled one at a time (detail in the sections below)
+
+Code fixes
+1. [ ] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason.
+2. [ ] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px.
+3. [ ] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break).
+4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
+5. [ ] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false.
+6. [ ] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source.
+7. [ ] Weekend FX / FR-31 blocks (weekly report runs Sunday). Needs a decision.
+8. [ ] Maturity/vest-funded buys not logged as purchases (form change).
+9. [ ] RSU vest form on /log (Telegram only today).
+10. [ ] Monthly financial snapshot + expense/surplus trend (job + page). Owner check first: does INDmoney `total_due` include interest/fees?
+11. [ ] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed.
+12. [ ] Monthly advisor only runs inside the weekly report (orphan).
+13. [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it.
+14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
+
+Owner actions / decisions
+15. [ ] Top up OpenRouter credit (advisor HTTP 402 since the switch to `ling-3.1-flash`).
+16. [ ] Screener export with Pledged %, Promoter holding, CFO 5Y, PAT 5Y; plus the screener gate decision.
+17. [ ] Fresh Fidelity statement (unblocks US:NOW under FR-31 and tests the vest flow).
+18. [ ] Free amount is also capped by `tactical_monthly_paise` (₹50k): raise budget and tactical together.
+19. [ ] Calibration minimum N = 20 — confirm or change.
+20. [ ] 10Y G-sec yield source; credit-rating actions source (IPS §3.8).
+21. [ ] `milestones.raised_on` dates.
+22. [ ] Surplus gaps: ₹1,82,124 vs PRD ₹1,76,000; ₹1,50,000 vs modelled surplus.
+23. [ ] Re-auth Vercel connector to the echodigi scope (log endpoints 403); delete dead `sentinel-web-app` project.
+24. [ ] Run watchlist shortlisting (LLM job) — after item 15.
+25. [ ] Smallcase: no open smallcase lots on prod now — confirm the residue/provenance items can close.
+26. [ ] `mf_switch` kind unused; /funds switch check covers it — confirm close.
+27. [ ] September review items (redesign v2, /import flow, real app) — confirm close.
+
+Actionability package (larger builds)
+28. [ ] Per-action policy for the free envelope; Task 4 sizing / Task 6 ADVISE / Task 10 /advisor — re-audit what already exists before building.
+
 ## Next up
 - [x] **SIP START UI + ACCOUNTING FIXES 2026-11-05** — /log "Start a new SIP", /funds Started/Undo, logged badges; logged starts and
       move-to funds count in the commitment from their first month and retire once INDmoney lists them; a move stops only SIPs
@@ -135,7 +171,7 @@ MEMORY.md; the code map lives in index.md.
       ₹50k — raise both together.
 - [ ] **Two zombie STALE_DATA incidents (`composite`, FX `seed`) can never clear** — no job
       refreshes those sources (found 2026-10-14). Close or re-source them.
-- [ ] **`indmoney-sips` STALE_DATA stays open while INDmoney falls back to the file
+- [x] (closed 2026-11-05: incident cleared after the live sync) **`indmoney-sips` STALE_DATA stays open while INDmoney falls back to the file
       source.** Honest, not a bug — clears on the next live sync.
 - [ ] **Stale FR-31 copy on `/freshness`:** "NAV and price ingestion … unimplemented in
       Phase 0" is false. Rewrite.
@@ -208,7 +244,7 @@ MEMORY.md; the code map lives in index.md.
       the old fraction-valued one printed 20.0%. The page now formats by the key's unit
       suffix — `_pct` as a percent, `_paise` through `rupees()`.
 
-- [ ] **FR-34 COOLING-OFF IS UNIMPLEMENTED, AND THE RAILS ENGINE DOES NOT GATE ANYTHING.**
+- [x] (closed 2026-11-05: rail edits cool 48h via settings_rails.pending_value; orders.ts gate calls checkRails + checkFreeze) **FR-34 COOLING-OFF IS UNIMPLEMENTED, AND THE RAILS ENGINE DOES NOT GATE ANYTHING.**
       Investigated 2026-09-19 while deciding whether to backfill a cooling row for the
       cash-ceiling change. What is actually true:
       - **`last_rail_change` is read in three places and written in none.** There is no
@@ -252,7 +288,7 @@ MEMORY.md; the code map lives in index.md.
       `sector_cap_pct` 20 vs 25, `issuer_cap_pct` 15 vs 10). Wiring them up means fixing
       those four first — copying the constants across would loosen the employer cap.
 
-- [ ] **`checkPortfolioRails` raises a permanent false TACTICAL_BUDGET_EXCEEDED.**
+- [x] (closed 2026-11-05: fixed 2026-10-14, compares month spend to the free envelope) **`checkPortfolioRails` raises a permanent false TACTICAL_BUDGET_EXCEEDED.**
       `src/domain/rails.ts:281` sums the market value of the whole EQUITY/ETF/MF book and
       compares that stock to the ₹50k/month flow budget, so it fires for any portfolio
       over ₹50k — it is one of the four breaches /rails shows today, reading
@@ -773,7 +809,7 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
       recommendations that can exist are the non-satellite kinds (2026-09-20 produced
       exactly `maturity_routing x1` and `rebalance x1`, which is correct behaviour).
 
-- [ ] **`index_prices_eod` has never been populated.** Zero rows. The benchmark leg of
+- [x] (closed 2026-11-05: 285 trading days on prod, to 2026-11-05) **`index_prices_eod` has never been populated.** Zero rows. The benchmark leg of
       the trend score and the scoring harness's excess-return comparison both read it.
 
 ---
@@ -845,7 +881,7 @@ items below either point at them or name a gap that plan does not cover.
       CHECK constraint and in the `RecKind` union, and no code constructs one. The engine
       ranks funds (consistency 40 / expense 20) but nothing turns a ranking into a switch.
       This is the entire mutual-fund answer and it does not exist.
-- [ ] **`sell` kind likewise never built.** Declared, unused.
+- [x] (closed 2026-11-05: exit-promotion.ts produces kind sell) **`sell` kind likewise never built.** Declared, unused.
 - [ ] **Smallcase units are placeholders — blocks any exit sizing.** `NSE:SMALLCASE-RESIDUE`
       (₹6,55,400), `NSE:NIFTYBEES` (₹95,000) and `NSE:LIQUIDBEES` (₹16,000) all carry
       `quantity = 1` against five- and six-figure values; only `NSE:GOLDBEES` (2,616 units)
@@ -893,7 +929,7 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       - [ ] Note: **cannot be backfilled.** INDmoney serves today only, so the trend begins
             at the first snapshot and needs 2-3 months to mean anything.
 
-- [ ] **Acquisition dates missing — blocks every tax-aware sell.** `lots` has 95 rows over
+- [x] (closed 2026-11-05: 0 of 95 lots lack acquired_on) **Acquisition dates missing — blocks every tax-aware sell.** `lots` has 95 rows over
       29 instruments, all with cost, but `acquired_on` is `2026-08-25` on all of them (the
       upload date). Holding period is therefore unknown, so LTCG/STCG cannot be split and
       no sell can be priced for tax. Cost basis is NOT the gap; dates are. Zerodha's tax
