@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import LifeEventForm from './life-event-form';
 import RulesPanel, { type RuleRow } from './rules-panel';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event' | 'rules';
+type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'sip_start' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event' | 'rules';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
@@ -14,6 +14,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'sale', label: 'A sale I made' },
   { id: 'purchase', label: 'Purchase outside Sentinel' },
   { id: 'sip_move', label: 'Move a SIP' },
+  { id: 'sip_start', label: 'Start a new SIP' },
   { id: 'bond', label: 'Bond matured' },
   { id: 'lump_sum', label: 'Money received' },
   { id: 'milestone', label: 'Milestone done' },
@@ -27,6 +28,10 @@ type Pot = { id: string; name: string; held: string };
 type Label = { label: string; held: string };
 
 const POTS = ['B2', 'B3', 'B4', 'SP'];
+
+type Fund = { instrumentId: string; name: string };
+type SipStartOptions = { held: Fund[]; other: Fund[] };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 type SipMoveOptions = {
   from: { instrumentId: string; name: string; category: string }[];
@@ -43,7 +48,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, lumpSums, lifeEvents, rules }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, sipStarts, lumpSums, lifeEvents, rules }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -54,6 +59,8 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   spLabels: Label[];
   idleCash: string;
   sipMoves: SipMoveOptions;
+  /** Funds a new SIP can be logged on: held MFs, then registered universe and index-fund picks. */
+  sipStarts: SipStartOptions;
   /** Open lump sums, labelled `from · ₹remaining left` by the page. */
   lumpSums: { id: string; label: string }[];
   /** Live job losses / medical expenses for the Life event tab's **Ended**. */
@@ -135,6 +142,10 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   // The domain refuses a first month before last month (IST); the picker says so up front.
   const [ty, tm] = today.split('-').map(Number) as [number, number];
   const minMonth = tm === 1 ? `${ty - 1}-12` : `${ty}-${String(tm - 1).padStart(2, '0')}`;
+  // A new SIP's first instalment: this month or next (default), as the /funds Started control.
+  const startMonths = [[ty, tm], tm === 12 ? [ty + 1, 1] : [ty, tm + 1]].map(([y, m]) => ({
+    value: `${y}-${String(m).padStart(2, '0')}`, label: `${MONTHS[m! - 1]} ${y}` }));
+  const startMonth = pick['firstMonth'] ?? startMonths[1]!.value;
 
   return (
     <div className="form">
@@ -389,6 +400,47 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
                     </div>
                     {date}
                   </div>
+                  {note}
+                </>
+              )}
+          </>
+        )}
+
+        {tab === 'sip_start' && (
+          <>
+            <p className="dim">
+              You set up a new monthly SIP in INDmoney. INDmoney lists a SIP only once its mandate is active, so Sentinel
+              counts this one from its first month — in SIPs this month, the free envelope and the SIP card — until the
+              feed shows it; then the feed&apos;s amount is used.
+            </p>
+            {sipStarts.held.length + sipStarts.other.length === 0
+              ? <p className="dim">No mutual fund on record yet: holdings come from the daily sync, other funds from <span className="mono">pnpm mf:universe</span>.</p>
+              : (
+                <>
+                  <div className="form-row">
+                    <div className="field">
+                      <label htmlFor="instrumentId">Fund</label>
+                      <select id="instrumentId" name="instrumentId" required>
+                        {sipStarts.held.length > 0 ? <optgroup label="Funds you hold">{sipStarts.held.map((f) => <option key={f.instrumentId} value={f.instrumentId}>{f.name}</option>)}</optgroup> : null}
+                        {sipStarts.other.length > 0 ? <optgroup label="Other funds Sentinel tracks">{sipStarts.other.map((f) => <option key={f.instrumentId} value={f.instrumentId}>{f.name}</option>)}</optgroup> : null}
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="rupees">Monthly amount (₹)</label>
+                      <input id="rupees" name="rupees" inputMode="decimal" placeholder="2000" required />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <span id="first-month-label">First SIP in</span>
+                    <input type="hidden" name="firstMonth" value={startMonth} />
+                    <div className="tabs tabs-sm" role="radiogroup" aria-labelledby="first-month-label">
+                      {startMonths.map((m) => (
+                        <button key={m.value} type="button" role="radio" aria-checked={startMonth === m.value}
+                          onClick={() => setPick((p) => ({ ...p, firstMonth: m.value }))}>{m.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="form-row">{date}</div>
                   {note}
                 </>
               )}

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getRulesFor, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
+import { getFundMix, getFundMoves, getIndexFundChoices, getMfRanking, getRulesFor, getSipStarts, getSipSuggestions, getSips, type MixStatus } from '@/lib/data';
 import { ruleLabel } from '../../../src/domain/holding-rules';
 import { AllowOnce } from '../allow-once';
 import { RuleButton } from '../rule-button';
@@ -15,6 +15,7 @@ import { istDate, istMonth } from '../../../src/domain/sips';
 import { nextMonthStart } from '../../../src/domain/cadence';
 import { ApproveMix } from './approve-mix';
 import { SipMoveButton } from './sip-move-button';
+import { SipStartButton } from './sip-start-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,6 +51,9 @@ export default async function FundsPage() {
   const movedTo = new Map(fundMoves.moves.flatMap((m) => (m.sip.kind === 'moved' ? [[m.sip.toId, m.sip] as const] : [])));
   const rupees = (p: bigint) => `${p / 100n}.${(p % 100n).toString().padStart(2, '0')}`;
   const rules = await getRulesFor(ranked.map((r) => r.instrumentId));
+  // Logged SIP starts (Part B): Undo on their row; one whose first month is still ahead is not counted yet.
+  const startOf = new Map((await getSipStarts()).map((s) => [s.instrumentId, s]));
+  const loggedSip = new Set(sips.rows.filter((r) => r.logged).map((r) => r.instrumentId));
   const thisMonth = `for ${monthLabel(month)}`;
 
   return (
@@ -174,11 +178,21 @@ export default async function FundsPage() {
               cols={[
                 {
                   label: 'Fund',
-                  value: ({ s }) => (s.instrumentId === null ? <span className="dim">{s.fundName}</span>
-                    : s.logged ? <>{s.fundName} <Badge tone="gray">{(() => {
+                  value: ({ s }) => {
+                    if (s.instrumentId === null) return <span className="dim">{s.fundName}</span>;
+                    const st = startOf.get(s.instrumentId);
+                    const undo = st ? <SipStartButton kind="started" startId={st.id} /> : null;
+                    if (s.logged) {
                       const m = movedTo.get(s.instrumentId);
-                      return m && !moveStarted(m, month) ? `logged, starts ${monthLabel(m.firstMonth)}` : 'logged, not yet in the feed';
-                    })()}</Badge></> : s.fundName),
+                      return <>{s.fundName} <Badge tone="indigo">{m && !moveStarted(m, month) ? `logged, starts ${monthLabel(m.firstMonth)}` : 'logged, not yet in INDmoney'}</Badge>{undo}</>;
+                    }
+                    if (s.currentPaise !== 0n) return s.fundName;
+                    // A new fund, or a held fund with no SIP: log the SIP once it is set up in INDmoney.
+                    return st
+                      ? <>{s.fundName} <Badge tone="indigo">logged, starts {monthLabel(st.firstMonth)}</Badge>{undo}</>
+                      : <>{s.fundName}<SipStartButton kind="start" instrumentId={s.instrumentId} fundName={s.fundName}
+                          rupees={s.suggestedPaise > 0n ? rupees(s.suggestedPaise) : ''} today={istDate(nowIso)} months={firstMonths} /></>;
+                  },
                 },
                 { label: 'Type', value: ({ s }) => (s.fundType === null ? <span className="dim">type unknown</span> : FUND_TYPE_LABEL[s.fundType]) },
                 {
@@ -193,9 +207,10 @@ export default async function FundsPage() {
             />
             <p className="muted">
               Today&apos;s SIPs total <Money p={suggested.currentPaise as never} />
-              {suggested.rows.some((s) => s.logged) ? ', counting SIP moves logged on /log that the feed does not show yet' : ''};
+              {suggested.rows.some((s) => s.logged) ? ', counting SIPs logged on Sentinel that INDmoney does not show yet' : ''};
               suggested <Money p={suggested.suggestedPaise as never} />. {sipCapSentence(suggested)} A fund the switch
-              check says to leave gets no new money. Change SIPs in INDmoney; the next sync shows them here.
+              check says to leave gets no new money. Change SIPs in INDmoney; mark a new one <strong>Started</strong> so it counts
+              from its first month — the next sync then shows it here.
             </p>
           </>
         )}
@@ -310,7 +325,9 @@ export default async function FundsPage() {
                     : sipAnswerOf.get(r.instrumentId)?.kind === 'moved'
                       ? <span className="dim">{moveStarted(sipAnswerOf.get(r.instrumentId)!, month) ? 'stopped — ' : ''}{sipText(sipAnswerOf.get(r.instrumentId)!, month)}</span>
                     : sipOf.has(r.instrumentId)
-                      ? <><Money p={sipOf.get(r.instrumentId)! as never} />/mo</>
+                      ? <><Money p={sipOf.get(r.instrumentId)! as never} />/mo{loggedSip.has(r.instrumentId) ? <> <Badge tone="indigo">logged, not yet in INDmoney</Badge></> : null}</>
+                    : startOf.has(r.instrumentId)
+                      ? <span className="dim">logged, starts {monthLabel(startOf.get(r.instrumentId)!.firstMonth)}</span>
                       : <span className="dim">no active SIP</span>),
                 },
                 {

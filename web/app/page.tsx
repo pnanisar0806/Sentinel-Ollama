@@ -108,7 +108,7 @@ export default async function OverviewPage() {
             ) : null}
             <div className="stat-grid">
               <Stat label="Budget" value={<Money p={sips.budgetPaise as Paise} />} accent="sky" />
-              <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + recorded payments" accent="violet" />
+              <Stat label="SIPs this month" value={sips.sipTotalPaise === null ? 'unknown' : <Money p={sips.sipTotalPaise as Paise} />} sub="INDmoney SIPs + logged SIPs + recorded payments" accent="violet" />
               {sips.setAsidePaise > 0n
                 ? <Stat label="Set aside for goals" value={<><Money p={sips.setAsidePaise as Paise} />/month</>} sub="house + emergency · log it on /log" accent="amber" />
                 : null}
@@ -151,6 +151,8 @@ export default async function OverviewPage() {
                           : <>paid {formatInr(r.recordedPaise as Paise)} on {r.paidOn} · {formatInr(r.amountPaise as Paise)} beyond the feed</>}</Badge></>
                         : r.departed
                         ? <><span className="dim">{r.fund}</span> <Badge tone="gray">stopped — counted this month</Badge></>
+                        : r.logged
+                        ? <>{r.fund} <Badge tone="indigo">logged, not yet in INDmoney</Badge></>
                         : r.fund),
                     },
                     { label: 'Class', value: (r) => <ClassChip assetClass={r.assetClass} /> },

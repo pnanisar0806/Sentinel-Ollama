@@ -140,6 +140,20 @@ export async function sipInstrumentKey(db: Db, instrumentId: string): Promise<st
   return row?.key ?? instrumentId;
 }
 
+/**
+ * What identifies a fund across sources: its alias key (`sipInstrumentKey`) and every ISIN on it
+ * or a one-hop alias, plus a feed row's own ISIN. Two funds are one when the lists share an entry —
+ * a move's "to" may be MFU:* or MF:* while the feed and holdings say IND:*.
+ */
+export async function fundAliases(db: Db, instrumentId: string, isin: string | null = null): Promise<string[]> {
+  const isins = await db.query<{ isin: string }>(
+    `select distinct b.isin from instruments a join instruments b on b.id=a.id
+       or (a.canonical_id is not null and b.canonical_id=a.canonical_id)
+       or (a.isin is not null and b.isin=a.isin) where a.id=$1 and b.isin is not null`, [instrumentId]);
+  return [await sipInstrumentKey(db, instrumentId), ...isins.map((r) => r.isin), ...(isin === null ? [] : [isin])];
+}
+export const sameFund = (a: string[], b: string[]): boolean => a.some((x) => b.includes(x));
+
 /** Owner-recorded SIP payments (`owner_sip_payments`) for the IST month of `now`, skipping reversed ones. */
 export async function loadOwnerSipPayments(db: Db, now: string): Promise<OwnerSipPayment[]> {
   const rows = await db.query<{ instrument_id: string; fund_name: string; paid_on: string; amount_paise: string; note: string; as_of: string | Date; source: string }>(
@@ -236,69 +250,45 @@ export async function loadSipCommitment(db: Db, nowIso: string): Promise<SipComm
     `select s.id::text, s.instrument_id, i.name, s.amount_paise::text, s.first_month
        from sip_starts s join instruments i on i.id = s.instrument_id
       where not exists (select 1 from log_reversals r where r.entity = 'sip_start' and r.entity_id = s.id::text)`);
-  const moveFromKeys = new Set<string>();
-  const moveStandins: { toId: string; toName: string; amount: bigint; firstMonth: string; id: string }[] = [];
-  for (const m of activeMoves) {
-    if (month !== null && m.first_month <= month) moveFromKeys.add(await sipInstrumentKey(db, m.from_id));
-    if (month !== null && m.first_month <= month) moveStandins.push({ toId: m.to_id, toName: m.to_name, amount: BigInt(m.amount_paise), firstMonth: m.first_month, id: m.id });
-  }
-  const startStandins = activeStarts
-    .filter((s) => month !== null && s.first_month <= month!)
-    .map((s) => ({ toId: s.instrument_id, toName: s.name, amount: BigInt(s.amount_paise), firstMonth: s.first_month, id: s.id }));
-  // Feed SIPs: drop a move's "from" fund from the first month onward.
+  // From its first month a logged SIP stands in, and a move's "from" stops (even while the feed still lists it).
+  const started = (firstMonth: string) => month !== null && firstMonth <= month;
+  const logged = [
+    ...activeMoves.filter((m) => started(m.first_month)).map((m) => ({ toId: m.to_id, toName: m.to_name, amount: BigInt(m.amount_paise), firstMonth: m.first_month, id: `move:${m.id}`, fromId: m.from_id as string | null })),
+    ...activeStarts.filter((s) => started(s.first_month)).map((s) => ({ toId: s.instrument_id, toName: s.name, amount: BigInt(s.amount_paise), firstMonth: s.first_month, id: `start:${s.id}`, fromId: null })),
+  ];
   let feedSips = rows.map((r) => toSip(r, asOf));
-  if (month !== null) {
-    const filtered: ActiveSip[] = [];
-    for (const s of feedSips) {
-      const key = await sipInstrumentKey(db, s.instrumentId);
-      if (moveFromKeys.has(key)) continue;
-      filtered.push(s);
-    }
-    feedSips = filtered;
-  }
   const departed = await departedThisMonth(db, snap.id, nowIso);
-  // Drop departed "from" funds too.
-  if (month !== null) {
-    const filteredDep: ActiveSip[] = [];
-    for (const s of departed.sips) {
-      const key = await sipInstrumentKey(db, s.instrumentId);
-      if (moveFromKeys.has(key)) continue;
-      filteredDep.push(s);
-    }
-    departed.sips = filteredDep;
-  }
   const odd = [...rows.filter((r) => r.frequency !== 'MONTHLY'), ...departed.odd].map((r) => `${r.fund_name} (${r.frequency})`);
-  // Stand-ins: logged SIPs (starts + move "to") from their first month, while the feed does not list the fund.
-  // Feed identifiers for alias matching: sipInstrumentKey + any ISIN (from sips or instruments).
-  const feedIdents = new Set<string>();
-  for (const s of [...feedSips, ...departed.sips]) {
-    feedIdents.add(await sipInstrumentKey(db, s.instrumentId));
-    const [i] = await db.query<{ isin: string | null }>(`select isin from instruments where id = $1`, [s.instrumentId]);
-    if (i?.isin) feedIdents.add(i.isin);
-  }
-  // ISINs recorded on the feed's sips rows (the snapshot may list a fund under an id we have no instrument for).
-  const feedIsins = await db.query<{ isin: string }>(`select distinct isin from sips where snapshot_id = $1 and isin is not null`, [snap.id]);
-  for (const r of feedIsins) feedIdents.add(r.isin);
   const standins: ActiveSip[] = [];
-  const seenStandin = new Set<string>();
-  for (const st of [...moveStandins, ...startStandins]) {
-    const idents = new Set<string>([await sipInstrumentKey(db, st.toId)]);
-    const [i] = await db.query<{ isin: string | null }>(`select isin from instruments where id = $1`, [st.toId]);
-    if (i?.isin) idents.add(i.isin);
-    // alias instruments sharing isin/canonical
-    const more = await db.query<{ isin: string | null }>(`select distinct isin from instruments where canonical_id = (select canonical_id from instruments where id = $1) and isin is not null`, [st.toId]);
-    for (const m of more) if (m.isin) idents.add(m.isin);
-    let inFeed = false;
-    for (const id of idents) if (feedIdents.has(id)) { inFeed = true; break; }
-    if (inFeed) continue; // feed wins
-    const key = await sipInstrumentKey(db, st.toId);
-    if (seenStandin.has(key)) continue;
-    seenStandin.add(key);
-    standins.push({
-      sipId: `logged:${st.id}`, instrumentId: st.toId, fundName: st.toName, fundType: null, category: null,
-      amountPaise: st.amount, stepUpRaw: null, stepUpKind: null, stepUpInferred: false, stepUpFreq: null,
-      startDate: `${st.firstMonth}-01`, asOf, logged: true,
-    });
+  // Funds match by alias (`fundAliases`) plus the feed row's own ISIN: a feed id (IND:*) need not be an instrument.
+  if (logged.length > 0) {
+    const isinOf = new Map((await db.query<{ sip_id: string; isin: string }>(
+      `select distinct sip_id, isin from sips where isin is not null and sip_id = any($1::text[])`,
+      [[...feedSips, ...departed.sips].map((s) => s.sipId)])).map((r) => [r.sip_id, r.isin]));
+    const froms = await Promise.all(logged.flatMap((l) => (l.fromId === null ? [] : [fundAliases(db, l.fromId)])));
+    const keep = async (list: ActiveSip[]) => {
+      const out: { s: ActiveSip; aliases: string[] }[] = [];
+      for (const s of list) {
+        const aliases = await fundAliases(db, s.instrumentId, isinOf.get(s.sipId) ?? null);
+        if (!froms.some((f) => sameFund(f, aliases))) out.push({ s, aliases });
+      }
+      return out;
+    };
+    const feed = await keep(feedSips);
+    const dep = await keep(departed.sips);
+    feedSips = feed.map((x) => x.s);
+    departed.sips = dep.map((x) => x.s);
+    const seen = [...feed, ...dep].map((x) => x.aliases);
+    for (const st of logged) {
+      const aliases = await fundAliases(db, st.toId);
+      if (seen.some((f) => sameFund(f, aliases))) continue; // the feed (or an earlier stand-in) wins
+      seen.push(aliases);
+      standins.push({
+        sipId: `logged:${st.id}`, instrumentId: st.toId, fundName: st.toName, fundType: null, category: null,
+        amountPaise: st.amount, stepUpRaw: null, stepUpKind: null, stepUpInferred: false, stepUpFreq: null,
+        startDate: `${st.firstMonth}-01`, asOf, logged: true,
+      });
+    }
   }
   const sips = [...feedSips, ...standins];
   // Per fund (aliases joined by sipInstrumentKey): the feed's amount, topped up to an owner-recorded
