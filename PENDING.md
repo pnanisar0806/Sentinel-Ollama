@@ -7,7 +7,7 @@ MEMORY.md; the code map lives in index.md.
 ## Open list — owner-agreed 2026-11-05, tackled one at a time (detail in the sections below)
 
 Code fixes
-1. [ ] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason.
+1. [x] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason. (fixed 2026-11-09: `neverCut` keeps any reason `suggestSips` already starts with "kept")
 2. [ ] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px.
 3. [ ] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break).
 4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.

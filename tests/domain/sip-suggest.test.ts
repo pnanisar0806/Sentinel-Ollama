@@ -157,6 +157,15 @@ describe('neverCut (owner, 2026-10-28)', () => {
     expect(n50.reason).toMatch(/never suggests cutting/);
     expect(rows.some((r) => r.suggestedPaise > r.currentPaise)).toBe(true);
   });
+
+  it('a SIP the switch check says to leave keeps its switch reason, not the never-cut one (open list #1)', () => {
+    const flexi = liveSips.find((x) => x.type === 'FLEXI')!;
+    const raw = suggestSips({ sips: liveSips, ranges, actualBps: capActual, heldByType: noneHeld(), leaving: { [flexi.instrumentId]: 'Better Flexi' } });
+    const before = raw.find((r) => r.instrumentId === flexi.instrumentId)!;
+    const after = neverCut(raw).find((r) => r.instrumentId === flexi.instrumentId)!;
+    expect(after).toMatchObject({ suggestedPaise: flexi.amountPaise, reason: before.reason });
+    expect(after.reason).toMatch(/switch check says to leave it/);
+  });
 });
 
 describe('FUND_TYPE_BY_ISIN (owner, 2026-10-29)', () => {

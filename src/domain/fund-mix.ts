@@ -318,10 +318,12 @@ export function suggestSips(i: {
  * Owner, 2026-10-28: a SIP is never suggested below its current amount. The re-split's cuts are
  * shown as "kept" and only its additions stand, so the suggested total can exceed today's;
  * `capToBudget` (sip-advice.ts, batch B §5) then scales the additions to the monthly budget.
+ * A row `suggestSips` already marked "kept…" (e.g. the switch check says to leave it) keeps its own
+ * reason: overwriting it made a switch decision read as a second, unrelated one (open list #1).
  */
 export function neverCut(rows: SipSuggestion[]): SipSuggestion[] {
   return rows.map((r) => (r.suggestedPaise >= r.currentPaise ? r
-    : { ...r, suggestedPaise: r.currentPaise, reason: 'kept — Sentinel never suggests cutting a SIP' }));
+    : { ...r, suggestedPaise: r.currentPaise, reason: r.reason.startsWith('kept') ? r.reason : 'kept — Sentinel never suggests cutting a SIP' }));
 }
 
 /**
