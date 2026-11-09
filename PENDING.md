@@ -41,6 +41,9 @@ Actionability package (larger builds)
 28. [ ] Per-action policy for the free envelope; Task 4 sizing / Task 6 ADVISE / Task 10 /advisor — re-audit what already exists before building.
 
 ## Next up
+- [x] **SBI NOT FREE CASH + INDMONEY-ID QUOTES 2026-11-09** — SBI balance excluded from idle cash and the cash
+      ceiling (owner 2026-11-06; still in net worth); an `IND:*` holding with no close takes its curated NSE ticker's
+      close in sizing (Zerodha Gold ETF ← `NSE:GOLDCASE`). Stray `=` file removed. 1747 tests.
 - [x] **SIP START UI + ACCOUNTING FIXES 2026-11-05** — /log "Start a new SIP", /funds Started/Undo, logged badges; logged starts and
       move-to funds count in the commitment from their first month and retire once INDmoney lists them; a move stops only SIPs
       listed or logged before it. Fixed: 0043 unrecorded on prod (sync/schedule crashed 11-03..11-05), CI web deps, IST window.

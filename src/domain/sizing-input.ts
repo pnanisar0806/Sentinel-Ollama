@@ -9,6 +9,7 @@ import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
 import type { RuleCheck, SizingInput } from './sizing.js';
 import { fromMicro, heldAfterSales, loadLiveSales, toMicro } from './owner-sales.js';
 import { openLumpSumPaise } from './lump-sums.js';
+import { tickerForInstrument } from '../sources/statement-tickers.js';
 import { loadActiveHoldingRules, monthLabel, ruleBlock, type HoldingRule } from './holding-rules.js';
 import { istMonth } from './sips.js';
 
@@ -92,7 +93,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
       instrumentId: p.instrumentId, valuePaise: p.valuePaise, units: unitsOf.get(p.instrumentId) ?? null,
       kind: p.kind, costKnown: p.avgCostPaise !== null,
     })),
-    quotes: new Map(quotes.map((q) => [q.instrument_id, { pricePaise: BigInt(q.close_paise), asOf: q.trade_date }])),
+    quotes: withTickerQuotes(new Map(quotes.map((q) => [q.instrument_id, { pricePaise: BigInt(q.close_paise), asOf: q.trade_date }])), positions),
     buys,
     sells: sells.map((s) => ({
       instrumentId: s.instrument_id, name: s.name, kind: s.kind, action: s.action,
@@ -136,4 +137,18 @@ export function makeRuleCheck(
     if (hit === null) return null;
     return { reason: hit.reason, ruleId: hit.rule.id, waiver: hit.waivedBy === null ? null : `${hit.reason} waived for ${monthLabel(month)}, by you` };
   };
+}
+
+/**
+ * INDmoney keys a holding by its own id (IND:INDS29570) and carries no ISIN, while the NSE
+ * bhavcopy prices the same listing as NSE:<ticker>. A held id with no close of its own takes
+ * the close of its curated statement ticker (`statement-tickers.ts`), never a guess.
+ */
+function withTickerQuotes<Q>(quotes: Map<string, Q>, positions: readonly { instrumentId: string }[]): Map<string, Q> {
+  for (const { instrumentId } of positions) {
+    const t = quotes.has(instrumentId) ? undefined : tickerForInstrument(instrumentId);
+    const q = t === undefined ? undefined : quotes.get(`NSE:${t}`);
+    if (q !== undefined) quotes.set(instrumentId, q);
+  }
+  return quotes;
 }

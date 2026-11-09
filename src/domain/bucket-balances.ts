@@ -26,11 +26,21 @@ export async function loadSpLabels(db: Db): Promise<{ label: string; balancePais
 }
 
 /**
- * Bank cash not set aside: CASH-class positions less B3 and SP, which are bank cash too.
+ * Bank accounts that are never free cash (owner, 2026-11-06): the SBI balance is not money
+ * Sentinel may plan with. It still counts in net worth; only idle-cash maths skips it.
+ */
+export const NOT_FREE_CASH: ReadonlySet<string> = new Set(['IND:STATE-BANK-OF-INDIA']);
+
+/** A CASH position whose balance counts as free (idle) bank cash. */
+export const isFreeCash = (p: { assetClass: string; instrumentId: string }): boolean =>
+  p.assetClass === 'CASH' && !NOT_FREE_CASH.has(p.instrumentId);
+
+/**
+ * Bank cash not set aside: free CASH positions less B3 and SP, which are bank cash too.
  * Null when no CASH position is known. Shared by sizing and earmarks so they cannot drift.
  */
-export function idleBankCash(positions: readonly { assetClass: string; valuePaise: bigint }[], balances: Map<string, bigint>): bigint | null {
-  const cash = positions.filter((p) => p.assetClass === 'CASH');
-  if (cash.length === 0) return null;
-  return cash.reduce((s, p) => s + p.valuePaise, 0n) - (balances.get('B3') ?? 0n) - (balances.get('SP') ?? 0n);
+export function idleBankCash(positions: readonly { assetClass: string; instrumentId: string; valuePaise: bigint }[], balances: Map<string, bigint>): bigint | null {
+  if (!positions.some((p) => p.assetClass === 'CASH')) return null;
+  const cash = positions.filter(isFreeCash).reduce((s, p) => s + p.valuePaise, 0n);
+  return cash - (balances.get('B3') ?? 0n) - (balances.get('SP') ?? 0n);
 }

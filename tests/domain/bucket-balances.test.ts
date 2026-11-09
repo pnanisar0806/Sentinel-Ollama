@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
-import { loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
+import { idleBankCash, loadBucketBalances, loadSpLabels, NOT_FREE_CASH } from '../../src/domain/bucket-balances.js';
 import { loadSizingInput } from '../../src/domain/sizing-input.js';
 import { checkPortfolioRails } from '../../src/domain/rails.js';
 import type { Position } from '../../src/domain/networth.js';
@@ -105,5 +105,31 @@ describe('SP is held back from investable cash, exactly like B3 (spec §7.1)', (
     expect(await ceiling()).toHaveLength(1);             // 20% idle
     await flow('SP', rupees(100_000), 'Himachal trip');   // 10% idle after SP: at the inclusive cap
     expect(await ceiling()).toHaveLength(0);
+  });
+});
+
+describe('SBI is not free cash (owner 2026-11-06)', () => {
+  const cashPos = (id: string, value: Paise): Position => ({
+    instrumentId: id, name: id, kind: 'CASH', valuePaise: value, sector: null, currency: 'INR', account: 'bank',
+    source: 'test', asOf: new Date().toISOString(), assetClass: 'CASH', issuer: null, isEmployer: false, avgCostPaise: null,
+  });
+  const [sbi] = [...NOT_FREE_CASH];
+
+  it('idleBankCash counts the operating bank only', () => {
+    expect(sbi).toBe('IND:STATE-BANK-OF-INDIA');
+    const positions = [cashPos('IND:HDFC-BANK', rupees(271_069)), cashPos(sbi!, rupees(119_877))];
+    expect(idleBankCash(positions, new Map([['B3', rupees(1_000)]]))).toBe(rupees(270_069));
+  });
+
+  it('only-SBI cash is known (₹0 free), not unknown', () => {
+    expect(idleBankCash([cashPos(sbi!, rupees(119_877))], new Map())).toBe(0n);
+  });
+
+  it('the cash ceiling ignores SBI', async () => {
+    const eq = { ...cashPos('NSE:EQ', rupees(800_000)), kind: 'EQUITY', assetClass: 'EQUITY' } as Position;
+    const ceiling = async (positions: Position[]) =>
+      (await checkPortfolioRails(db, positions, rupees(1_000_000))).filter((b) => b.code === 'CASH_CEILING');
+    expect(await ceiling([cashPos(sbi!, rupees(200_000)), eq])).toHaveLength(0);
+    expect(await ceiling([cashPos('IND:HDFC-BANK', rupees(200_000)), eq])).toHaveLength(1);
   });
 });

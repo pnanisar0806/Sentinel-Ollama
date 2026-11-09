@@ -8,7 +8,7 @@ import type { OverrideEvent } from './recommendations.js';
 import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
 import { istMonth, loadFreeEnvelope } from './sips.js';
 import { loadLumpSum } from './lump-sums.js';
-import { loadBucketBalances } from './bucket-balances.js';
+import { isFreeCash, loadBucketBalances } from './bucket-balances.js';
 import { isFundTopUp, monthsBetween } from './repeat-buy-hold.js';
 
 export { DEFAULT_OWNER_RAILS, railPaise };
@@ -452,7 +452,7 @@ async function checkCashCeiling(
 
   let cash = 0n;
   for (const p of positions) {
-    if (p.assetClass === 'CASH') cash += p.valuePaise;
+    if (isFreeCash(p)) cash += p.valuePaise;
   }
 
   const balances = await loadBucketBalances(db);
