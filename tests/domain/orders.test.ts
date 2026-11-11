@@ -3,7 +3,7 @@ import { openDb } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { persistSipSnapshot } from '../../src/domain/sips.js';
-import { createOrder, getOrder, getPendingApprovals, approveOrder, modifyOrder, deferOrder, rejectOrder, expireOrders, acknowledgeAdvisory, simulatePaperEvent, getOrderHistory, awaitManualExecution, verifyAdvisory, abandonAdvisory, resurfaceDeferredOrder, recordAdvisoryReminder, type OrderStatus, type OrderIntent } from '../../src/domain/orders.js';
+import { createOrder, getOrder, getPendingApprovals, approveOrder, modifyOrder, deferOrder, rejectOrder, expireOrders, acknowledgeAdvisory, simulatePaperEvent, getOrderHistory, awaitManualExecution, verifyAdvisory, abandonAdvisory, resurfaceDeferredOrder, resurfaceDueDeferredOrders, getDeferredOrders, recordDueAdvisoryReminders, recordAdvisoryReminder, type OrderStatus, type OrderIntent } from '../../src/domain/orders.js';
 import { buildRecommendation, type Recommendation, type RecLeg, persistRecommendation } from '../../src/domain/recommendations.js';
 import { paise } from '../../src/money/paise.js';
 
@@ -416,53 +416,78 @@ describe('advisory path (FR-25)', () => {
   });
 });
 
-describe('deferred order resurfacing', () => {
-  it('resurfaces a deferred order when deferUntil date has passed', async () => {
+describe('deferred order resurfacing (open list #3)', () => {
+  const NOW = new Date('2026-11-11T05:00:00Z');
+  const deferred = async (deferUntil: string, evidence?: Recommendation['engineEvidence']) => {
     const rec = makeRecommendation();
+    if (evidence) rec.engineEvidence = evidence;
     const persisted = await persistRecommendation(db, rec);
     const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor' });
-    await deferOrder(db, order.id, { idempotencyKey: `d1`, actor: 'owner', deferUntil: '2020-01-01' });
+    await deferOrder(db, order.id, { idempotencyKey: `d1`, actor: 'owner', deferUntil });
+    return order.id;
+  };
 
-    const resurfaced = await resurfaceDeferredOrder(db, order.id);
-    // resurfaceDeferredOrder may return null in test env due to validation gate
-    if (resurfaced) {
-      expect(resurfaced.status).toBe('PENDING_APPROVAL');
-      expect(resurfaced.payloadSnapshot.resurfaced).toBe(true);
-    }
+  it('a deferred order carries its defer date (deferOrder writes it to the transition, not order_intents)', async () => {
+    const id = await deferred('2026-11-10');
+    expect((await getOrder(db, id))?.deferUntil).toBe('2026-11-10');
   });
 
-  it('returns null when deferUntil date has not yet passed', async () => {
-    const rec = makeRecommendation();
-    const persisted = await persistRecommendation(db, rec);
-    const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor' });
-    await deferOrder(db, order.id, { idempotencyKey: `d1`, actor: 'owner', deferUntil: '2026-12-31' });
+  it('lists deferred orders for the scheduler', async () => {
+    const id = await deferred('2026-11-10');
+    expect((await getDeferredOrders(db)).map((o) => o.id)).toEqual([id]);
+  });
 
-    const resurfaced = await resurfaceDeferredOrder(db, order.id);
-    expect(resurfaced).toBeNull();
+  it('resurfaces a due deferred order back to PENDING_APPROVAL', async () => {
+    const id = await deferred('2026-11-10');
+    const resurfaced = await resurfaceDeferredOrder(db, id, NOW);
+    expect(resurfaced?.status).toBe('PENDING_APPROVAL');
+    expect(resurfaced?.payloadSnapshot.resurfaced).toBe(true);
+    expect((await getPendingApprovals(db)).map((o) => o.id)).toContain(id);
+  });
+
+  it('leaves an order deferred until its date', async () => {
+    const id = await deferred('2026-11-12');
+    expect(await resurfaceDeferredOrder(db, id, NOW)).toBeNull();
+    expect((await getOrder(db, id))?.status).toBe('DEFERRED');
   });
 
   it('returns null for non-DEFERRED orders', async () => {
     const rec = makeRecommendation();
     const persisted = await persistRecommendation(db, rec);
     const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor' });
-
-    const resurfaced = await resurfaceDeferredOrder(db, order.id);
-    expect(resurfaced).toBeNull();
+    expect(await resurfaceDeferredOrder(db, order.id, NOW)).toBeNull();
   });
 
-  it('recommends withdrawal when composite score is below threshold', async () => {
-    const rec = makeRecommendation();
-    rec.engineEvidence = { composite: 30 }; // Below threshold
-    const persisted = await persistRecommendation(db, rec);
-    const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor' });
-    await deferOrder(db, order.id, { idempotencyKey: `d1`, actor: 'owner', deferUntil: '2020-01-01' });
+  it('a fallen score resurfaces with a withdrawal recommendation (no DEFERRED to DEFERRED row)', async () => {
+    const id = await deferred('2026-11-10', { composite: 30 });
+    const resurfaced = await resurfaceDeferredOrder(db, id, NOW);
+    expect(resurfaced?.status).toBe('PENDING_APPROVAL');
+    expect(resurfaced?.payloadSnapshot.withdrawalRecommended).toBe(true);
+  });
 
-    const resurfaced = await resurfaceDeferredOrder(db, order.id);
-    // resurfaceDeferredOrder returns null in test env due to validation gate; this is expected
-    // The withdrawal logic is tested via the FR-31 validation in staleness tests
-    if (resurfaced) {
-      expect(resurfaced.payloadSnapshot.withdrawalRecommended).toBe(true);
-    }
+  it('resurfaceDueDeferredOrders resurfaces only the due ones', async () => {
+    const due = await deferred('2026-11-10', { composite: 30 });
+    const later = await deferred('2026-11-30');
+    expect(await resurfaceDueDeferredOrders(db, NOW)).toEqual({ resurfaced: 1, withdrawals: 1 });
+    expect((await getOrder(db, due))?.status).toBe('PENDING_APPROVAL');
+    expect((await getOrder(db, later))?.status).toBe('DEFERRED');
+    expect(await resurfaceDueDeferredOrders(db, NOW)).toEqual({ resurfaced: 0, withdrawals: 0 });
+  });
+});
+
+describe('advisory T+2/T+7 reminders (open list #3: the scheduler never saw AWAITING orders)', () => {
+  it('records each reminder once, from 2 and 7 days after AWAITING_MANUAL_EXECUTION', async () => {
+    const rec = makeRecommendation({ kind: 'sell' });
+    const persisted = await persistRecommendation(db, rec);
+    const order = await createOrder(db, { recommendationId: persisted.id!, recommendation: rec, createdBy: 'advisor', advisoryPath: true });
+    await approveOrder(db, order.id, { idempotencyKey: `a1`, actor: 'owner' });
+    await awaitManualExecution(db, order.id, { idempotencyKey: `ame1`, actor: 'owner' });
+    const day = 86_400_000;
+    const t0 = Date.now();
+    expect(await recordDueAdvisoryReminders(db, new Date(t0 + day))).toEqual({ t2: 0, t7: 0 });
+    expect(await recordDueAdvisoryReminders(db, new Date(t0 + 2 * day + 60_000))).toEqual({ t2: 1, t7: 0 });
+    expect(await recordDueAdvisoryReminders(db, new Date(t0 + 3 * day))).toEqual({ t2: 0, t7: 0 });
+    expect(await recordDueAdvisoryReminders(db, new Date(t0 + 7 * day + 60_000))).toEqual({ t2: 0, t7: 1 });
   });
 });
 
@@ -545,4 +570,4 @@ describe('advisory reminders', () => {
     const history = await getOrderHistory(db, order.id);
     expect(history.simulations.some(s => s.simType === 'T7_REMINDER')).toBe(true);
   });
-});
+});

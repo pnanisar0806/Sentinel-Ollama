@@ -303,16 +303,39 @@ async function getOrderWithStatus(db: Db, id: string): Promise<OrderIntent | nul
   
   const intent = toOrderIntent({ ...row, current_revision: currentRevision, quantity: currentQuantity }, currentStatus);
   
-  // Merge latest transition payload for fields like deferUntil, rejectReason
+  // Merge latest transition payload for fields like deferUntil, rejectReason. Same order as
+  // getCurrentStatus (at, then id) so two rows in one instant cannot disagree.
   const [latestTransition] = await db.query<Record<string, unknown>>(
-    `select payload_snapshot from order_transitions where order_intent_id = $1 order by at desc limit 1`,
+    `select payload_snapshot from order_transitions where order_intent_id = $1 order by at desc, id desc limit 1`,
     [id],
   );
   if (latestTransition) {
     const transitionPayload = latestTransition.payload_snapshot as Record<string, unknown>;
-    return { ...intent, payloadSnapshot: { ...intent.payloadSnapshot, ...transitionPayload } };
+    // order_intents is append-only, so deferOrder records the defer date on its transition;
+    // a DEFERRED order reads it from there (open list #3).
+    const deferred = currentStatus === 'DEFERRED' && typeof transitionPayload.deferUntil === 'string'
+      ? transitionPayload.deferUntil : intent.deferUntil;
+    return { ...intent, deferUntil: deferred, payloadSnapshot: { ...intent.payloadSnapshot, ...transitionPayload } };
   }
   return intent;
+}
+
+/** Orders whose latest transition (at, then id) is `status`, oldest first. */
+export async function getOrdersByStatus(db: Db, status: OrderStatus): Promise<OrderIntent[]> {
+  const rows = await db.query<{ id: string }>(
+    `select id from (
+       select distinct on (ot.order_intent_id) ot.order_intent_id as id, ot.to_status, oi.created_at
+         from order_transitions ot join order_intents oi on oi.id = ot.order_intent_id
+        order by ot.order_intent_id, ot.at desc, ot.id desc
+     ) latest where to_status = $1 order by created_at`,
+    [status],
+  );
+  const out: OrderIntent[] = [];
+  for (const r of rows) {
+    const o = await getOrderWithStatus(db, r.id);
+    if (o) out.push(o);
+  }
+  return out;
 }
 
 export async function createOrder(db: Db, input: CreateOrderInput): Promise<OrderIntent> {
@@ -809,15 +832,14 @@ export async function recordAdvisoryReminder(db: Db, orderId: string, reminderTy
  * refreshes staleness/validation and notifies if score fell below threshold.
  * Returns the order if resurfaced, null if not yet time, or throws if validation fails.
  */
-export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderIntent | null> {
+export async function resurfaceDeferredOrder(db: Db, id: string, now: Date = new Date()): Promise<OrderIntent | null> {
   const order = await getOrderWithStatus(db, id);
   if (!order) throw new Error(`Order ${id} not found`);
   if (order.status !== 'DEFERRED') return null;
   if (!order.deferUntil) return null;
 
-  const deferDate = new Date(order.deferUntil);
-  const now = new Date();
-  if (deferDate > now) return null; // Not yet time to resurface
+  // deferUntil is a calendar date: the order is due from that day, read in IST.
+  if (istDate(now) < order.deferUntil.slice(0, 10)) return null;
 
   // Build recommendation from payload for re-validation
   const payload = order.payloadSnapshot as unknown as Recommendation;
@@ -843,12 +865,13 @@ export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderI
     // Score below HIGH/MEDIUM threshold - recommend withdrawal
     const note = `Resurfaced from deferral: composite score ${composite} below threshold, recommended withdrawal`;
     await simulatePaperEvent(db, id, 'T2_REMINDER', note);
-    // Update payload with withdrawal recommendation
-    const newPayload = { ...payload, withdrawalRecommended: true, withdrawalReason: `composite ${composite} < 40` };
+    // Back in front of the owner with a withdrawal recommendation; the owner rejects it. A
+    // DEFERRED-to-DEFERRED row would break order_transitions' from_status <> to_status check.
+    const newPayload = { ...payload, resurfaced: true, resurfacedAt: now.toISOString(), withdrawalRecommended: true, withdrawalReason: `composite ${composite} < 40` };
     await db.query(
       `insert into order_transitions
          (order_intent_id, revision_number, from_status, to_status, actor, payload_snapshot, expected_revision, idempotency_key)
-       values ($1, $2, $3, $3, $4, $5, $2, $6)`,
+       values ($1, $2, $3, 'PENDING_APPROVAL', $4, $5, $2, $6)`,
       [id, order.currentRevision, 'DEFERRED', 'system', JSON.stringify(newPayload), `resurface:${id}:${now.toISOString()}`],
     );
     return getOrderWithStatus(db, id);
@@ -864,6 +887,53 @@ export async function resurfaceDeferredOrder(db: Db, id: string): Promise<OrderI
   );
 
   return getOrderWithStatus(db, id);
+}
+
+/** Deferred orders: what the scheduler resurfaces. */
+export const getDeferredOrders = (db: Db): Promise<OrderIntent[]> => getOrdersByStatus(db, 'DEFERRED');
+
+/**
+ * Scheduler step (FR-25): T+2 and T+7 reminders for advisory orders awaiting manual execution,
+ * each recorded once, counted from the latest AWAITING_MANUAL_EXECUTION transition.
+ */
+export async function recordDueAdvisoryReminders(db: Db, now: Date = new Date()): Promise<{ t2: number; t7: number }> {
+  let t2 = 0;
+  let t7 = 0;
+  for (const order of await getOrdersByStatus(db, 'AWAITING_MANUAL_EXECUTION')) {
+    if (!order.advisoryPath) continue;
+    const [since] = await db.query<{ at: string | Date }>(
+      `select at from order_transitions where order_intent_id = $1 and to_status = 'AWAITING_MANUAL_EXECUTION'
+        order by at desc, id desc limit 1`,
+      [order.id],
+    );
+    if (!since) continue;
+    const days = (now.getTime() - new Date(since.at).getTime()) / 86_400_000;
+    const sent = new Set((await db.query<{ sim_type: string }>(
+      `select distinct sim_type from order_simulations where order_intent_id = $1 and sim_type in ('T2_REMINDER', 'T7_REMINDER')`,
+      [order.id],
+    )).map((r) => r.sim_type));
+    if (days >= 2 && !sent.has('T2_REMINDER')) { await recordAdvisoryReminder(db, order.id, 'T2_REMINDER'); t2++; }
+    if (days >= 7 && !sent.has('T7_REMINDER')) { await recordAdvisoryReminder(db, order.id, 'T7_REMINDER'); t7++; }
+  }
+  return { t2, t7 };
+}
+
+/** IST calendar date (YYYY-MM-DD) of an instant. */
+function istDate(d: Date): string {
+  return new Date(d.getTime() + 330 * 60_000).toISOString().slice(0, 10);
+}
+
+/** Scheduler step: resurface every deferred order that is due. Idempotent: a resurfaced order is no longer DEFERRED. */
+export async function resurfaceDueDeferredOrders(db: Db, now: Date = new Date()): Promise<{ resurfaced: number; withdrawals: number }> {
+  let resurfaced = 0;
+  let withdrawals = 0;
+  for (const order of await getDeferredOrders(db)) {
+    const r = await resurfaceDeferredOrder(db, order.id, now);
+    if (r === null) continue;
+    resurfaced++;
+    if (r.payloadSnapshot.withdrawalRecommended === true) withdrawals++;
+  }
+  return { resurfaced, withdrawals };
 }
 
 export async function getOrderHistory(db: Db, id: string): Promise<{ revisions: OrderRevision[]; transitions: OrderTransition[]; simulations: OrderSimulation[] }> {

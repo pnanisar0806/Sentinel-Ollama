@@ -3416,3 +3416,16 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   (`rails.ts` uses `isFreeCash`). Only-SBI cash reads ₹0 free (known), not unknown.
 - `loadSizingInput` fills a missing quote for an INDmoney-keyed holding from its curated
   `statement-tickers.ts` ticker (`NSE:<ticker>` close). No ticker → no quote; never a guess.
+
+## Deferred orders and advisory reminders, fixed 2026-11-11 (open list #3)
+
+- `order_intents` is append-only, so `deferOrder` stores the defer date in its DEFERRED transition's
+  payload. `getOrderWithStatus` sets `deferUntil` from that payload when the status is DEFERRED; the
+  `order_intents.defer_until` column stays whatever `createOrder` wrote (normally null).
+- `deferUntil` is a calendar date: an order is due from that IST day (`istDate(now) >= deferUntil`).
+- A fallen score (composite < 40) resurfaces to PENDING_APPROVAL with `withdrawalRecommended: true`;
+  the owner then rejects it. Never write a DEFERRED-to-DEFERRED row: `from_status <> to_status`.
+- The scheduler used `getPendingApprovals`, which returns PENDING_APPROVAL only, so it never saw
+  DEFERRED or AWAITING_MANUAL_EXECUTION orders: resurfacing AND the T+2/T+7 reminders were dead.
+  Both now use `getOrdersByStatus` (latest transition by at, then id).
+- "Latest transition" always orders by `at desc, id desc`.

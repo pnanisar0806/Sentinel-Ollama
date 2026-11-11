@@ -9,7 +9,7 @@ MEMORY.md; the code map lives in index.md.
 Code fixes
 1. [x] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason. (fixed 2026-11-09: `neverCut` keeps any reason `suggestSips` already starts with "kept")
 2. [x] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px. (prod 2026-11-11: /funds, /log, Overview fit 390px; SIP total ₹40,804 same on /funds and Overview; item-1 switch reason live)
-3. [ ] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break).
+3. [x] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break). (fixed 2026-11-11; T+2/T+7 reminders were dead too, fixed)
 4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
 5. [ ] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false.
 6. [ ] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source.
@@ -150,7 +150,7 @@ Actionability package (larger builds)
       `recordSipPayment(..., source: 'owner-chat')` → Overview reads SIPs ₹30,254, remaining ₹22.
 - [x] **Later batch: upcoming SIPs / pending mandates** (now active at ₹6,101 in INDmoney; feed sync pending) (Invesco ₹3,001, first instalment Nov
       2026) — dropped from 0034 by owner decision 2026-10-16; the feed counts it once live.
-- [ ] **PRE-EXISTING DEFECT — deferred orders never resurface.** `resurfaceDeferredOrder`
+- [x] (fixed 2026-11-11, open list #3) **PRE-EXISTING DEFECT — deferred orders never resurface.** `resurfaceDeferredOrder`
       reads `order_intents.defer_until`, which `deferOrder` never writes; the scheduler reads
       PENDING_APPROVAL only. Its withdrawal path writes DEFERRED→DEFERRED, violating
       `from_status <> to_status`. `getOrderWithStatus` payload-merge read lacks a tie-break.
