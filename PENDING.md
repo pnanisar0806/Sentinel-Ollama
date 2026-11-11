@@ -8,7 +8,7 @@ MEMORY.md; the code map lives in index.md.
 
 Code fixes
 1. [x] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason. (fixed 2026-11-09: `neverCut` keeps any reason `suggestSips` already starts with "kept")
-2. [ ] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px.
+2. [x] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px. (prod 2026-11-11: /funds, /log, Overview fit 390px; SIP total ₹40,804 same on /funds and Overview; item-1 switch reason live)
 3. [ ] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break).
 4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
 5. [ ] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false.
@@ -53,7 +53,7 @@ Actionability package (larger builds)
 - [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
   - [x] Apply 0043 to prod (recorded, triggers + RLS); browser-check /funds + Overview at 390px. (migration applied 2026-11-03; browser-check still pending)
   - [x] /log "Start a new SIP" tab + /funds "Started"/Undo + "logged, not yet in INDmoney" badges (branch `sip/ui`, 2026-11-05). Commitment now matches feed rows by their own ISIN (a move's stale "from" was double-counted when its IND:* id was no instrument).
-  - [ ] Browser-check /log Start a new SIP + /funds Started at 390px; add the Edelweiss Next 50 ISIN to `FUND_TYPE_BY_ISIN` once INDmoney lists it (else "type unknown").
+  - [x] Browser-check /log Start a new SIP + /funds Started at 390px (done 2026-11-11). [ ] Add the Edelweiss Next 50 ISIN to `FUND_TYPE_BY_ISIN` once INDmoney lists it (else "type unknown").
 - [x] **BATCH C SHIPPED 2026-11-03** — holding rules (no new money / hold until / never buy again / cap %), one-off
       Allow once (month or lump sum), life events with review lines + IPS stop-event flags. 0042 applied to prod
       2026-11-03 (recorded, 8 triggers, RLS). Spec `2026-10-31-batch-c-design.md`, plan `2026-10-31-batch-c.md`. 1723 tests.
