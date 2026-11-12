@@ -3390,6 +3390,19 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   **projected future RSU vests (after withholding) toward the house**; house money sits in
   debt/arbitrage (IPS: no equity within 7 years of purchase). Not a firm commitment by the owner.
 
+## Payday cash flow — contract (open list #10/#29, 2026-11-12)
+
+- INDmoney refreshes bank balances only when the owner opens its app (prod: HDFC changed 3 times in 53 days; card
+  `total_due` is the billed statement only). No refresh API; AA needs a licensed FIU. So the owner enters a payday on
+  /log (salary + HDFC balance right after it); only HDFC counts (owner). Nothing is modelled or compared to the PRD.
+- Cycle = consecutive live paydays (A, B]: left HDFC = A.balance + other in − (B.balance − B.salary); spend = left −
+  invested − set aside − loan principal; surplus = A.salary + other in − spend. Other in = lump sums with `origin` NULL +
+  sales with no pot + bond redemptions. Invested = B's frozen SIP commitment + owner purchases + BUY orders first
+  FILLED/VERIFIED in the window. Set aside = owner goal flows of kind `sip`. Loan principal = fall in INDmoney loan balances.
+- `paydays.sips_paise` freezes the month's `loadSipCommitment` at entry (feed must be fresh vs now, entry ≤ 10 days after
+  the payday); otherwise NULL and the cycle's spend/surplus are unknown. Two paydays < 10 days apart are refused.
+- HDFC staleness = days since the amount last changed (`bankBalanceAge`), stale at 7.
+
 ## Lump sums — accounting contract (batch B, 2026-10-31)
 
 - A lump sum (`lump_sums`, /log "Money received") is money outside the month: purchases (`owner_purchases.lump_sum_id`)

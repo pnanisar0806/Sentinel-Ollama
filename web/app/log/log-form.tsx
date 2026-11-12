@@ -5,10 +5,11 @@ import { useRouter } from 'next/navigation';
 import LifeEventForm from './life-event-form';
 import RulesPanel, { type RuleRow } from './rules-panel';
 
-type Tab = 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'sip_start' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event' | 'rules';
+type Tab = 'payday' | 'goal' | 'earmark' | 'spend' | 'sale' | 'purchase' | 'sip_move' | 'sip_start' | 'bond' | 'lump_sum' | 'milestone' | 'note' | 'life_event' | 'rules';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'goal', label: 'Money into a goal' },
+  { id: 'payday', label: 'Payday' },
   { id: 'earmark', label: 'Earmark money' },
   { id: 'spend', label: 'Money spent' },
   { id: 'sale', label: 'A sale I made' },
@@ -48,7 +49,7 @@ async function post(body: object): Promise<{ ok: boolean; text: string }> {
  * One form per kind of thing the owner did. Validation is server-side in the domain;
  * this only gathers the fields and reports what the server said, verbatim.
  */
-export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, sipStarts, lumpSums, lifeEvents, rules }: {
+export default function LogForm({ buckets, bonds, holdings, milestones, today, sellable, pots, spLabels, idleCash, sipMoves, sipStarts, lumpSums, lifeEvents, rules, hdfcHint, initialTab }: {
   buckets: { id: string; name: string }[];
   holdings: { id: string; name: string }[];
   bonds: { id: string; name: string }[];
@@ -67,9 +68,13 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
   lifeEvents: { id: string; label: string; on: string }[];
   /** Active holding rules with their Allow onces, for the Holding rules tab. */
   rules: RuleRow[];
+  /** INDmoney's HDFC figure and its real age, shown under the payday balance for reference only. */
+  hdfcHint: string | null;
+  /** `/log?tab=payday` (the Overview reminder) opens that tab. */
+  initialTab?: string;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>('goal');
+  const [tab, setTab] = useState<Tab>(TABS.some((t) => t.id === initialTab) ? initialTab as Tab : 'goal');
   // The picks that change which fields a form shows; cleared with the form.
   const [pick, setPick] = useState<Record<string, string>>({});
   // Defaults handed over by another tab (a windfall → Money received); cleared with the tab.
@@ -521,6 +526,29 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
               {date}
             </div>
           ))}
+
+        {tab === 'payday' && (
+          <>
+            <p className="dim">
+              Once a month, right after the salary lands in HDFC. Two paydays in a row make one cycle on{' '}
+              <a href="/cashflow">Cash flow</a>: what came in, what was invested, and what was spent. Enter the balance
+              from your HDFC app, after the salary credit.
+            </p>
+            <div className="form-row">
+              <div className="field">
+                <label htmlFor="salary">Salary credited (₹)</label>
+                <input id="salary" name="salary" inputMode="decimal" required />
+              </div>
+              <div className="field">
+                <label htmlFor="balance">HDFC balance after it (₹)</label>
+                <input id="balance" name="balance" inputMode="decimal" required />
+                {hdfcHint ? <span className="help">{hdfcHint}</span> : null}
+              </div>
+              {date}
+            </div>
+            {note}
+          </>
+        )}
 
         {tab === 'note' && (
           <>

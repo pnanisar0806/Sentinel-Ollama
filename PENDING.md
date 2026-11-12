@@ -16,13 +16,13 @@ Code fixes
 7. [x] Weekend FX / FR-31 blocks (weekly report runs Sunday). (already fixed 2026-09-20, `79dbf2a`: prices/NAVs/FX judged against the last completed trading session; prod has no market STALE_DATA incident since 09-21 — verified 2026-11-11)
 8. [x] (fixed 2026-11-12, owner OK: unticked by default) Maturity/vest-funded buys not logged as purchases. The bond redemption and sale forms carry "Invest this money": ticked, the amount becomes a lump sum in the same transaction (`lump_sums.origin`, migration 0045), one live lump per entry, and reversing the sale reverses its lump. A vest pays shares, so its money arrives through a sale.
 9. [x] (closed by owner 2026-11-12: not needed. The vest schedule is already modelled; actual vests and new grants come from the Fidelity statement upload on Telegram `/fidelity`) RSU vest form on /log.
-10. [ ] Monthly financial snapshot + expense/surplus trend (job + page). Owner check first: does INDmoney `total_due` include interest/fees?
+10. [x] (built 2026-11-12, owner-approved design) Payday-to-payday cash flow: /log "Payday" tab (salary + HDFC balance after it, migration 0046 `paydays`), `/cashflow` page, Overview reminder from the 2nd-last weekday. Nothing modelled; only HDFC (owner). Prod data answered the owner check: INDmoney card `total_due` is the billed statement only, so cards are not read at all (bills paid count as spend). Starts from scratch: first cycle after two paydays.
 11. [x] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed. (verified on prod 2026-11-11: scores since 09-27; 11-08 run 35 of 41 quality-passed names > 0, max 30/30, 10 composites ≥ 60)
 12. [x] Monthly advisor only runs inside the weekly report (orphan). (not an orphan, by design: first successful weekly run of the month, waits for the budget up to the 7th, retry crons 07:30/11:30 UTC; ran 2026-10-04 and 2026-11-08 on prod. Cost: up to 6 days' lag after the budget settles — owner may ask for a daily attempt)
 13. [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it.
 14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
 
-29. [ ] **INDmoney data goes stale without anyone noticing (owner, 2026-11-12).** INDmoney does not refresh
+29. [~] (2026-11-12: HDFC stale warning built: Overview + /freshness date the balance by its last change, stale at 7 days. INDmoney has no refresh API and Account Aggregator access needs a licensed FIU (checked); CRED Money has no API; owner declined SMS forwarding, Gmail and Telegram. Holdings/MF staleness still open) **INDmoney data goes stale without anyone noticing (owner, 2026-11-12).** INDmoney does not refresh
     bank balances and holdings daily; Sentinel reads whatever INDmoney last pulled. Investigate, in order:
     (a) does any INDmoney MCP tool expose a per-row "last refreshed" time? If so, store it as `as_of` instead
     of the sync time and let FR-31 flag stale accounts honestly; (b) is there any read-only way to ask

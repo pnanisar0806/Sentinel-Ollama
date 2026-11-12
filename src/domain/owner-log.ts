@@ -630,6 +630,7 @@ function describe(entity: string, entityId: string, action: string, p: Payload):
       const month = y && mo ? `${MONTHS[Number(mo) - 1] ?? mo} ${y}` : 'unknown month';
       return { kind: 'SIP', summary: `Started a SIP: ${String(p['fundName'] ?? '')}, ${money(p['amountPaise'])}/month from ${month}` };
     }
+    case 'payday/LOGGED': return { kind: 'Payday', summary: `Payday: salary ${money(p['salaryPaise'])}, ${String(p['account'] ?? 'HDFC')} balance ${money(p['balancePaise'])}` };
     case 'lump_sum/LOGGED': return { kind: 'Lump sum', summary: `Money received: ${money(p['amountPaise'])} from ${String(p['from'] ?? '')}` };
     case 'owner_purchase/LOGGED': return { kind: 'Purchase', summary: `Bought ${money(p['amountPaise'])} of ${String(p['description'] ?? '')}` };
     case 'milestone/COMPLETED': return { kind: 'Milestone', summary: `Completed ${String(p['name'] ?? entityId)}` };
@@ -662,7 +663,7 @@ export async function loadOwnerTimeline(db: Db, limit = 100): Promise<TimelineEn
   const rows = await db.query<{ id: string; at: string | Date; entity: string; entity_id: string; action: string; payload: unknown }>(
     `select id::text, at, entity, entity_id, action, payload from audit_log
       where actor = 'owner' and entity in ('bucket_flow', 'milestone', 'owner_note', 'bond_redemption', 'rsu_vest', 'owner_purchase',
-        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'sip_start', 'lump_sum', 'life_event')
+        'owner_sip_payment', 'earmark', 'spend', 'owner_sale', 'sip_move', 'sip_start', 'lump_sum', 'life_event', 'payday')
       order by at desc, id desc limit $1`,
     [limit],
   );

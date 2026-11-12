@@ -33,7 +33,15 @@ export const AREAS: Area[] = [
     stage: 'live',
     what: 'The owner tells Sentinel what they did outside it, in the app instead of a chat.',
     works: ['Money into or out of a goal (feeds B3 progress and the cash ceiling)', 'Earmark money between FI, the goals and Planned spending (per-label pots, e.g. a trip); into the emergency fund or Planned spending it needs idle bank cash', 'Money spent from a pot, a goal or the bank', 'A sale or redemption (units required except for a fund), optionally into a pot; a sold manual-seed RSU share stops counting toward the house', 'A purchase made outside Sentinel (counts against that month’s remaining to invest)', 'Bond redemption with the amount credited', 'Milestone completion', 'Free-text notes', 'Timeline of every owner entry; Reverse with a reason on entries logged since batch A, struck through, never edited', 'Planned spending line on the Overview goals card', 'Move a SIP to another fund in the same AMFI category (stop the old, start the new), reversible', 'Start a new SIP (held fund or any registered universe / index fund, amount, first month this or next), reversible; it counts in SIPs this month, the envelope and the SIP card from its first month until INDmoney lists the fund', 'Money received (a lump sum, e.g. bond interest), reversible; a purchase outside Sentinel can be marked as paid from it and then counts against it, not the month'],
-    missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'Sale and redemption proceeds do not become a lump sum by themselves (log them as money received)', 'No capital-gains tax on a logged sale'],
+    missing: ['RSU vest confirmation (Telegram only today)', 'Entries logged before batch A and notes cannot be reversed', 'A reversal cannot itself be reversed (log the entry again)', 'No capital-gains tax on a logged sale'],
+  },
+  {
+    slug: 'cashflow',
+    name: 'Cash flow',
+    stage: 'live',
+    what: 'Payday to payday: salary, other money in, invested, set aside, loan principal, spend and surplus, from the owner’s payday entries and what Sentinel recorded.',
+    works: ['“Payday” tab on /log: salary credited and the HDFC balance after it, reversible on the timeline', 'The month’s SIP commitment frozen with each payday', 'Overview reminder from the 2nd-last weekday until entered', 'HDFC stale warning (Overview, /freshness) from when INDmoney last changed the balance', 'Unknown inputs make spend and surplus unknown, never ₹0'],
+    missing: ['Only HDFC: money moved to another account counts as spend', 'Sales made through Approvals are not counted as money in', 'Card bills are counted when paid (one cycle late)', 'No chart yet; a table per cycle'],
   },
   {
     slug: 'life-events',

@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../../src/money/paise.js';
-import { getEndableLifeEvents, getHoldingRules, getLog, getSipMoveOptions, getSipStartOptions } from '../../lib/data';
+import { getEndableLifeEvents, getHoldingRules, getLog, getPaydayStatus, getSipMoveOptions, getSipStartOptions } from '../../lib/data';
 import { ruleLabel } from '../../../src/domain/holding-rules.js';
 import { monthLabel } from '../../lib/funds';
 import { canReverse } from '../../lib/log';
+import { hdfcHint } from '../../lib/cashflow';
 import { Badge, Card, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import LogForm, { ReverseControl } from './log-form';
@@ -13,12 +14,14 @@ export const dynamic = 'force-dynamic';
 const KIND_TONE: Record<string, Tone> = {
   Goal: 'green', Purchase: 'indigo', Bond: 'amber', Milestone: 'indigo', Note: 'gray', RSU: 'indigo',
   Earmark: 'green', Spend: 'amber', Sale: 'indigo', SIP: 'indigo', 'SIP move': 'indigo', 'Lump sum': 'green',
-  'Life event': 'amber',
+  'Life event': 'amber', Payday: 'green',
 };
 
 const inr = (p: bigint) => formatInr(p as Paise);
 
-export default async function LogPage() {
+export default async function LogPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const { tab } = await searchParams;
+  const payday = await getPaydayStatus();
   const { timeline, buckets, openMilestones, bonds, holdings, sellable, pots, spLabels, idleBankCashPaise, openLumpSums } = await getLog();
   const sipMoves = await getSipMoveOptions();
   const sipStarts = await getSipStartOptions();
@@ -55,6 +58,8 @@ export default async function LogPage() {
               lumpSums={openLumpSums.map((l) => ({ id: l.id, label: `${l.from} · ${inr(l.remainingPaise)} left` }))}
               lifeEvents={lifeEvents}
               rules={rules}
+              hdfcHint={hdfcHint(payday.hdfc)}
+              initialTab={tab}
             />
           </Card>
         </div>
@@ -71,6 +76,7 @@ export default async function LogPage() {
               <li>Money you want invested on top of the month, like bond interest: <em>Money received</em>. A buy paid from it says so under <em>Purchase outside Sentinel</em>.</li>
               <li>A salary change, job loss, new dependent, retirement-age change or big medical bill: <em>Life event</em>. What it touches is listed on the <Link href="/">Overview</Link> to review.</li>
               <li>A standing instruction on one holding — no new money, hold until a date, never buy again, a cap: <em>Add rule</em> on <Link href="/holdings">Holdings</Link> or <Link href="/funds">Mutual funds</Link>; end it under <em>Holding rules</em>.</li>
+              <li>Your salary landed: <em>Payday</em> (salary and the HDFC balance after it). Two in a row make a cycle on <Link href="/cashflow">Cash flow</Link>.</li>
               <li>A wrong entry: <em>Reverse</em> it on the timeline below, then log the right one.</li>
             </ul>
           </Card>

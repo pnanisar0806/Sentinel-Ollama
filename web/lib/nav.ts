@@ -11,6 +11,7 @@ export const GROUPS: {
       { href: '/holdings', label: 'Holdings', stage: 'live' },
       { href: '/allocation', label: 'Allocation', stage: 'live' },
       { href: '/buckets', label: 'Goals', stage: 'live' },
+      { href: '/cashflow', label: 'Cash flow', stage: 'live' },
       { href: '/rsu', label: 'RSU', stage: 'live' },
       { href: '/funds', label: 'Funds', stage: 'live' },
     ],

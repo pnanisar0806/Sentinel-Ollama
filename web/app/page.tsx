@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getGoals, getInvestmentControls, getLifeEventReview, getOverview, getPlannedSpending, getSips } from '../lib/data';
+import { getGoals, getInvestmentControls, getLifeEventReview, getOverview, getPaydayStatus, getPlannedSpending, getSips } from '../lib/data';
+import { paydayDueText, staleBankText } from '../lib/cashflow';
 import { plannedSpendingLine } from '../lib/log';
 import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
@@ -16,6 +17,10 @@ export default async function OverviewPage() {
   const controls = await getInvestmentControls();
   const goals = await getGoals();
   const planned = plannedSpendingLine(await getPlannedSpending());
+  // Open list #10/#29: fail-soft, like the life-event review.
+  const payday = await getPaydayStatus().catch(() => null);
+  const dueText = payday === null ? null : paydayDueText(payday.due);
+  const bankText = payday === null ? null : staleBankText(payday.hdfc);
   // Fail-soft: the overview never goes down for the life-event review.
   const life = await getLifeEventReview().then((l) => ({ ...l, error: null as string | null }))
     .catch((e: unknown) => ({ open: [], waiting: [], stops: [], error: e instanceof Error ? e.message : String(e) }));
@@ -33,6 +38,10 @@ export default async function OverviewPage() {
       />
 
       <div className="bento">
+        {dueText !== null && (
+          <div className="span-12"><Notice tone="indigo">{dueText} <Link href="/log?tab=payday">Enter it on Log</Link>.</Notice></div>
+        )}
+        {bankText !== null && <div className="span-12"><Notice tone="amber">{bankText}</Notice></div>}
         {life.error !== null && <div className="span-12"><Notice tone="amber">life-event review unavailable: {life.error}</Notice></div>}
         {life.stops.map((s) => (
           <div className="span-12" key={s.eventId}>

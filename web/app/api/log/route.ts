@@ -9,6 +9,7 @@ import type { Db } from '../../../../src/db/client';
 import { endLifeEvent, logLifeEvent, reviewLine, type LifeEventKind } from '../../../../src/domain/life-events';
 import { logHoldingRule, logRuleException, type RuleKind } from '../../../../src/domain/holding-rules';
 import { capBps } from '@/lib/rules';
+import { logPayday } from '../../../../src/domain/cashflow';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,6 +23,7 @@ type Body =
   | { action: 'milestone'; id: string; on: string }
   | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string; invest?: string }
   | { action: 'note'; on: string; text: string }
+  | { action: 'payday'; on: string; salary: string; balance: string; note?: string }
   | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string; lumpSumId?: string }
   | { action: 'lump_sum'; on: string; rupees: string; from: string; note?: string }
   | { action: 'sale'; on: string; instrumentId: string; units?: string; rupees: string; destination?: string; label?: string; note?: string; invest?: string }
@@ -159,6 +161,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ...(body.lumpSumId ? { lumpSumId: body.lumpSumId } : { month: body.month ?? '' }),
         });
         return NextResponse.json({ ok: true, message: 'Allowed once. The rule stays on; the next advice run uses this.' });
+      case 'payday':
+        await logPayday(d, { on: body.on, salaryPaise: paise(body.salary ?? ''), balancePaise: paise(body.balance ?? ''), note: body.note ?? '' });
+        return NextResponse.json({ ok: true, message: 'Payday recorded. The cycle it closes is on Cash flow.' });
       case 'note':
         await logNote(d, { on: body.on, text: body.text ?? '' });
         return NextResponse.json({ ok: true, message: 'Noted.' });
