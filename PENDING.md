@@ -22,6 +22,18 @@ Code fixes
 13. [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it.
 14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
 
+29. [ ] **INDmoney data goes stale without anyone noticing (owner, 2026-11-12).** INDmoney does not refresh
+    bank balances and holdings daily; Sentinel reads whatever INDmoney last pulled. Investigate, in order:
+    (a) does any INDmoney MCP tool expose a per-row "last refreshed" time? If so, store it as `as_of` instead
+    of the sync time and let FR-31 flag stale accounts honestly; (b) is there any read-only way to ask
+    INDmoney to refresh first? (none of today's MCP tools does; the app refreshes on open); (c) our own
+    sources: MF holdings from the monthly CAMS/KFintech CAS, equity units × NSE close (prices are ours
+    already), bank balances from the HDFC/SBI balance alert emails via Gmail. Account Aggregator needs a
+    licensed FIU, so it is out for a single user.
+30. [ ] **Sync reports green while INDmoney fails.** 2026-11-12: the refresh token was rejected ("refresh token
+    does not exist"), every INDmoney step failed, and the run still showed success. Make an INDmoney auth failure
+    fail the run (or Telegram the owner), so it is seen the same day.
+
 Owner actions / decisions
 15. [x] Top up OpenRouter credit — $8 loaded 2026-11-05; first `ling-3.1-flash` OK rows in `llm_calls` (sentiment, id > 342). Note: ~10k reasoning tokens per 20-event batch, ~2 min each.
 16. [ ] Screener export with Pledged %, Promoter holding, CFO 5Y, PAT 5Y; plus the screener gate decision.
