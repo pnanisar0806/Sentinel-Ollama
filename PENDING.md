@@ -11,14 +11,14 @@ Code fixes
 2. [x] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px. (prod 2026-11-11: /funds, /log, Overview fit 390px; SIP total ₹40,804 same on /funds and Overview; item-1 switch reason live)
 3. [x] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break). (fixed 2026-11-11; T+2/T+7 reminders were dead too, fixed)
 4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
-5. [ ] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false.
-6. [ ] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source.
-7. [ ] Weekend FX / FR-31 blocks (weekly report runs Sunday). Needs a decision.
+5. [x] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false. (fixed 2026-11-11: copy lists every FR-31 input and the trading-session rule)
+6. [~] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source. (2026-11-11: `composite` + FX `seed` fixed — un-assessed sources' incidents now resolve, the bootstrap FX `seed` rate is not assessed; close on the next sync. `manual-seed` is REAL: it gap-fills EPF, US:NOW, bonds and only `pnpm seed` refreshes it — owner policy call, see #17)
+7. [x] Weekend FX / FR-31 blocks (weekly report runs Sunday). (already fixed 2026-09-20, `79dbf2a`: prices/NAVs/FX judged against the last completed trading session; prod has no market STALE_DATA incident since 09-21 — verified 2026-11-11)
 8. [ ] Maturity/vest-funded buys not logged as purchases (form change).
 9. [ ] RSU vest form on /log (Telegram only today).
 10. [ ] Monthly financial snapshot + expense/surplus trend (job + page). Owner check first: does INDmoney `total_due` include interest/fees?
-11. [ ] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed.
-12. [ ] Monthly advisor only runs inside the weekly report (orphan).
+11. [x] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed. (verified on prod 2026-11-11: scores since 09-27; 11-08 run 35 of 41 quality-passed names > 0, max 30/30, 10 composites ≥ 60)
+12. [x] Monthly advisor only runs inside the weekly report (orphan). (not an orphan, by design: first successful weekly run of the month, waits for the budget up to the 7th, retry crons 07:30/11:30 UTC; ran 2026-10-04 and 2026-11-08 on prod. Cost: up to 6 days' lag after the budget settles — owner may ask for a daily attempt)
 13. [ ] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it.
 14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
 
@@ -641,7 +641,7 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
       `VISION_MODEL_CHAIN` leads with `google/gemma-4-31b:free` again (the `ling-3.0-flash-vl`
       leader was retired). Text never sits in front of an image — the test asserts the split.
 
-- [ ] **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
+- [x] (fixed 2026-09-20 `79dbf2a`) **FX BLOCKs every weekend by construction (surfaced 2026-09-07, NOT new).**
       `FRESHNESS_HOURS.fx = 48h`, but frankfurter publishes ECB rates on weekdays only, so a
       normal Fri→Mon gap is ~72h. Observed Sunday 2026-09-06: open `STALE_DATA/BLOCK` on
       `frankfurter` at 63.4h with **no** `SYNC_FAILURE` — the fetch is fine, the limit is wrong
@@ -792,7 +792,7 @@ tests (existence/kind/metadata mark, derived exact-set, re-import idempotence, d
 
 (End of file)
 
-- [ ] **THE SATELLITE RECOMMENDER CANNOT FIRE — the trend leg is dead (found 2026-09-20).**
+- [x] (verified scoring 2026-11-11, open list #11) **THE SATELLITE RECOMMENDER CANNOT FIRE — the trend leg is dead (found 2026-09-20).**
       `SATELLITE_WEIGHTS` is valuation 30 / trend 30 / earnings 20 / fit 20, and MEDIUM
       (the lowest band that builds a recommendation, `report.ts` line ~291) needs a
       composite of 70. On the 2026-09-20 run, all 41 quality-passing names scored
@@ -944,7 +944,7 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       units for all 29 holdings; the DB's `quantity = 1` rows are a stale-ingestion bug on
       our side, not missing data upstream.
 
-- [ ] **FR-31 BLOCKS THE WHOLE PORTFOLIO EVERY WEEKEND — and the weekly report runs on
+- [x] (fixed 2026-09-20 `79dbf2a`; verified 2026-11-11) **FR-31 BLOCKS THE WHOLE PORTFOLIO EVERY WEEKEND — and the weekly report runs on
       Sunday (found 2026-09-20).** `assess()` in `src/sources/staleness.ts` compares a
       source's age in **wall-clock hours** against a fixed limit and has **no
       trading-calendar awareness at all** — `isTradingDay` and the `holidays` table both
@@ -975,7 +975,7 @@ Every engine item here ships with its page in the same task — see CLAUDE.md
       `balance_snapshots` (HDFC + SBI), so the fix is to source CASH from there instead of
       from the seed. Separate from the weekend bug.
 
-- [ ] **`composite` source has never produced a row** — open incident since 2026-08-24
+- [x] (fixed 2026-11-11, open list #6) **`composite` source has never produced a row** — open incident since 2026-08-24
       reading "last updated never". Either wire it or drop it from
       `KNOWN_PORTFOLIO_SOURCES`; an incident that can never clear is noise that trains the
       owner to ignore incidents.

@@ -211,3 +211,21 @@ describe('staleness engine', () => {
     expect(bhavcopyRow!.stale).toBe(true);
   });
 });
+describe('incidents that can never clear (open list #6)', () => {
+  it('a bootstrap FX rate (source seed) is not a feed and is not assessed', async () => {
+    await db.query(`insert into fx_rates (pair, as_of, rate_micros, source) values ('USD/INR', '2026-08-01', 95300000, 'seed')`);
+    const rows = await assessStaleness(db, '2026-08-15T18:00:00+05:30');
+    expect(rows.map((r) => r.source)).not.toContain('seed');
+  });
+
+  it('resolves an open STALE_DATA incident for a source that is no longer assessed', async () => {
+    await db.query(`insert into incidents (kind, severity, subject, detail) values ('STALE_DATA', 'BLOCK', 'composite', 'composite last updated never')`);
+    const rows = await assessStaleness(db, '2026-08-12T18:00:00+05:30');
+    expect(rows.map((r) => r.source)).not.toContain('composite');
+    await raiseIncidents(db, rows);
+    const open = await db.query<{ subject: string }>(
+      `select subject from incidents where kind = 'STALE_DATA' and resolved_at is null`,
+    );
+    expect(open.map((r) => r.subject)).not.toContain('composite');
+  });
+});

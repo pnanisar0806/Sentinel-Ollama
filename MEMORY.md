@@ -3429,3 +3429,12 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` Â
   DEFERRED or AWAITING_MANUAL_EXECUTION orders: resurfacing AND the T+2/T+7 reminders were dead.
   Both now use `getOrdersByStatus` (latest transition by at, then id).
 - "Latest transition" always orders by `at desc, id desc`.
+
+## STALE_DATA incidents: what can and cannot clear (2026-11-11, open list #6)
+
+- `raiseIncidents` now resolves every open STALE_DATA incident whose subject is not among the
+  assessed rows. It must always be passed the FULL `assessStaleness` result (sync does);
+  passing a subset would close the others.
+- FX rows with `source = 'seed'` are a bootstrap value, not a feed, and are not assessed.
+- `manual-seed` stays assessed on purpose: it gap-fills EPF, US:NOW, the bonds and some MF/ETF
+  rows, and only `pnpm seed` refreshes it, so its incident is a true FR-31 signal (US:NOW blocked).

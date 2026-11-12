@@ -221,7 +221,11 @@ export async function assessStaleness(db: Db, now: string): Promise<StalenessRow
     results.push(assess(source, holdingsMap.get(source), FRESHNESS_HOURS.portfolio!));
   }
 
+  // `seed` is a one-off bootstrap rate, not a feed: assessing it held a BLOCK incident open
+  // from 2026-09-26 that no job could ever clear (open list #6). It never blocked anything,
+  // since only KNOWN_FX_SOURCES gate FR-31.
   for (const source of new Set([...KNOWN_FX_SOURCES, ...fxMap.keys()])) {
+    if (source === 'seed') continue;
     results.push(assess(source, fxMap.get(source), FRESHNESS_HOURS.fx!));
   }
 
@@ -277,6 +281,15 @@ export async function raiseIncidents(db: Db, rows: StalenessRow[]): Promise<numb
       );
     }
   }
+
+  // A source that is no longer assessed at all (`composite`, retired 2026-09-20) has no row
+  // to recover through, so its incident stayed open forever. Close it: an incident that can
+  // never clear only teaches the owner to ignore incidents (open list #6).
+  await db.query(
+    `update incidents set resolved_at = now()
+      where kind = 'STALE_DATA' and resolved_at is null and not (subject = any($1::text[]))`,
+    [rows.map((r) => r.source)],
+  );
 
   return opened;
 }

@@ -52,7 +52,7 @@ export default async function FreshnessPage() {
           ? <Notice tone="green">Nothing is blocked: every input needed to value the holdings is fresh.</Notice>
           : <p style={{ margin: '0.2rem 0' }}><span className="mono">{blocked.join(', ')}</span></p>}
         <p className="dim" style={{ marginBottom: 0 }}>
-          FR-31 gates recommendation inputs, not just display. Two inputs are checked today: the portfolio source and FX for non-INR positions. NAV and price ingestion (amfi, bhavcopy, screener) are unimplemented in Phase 0, so they do not block — that changes when their ingestion paths land.
+          FR-31 gates recommendation inputs, not just display. Each holding is checked against every input needed to value it: the portfolio source that reported it, FX for non-INR holdings, NAVs (amfi) for mutual funds, NSE closes (bhavcopy) for stocks, ETFs and bonds, and screener fundamentals for stocks. Closes, NAVs and FX are judged against the last completed trading session, not the clock, so a weekend or holiday never blocks anything.
         </p>
       </Card>
     </>
