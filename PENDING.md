@@ -30,9 +30,15 @@ Code fixes
     sources: MF holdings from the monthly CAMS/KFintech CAS, equity units × NSE close (prices are ours
     already), bank balances from the HDFC/SBI balance alert emails via Gmail. Account Aggregator needs a
     licensed FIU, so it is out for a single user.
-30. [ ] **Sync reports green while INDmoney fails.** 2026-11-12: the refresh token was rejected ("refresh token
+30. [x] (fixed 2026-11-12: `syncExitCode` fails the run on any INDmoney source failure) **Sync reports green while INDmoney fails.** 2026-11-12: the refresh token was rejected ("refresh token
     does not exist"), every INDmoney step failed, and the run still showed success. Make an INDmoney auth failure
     fail the run (or Telegram the owner), so it is seen the same day.
+31. [x] (fixed 2026-11-12: `concurrency: indmoney-sync` in sync.yml; only sync refreshes the token) **Two syncs at once can kill the INDmoney login.** INDmoney rotates the refresh token on every use, and
+    `sync.yml` has no `concurrency` group, so two overlapping runs (a slow scheduled run plus a manual one, or
+    a retry) each spend the same token and one is left with a dead one. A likely cause of the 2026-11-12 expiry
+    (unconfirmed). Add `concurrency: { group: sync, cancel-in-progress: false }` to sync.yml (and to any other
+    workflow that refreshes the INDmoney token). Also seen 2026-11-12: a second login granted an extra
+    `insights:write` scope once; the guard refused it, and a retry granted `portfolio:read` only.
 
 Owner actions / decisions
 15. [x] Top up OpenRouter credit — $8 loaded 2026-11-05; first `ling-3.1-flash` OK rows in `llm_calls` (sentiment, id > 342). Note: ~10k reasoning tokens per 20-event batch, ~2 min each.

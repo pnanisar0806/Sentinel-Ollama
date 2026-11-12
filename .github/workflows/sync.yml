@@ -10,6 +10,13 @@ on:
     - cron: '30 13 * * *'
   workflow_dispatch:
 
+# INDmoney rotates its refresh token on every use. Two overlapping runs (a slow scheduled
+# run and a manual one, or a retry) would each spend the same token and leave one of them
+# holding a dead login. Runs queue instead of overlapping (open list #31, 2026-11-12).
+concurrency:
+  group: indmoney-sync
+  cancel-in-progress: false
+
 jobs:
   sync:
     runs-on: ubuntu-latest

@@ -3,6 +3,7 @@ import { openDb, type Db } from '../../src/db/client.js';
 import { runMigrations } from '../../src/db/migrate.js';
 import { seed } from '../../src/seed/seed.js';
 import { runSync } from '../../src/jobs/sync.js';
+import { syncExitCode } from '../../src/jobs/sync.js';
 import { FileIndmoneySource } from '../../src/sources/indmoney.js';
 import type { Source } from '../../src/sources/types.js';
 
@@ -173,5 +174,21 @@ describe('EOD quote steps (Phase 1 Task 13)', () => {
       `select subject from incidents where kind = 'SYNC_FAILURE' and resolved_at is null`,
     );
     expect(open.map((r) => r.subject)).toContain('nse-bhavcopy');
+  });
+});
+
+describe('syncExitCode (open list #30: INDmoney failing must not read green)', () => {
+  it('fails the run when an INDmoney source fails, even though other sources synced', () => {
+    const r = { synced: ['frankfurter', 'nse-bhavcopy', 'amfi'], failed: [{ source: 'indmoney', error: 'indmoney needs re-authentication: refresh token does not exist' }] };
+    expect(syncExitCode(r)).toBe(1);
+    expect(syncExitCode({ synced: ['indmoney', 'frankfurter'], failed: [{ source: 'indmoney-sips', error: 'x' }] })).toBe(1);
+  });
+
+  it('passes when INDmoney synced, even if a market source failed', () => {
+    expect(syncExitCode({ synced: ['indmoney', 'indmoney-sips'], failed: [{ source: 'nse-bhavcopy', error: '404' }] })).toBe(0);
+  });
+
+  it('fails when nothing synced at all', () => {
+    expect(syncExitCode({ synced: [], failed: [] })).toBe(1);
   });
 });

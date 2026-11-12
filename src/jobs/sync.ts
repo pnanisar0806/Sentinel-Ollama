@@ -51,6 +51,17 @@ type FxFetcher = () => Promise<{ rate: number; asOf: string; source: string }>;
 type PriceFetcher = (tradeDate: string) => Promise<{ equity: BhavcopyRow[]; index: IndexBhavcopyRow[] }>;
 type NavFetcher = () => Promise<{ rows: NavRow[] }>;
 
+/**
+ * The run's exit code. A failed INDmoney source fails the run even when the market feeds
+ * synced: on 2026-11-12 the refresh token was rejected, every INDmoney step failed, and the
+ * run still showed green, so the dead login went unseen (open list #30). A red run is what
+ * makes GitHub email the owner. A market feed's failure stays logged but does not fail it.
+ */
+export function syncExitCode(result: { synced: readonly string[]; failed: readonly { source: string; error?: string }[] }): 0 | 1 {
+  if (result.synced.length === 0) return 1;
+  return result.failed.some((f) => f.source === 'indmoney' || f.source.startsWith('indmoney-')) ? 1 : 0;
+}
+
 export async function runSync(
   db: Db,
   opts: {
@@ -414,5 +425,5 @@ if (isMainModule(import.meta.url)) {
   }
 
   await db.close();
-  if (result.synced.length === 0) process.exitCode = 1;
+  process.exitCode = syncExitCode(result);
 }
