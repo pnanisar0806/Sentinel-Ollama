@@ -83,6 +83,15 @@ export async function reverseEntry(
     }
 
     const keys: [ReversalEntity, string][] = [[entity, entityId], ...rowIds.map((id): [ReversalEntity, string] => ['bucket_flow', id])];
+    // Open list #8: a sale the owner chose to invest made a lump sum; the sale gone, that money
+    // never arrived, so its lump sum goes too (and buys paid from it return to their months).
+    if (entity === 'owner_sale' && p.rowId != null) {
+      const lumps = await tx.query<{ id: string }>(
+        `select l.id::text from lump_sums l where l.origin = $1
+            and not exists (select 1 from log_reversals x where x.entity = 'lump_sum' and x.entity_id = l.id::text)`,
+        [`owner_sale:${String(p.rowId)}`]);
+      for (const l of lumps) keys.push(['lump_sum', l.id]);
+    }
     for (const [e, id] of keys) {
       await tx.query(`insert into log_reversals (entity, entity_id, reason, as_of, source) values ($1, $2, $3, $4, 'owner-web')`,
         [e, id, reason, now]);

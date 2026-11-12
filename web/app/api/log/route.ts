@@ -1,12 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/data';
 import {
-  completeMilestone, logEarmark, logGoalMove, logLumpSum, logNote, logPurchase, logSale, logSipMove, logSipStart, logSpend, type EarmarkEnd, type GoalMoveKind,
+  completeMilestone, logBondRedemption, logEarmark, logGoalMove, logLumpSum, logNote, logPurchase, logSale, logSipMove, logSipStart, logSpend, type EarmarkEnd, type GoalMoveKind,
 } from '../../../../src/domain/owner-log';
 import { reverseEntry, type ReversalEntity } from '../../../../src/domain/reversals';
 import { loadGoalTracker } from '../../../../src/domain/goal-plan';
 import type { Db } from '../../../../src/db/client';
-import { recordRedemption, stateRedemptionAmount } from '../../../../src/domain/bond-redemptions';
 import { endLifeEvent, logLifeEvent, reviewLine, type LifeEventKind } from '../../../../src/domain/life-events';
 import { logHoldingRule, logRuleException, type RuleKind } from '../../../../src/domain/holding-rules';
 import { capBps } from '@/lib/rules';
@@ -21,11 +20,11 @@ export const dynamic = 'force-dynamic';
 type Body =
   | { action: 'goal'; bucketId: string; on: string; rupees: string; kind: GoalMoveKind; note: string }
   | { action: 'milestone'; id: string; on: string }
-  | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string }
+  | { action: 'bond'; instrumentId: string; on: string; rupees: string; note: string; invest?: string }
   | { action: 'note'; on: string; text: string }
   | { action: 'purchase'; on: string; rupees: string; description: string; instrumentId?: string; units?: string; note?: string; lumpSumId?: string }
   | { action: 'lump_sum'; on: string; rupees: string; from: string; note?: string }
-  | { action: 'sale'; on: string; instrumentId: string; units?: string; rupees: string; destination?: string; label?: string; note?: string }
+  | { action: 'sale'; on: string; instrumentId: string; units?: string; rupees: string; destination?: string; label?: string; note?: string; invest?: string }
   | { action: 'spend'; on: string; rupees: string; purpose: string; from: 'B2' | 'B3' | 'B4' | 'SP' | 'BANK'; label?: string; note?: string }
   | { action: 'earmark'; on: string; rupees: string; from: EarmarkEnd; to: EarmarkEnd; label?: string; expectedOn?: string; note?: string }
   | { action: 'sip_move'; on: string; fromInstrumentId: string; toInstrumentId: string; rupees: string; firstMonth: string; note?: string }
@@ -79,11 +78,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await completeMilestone(d, body.id, body.on);
         return NextResponse.json({ ok: true, message: 'Milestone marked complete.' });
       case 'bond': {
-        const amount = paise(body.rupees);
-        if (amount <= 0n) throw new Error('the amount credited must be positive');
-        const fresh = await recordRedemption(d, body.instrumentId, { receivedOn: body.on, amountPaise: null, note: body.note ?? '' });
-        await stateRedemptionAmount(d, body.instrumentId, amount, body.note ?? '');
-        return NextResponse.json({ ok: true, message: fresh ? 'Redemption recorded.' : 'Already redeemed; the amount was added.' });
+        const invest = body.invest === 'on';
+        const { fresh } = await logBondRedemption(d, { instrumentId: body.instrumentId, on: body.on, amountPaise: paise(body.rupees), note: body.note ?? '', invest });
+        const said = fresh ? 'Redemption recorded.' : 'Already redeemed; the amount was added.';
+        return NextResponse.json({ ok: true, message: invest ? `${said} It is also under Money received, ready to invest.` : said });
       }
       case 'purchase': {
         await logPurchase(d, {
@@ -101,11 +99,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const destination = (body.destination || null) as 'B2' | 'B3' | 'B4' | 'SP' | null;
         await logSale(d, {
           on: body.on, instrumentId: body.instrumentId ?? '', units: u === null ? null : Number(u), proceedsPaise: paise(body.rupees ?? ''),
-          destination, label: body.label, note: body.note ?? '',
+          destination, label: body.label, note: body.note ?? '', invest: body.invest === 'on',
         });
         return NextResponse.json({ ok: true, message: destination
           ? 'Sale recorded and the money added to that pot. The bank balance and holdings catch up at the next sync.'
-          : 'Sale recorded. The bank balance and holdings catch up at the next sync.' });
+          : body.invest === 'on'
+            ? 'Sale recorded and the proceeds put under Money received, ready to invest. Holdings catch up at the next sync.'
+            : 'Sale recorded. The bank balance and holdings catch up at the next sync.' });
       }
       case 'spend':
         await logSpend(d, { on: body.on, amountPaise: paise(body.rupees ?? ''), purpose: body.purpose ?? '', from: body.from, label: body.label, note: body.note ?? '' });

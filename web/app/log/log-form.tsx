@@ -100,6 +100,13 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
     }
   }
 
+  /** Open list #8: a sale or redemption becomes money received only when ticked (unticked by default). */
+  const investBox = (
+    <label className="check-row">
+      <input type="checkbox" name="invest" />
+      <span>Invest this money <span className="dim">— also logs it under Money received, so a buy paid from it does not use the month&apos;s budget</span></span>
+    </label>
+  );
   const date = (
     <div className="field">
       <label htmlFor="on">Date it happened</label>
@@ -305,6 +312,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
                     </div>
                     {saleTo === 'SP' ? labelInput : null}
                   </div>
+                  {saleTo ? null : investBox}
                   {note}
                 </>
               )}
@@ -320,8 +328,8 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
               It updates the monthly budget immediately. Holdings and the allocation bar update from
               the daily holdings sync, not from this form; the IPS target bands never change.
               A buy paid from money you logged under <em>Money received</em> says so below: it then counts against
-              that, not the month. Otherwise only log buys paid from this month&apos;s budget. A buy funded by a
-              maturity, an RSU vest or a redemption you did not log as money received is not logged here.
+              that, not the month. A sale or bond redemption becomes money received when you tick
+              <em> Invest this money</em> on its form.
             </p>
             <div className="form-row">
               <div className="field">
@@ -353,7 +361,12 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
                   {lumpSums.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
                 </select>
               </div>
-            ) : null}
+            ) : (
+              <p className="dim">
+                Paid with money from a sale, a bond redemption or a vest? Log that money under <em>Money received</em>{' '}
+                first (or tick <em>Invest this money</em> on the sale or redemption), then pick it here.
+              </p>
+            )}
             {note}
           </>
         )}
@@ -465,6 +478,7 @@ export default function LogForm({ buckets, bonds, holdings, milestones, today, s
                 </div>
                 {date}
               </div>
+              {investBox}
               {note}
             </>
           ))}

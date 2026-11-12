@@ -1,6 +1,6 @@
 import type { Db } from '../db/client.js';
 import { formatInr, type Paise } from '../money/paise.js';
-import { istDate, istMonth } from './sips.js';
+import { istDate, istMonth, liveLumpSql } from './sips.js';
 import { GROUPS, type ReversalEntity } from './reversals.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from './bucket-balances.js';
 import { loadPositions } from './networth.js';
@@ -8,6 +8,7 @@ import { fromMicro, heldAfterSales, instrumentMeta, loadLiveSales, toMicro } fro
 import { typeOf, fundAliases, sameFund } from './fund-mix.js';
 import { FUND_TYPE_LABEL } from './fund-types.js';
 import { loadLumpSum } from './lump-sums.js';
+import { recordRedemption, stateRedemptionAmount } from './bond-redemptions.js';
 
 /**
  * What the owner did outside Sentinel, told to it from the web app (/log).
@@ -208,7 +209,7 @@ export async function logSpend(
  */
 export async function logSale(
   db: Db,
-  s: { on: string; instrumentId: string; units: number | null; proceedsPaise: bigint; destination: Pot | null; label?: string | undefined; note: string },
+  s: { on: string; instrumentId: string; units: number | null; proceedsPaise: bigint; destination: Pot | null; label?: string | undefined; note: string; invest?: boolean },
   now = new Date().toISOString(),
 ): Promise<void> {
   if (s.proceedsPaise <= 0n) throw new Error('the amount must be positive');
@@ -216,6 +217,8 @@ export async function logSale(
   const [inst] = await db.query<{ kind: string; name: string }>(`select kind, name from instruments where id = $1`, [s.instrumentId]);
   if (!inst) throw new Error(`no holding ${s.instrumentId}`);
   if (inst.kind === 'BOND') throw new Error('a bond redemption is logged on its own form: use the bond redemption form');
+  // Open list #8: money put in a goal pot is set aside, not invested; it cannot be both.
+  if (s.invest && s.destination !== null) throw new Error('money put into a goal pot is not invested; choose the pot or investing, not both');
   let micro: bigint | null = null;
   if (s.units === null) {
     if (inst.kind !== 'MF') throw new Error('units sold are required for anything but a mutual fund');
@@ -283,6 +286,12 @@ export async function logSale(
       source: 'owner-web', rowId: row!.id, rowIds, on: s.on, instrumentId: s.instrumentId, name: inst.name, units,
       proceedsPaise: s.proceedsPaise.toString(), destination: s.destination, destinationName, label, note,
     });
+    if (s.invest) {
+      await logLumpSum(tx, {
+        receivedOn: s.on, amountPaise: s.proceedsPaise, from: `Sale of ${inst.name}`.slice(0, 200),
+        note, origin: `owner_sale:${row!.id}`,
+      }, now);
+    }
   });
 }
 
@@ -326,7 +335,7 @@ export async function logPurchase(
 
 /** Money received that the owner wants invested on top of the month (batch B §3); see lump-sums.ts. */
 export async function logLumpSum(
-  db: Db, e: { receivedOn: string; amountPaise: bigint; from: string; note?: string }, now = new Date().toISOString(),
+  db: Db, e: { receivedOn: string; amountPaise: bigint; from: string; note?: string; origin?: string }, now = new Date().toISOString(),
 ): Promise<{ id: string }> {
   if (e.amountPaise <= 0n) throw new Error('the amount must be positive');
   const from = e.from.trim();
@@ -334,15 +343,50 @@ export async function logLumpSum(
   if (from.length > 200) throw new Error('keep it under 200 characters');
   assertDate(e.receivedOn, now);
   const note = e.note?.trim() || null;
+  const origin = e.origin ?? null;
   return db.withTransaction(async (tx) => {
+    if (origin !== null) {
+      // Open list #8: one entry's money becomes at most one live lump sum. Reversing that lump
+      // sum frees the entry to be invested again (a corrected amount).
+      // ponytail: two concurrent invests of one entry are not serialised; single owner, one form.
+      const [dup] = await tx.query(
+        `select 1 from lump_sums l where l.origin = $1 and ${liveLumpSql('l.id')}`, [origin]);
+      if (dup) throw new Error('that money is already logged as money received; reverse that entry first to change it');
+    }
     const [row] = await tx.query<{ id: string }>(
-      `insert into lump_sums (received_on, amount_paise, from_text, note, as_of, source)
-       values ($1, $2, $3, $4, $5, 'owner-web') returning id::text`,
-      [e.receivedOn, e.amountPaise.toString(), from, note, now]);
+      `insert into lump_sums (received_on, amount_paise, from_text, note, origin, as_of, source)
+       values ($1, $2, $3, $4, $5, $6, 'owner-web') returning id::text`,
+      [e.receivedOn, e.amountPaise.toString(), from, note, origin, now]);
     await audit(tx, 'lump_sum', row!.id, 'LOGGED', {
-      on: e.receivedOn, amountPaise: e.amountPaise.toString(), from, note, rowId: row!.id, source: 'owner-web',
+      on: e.receivedOn, amountPaise: e.amountPaise.toString(), from, note, origin, rowId: row!.id, source: 'owner-web',
     });
     return { id: row!.id };
+  });
+}
+
+/**
+ * A bond that paid out, with what reached the bank (after TDS). `invest` (open list #8) also
+ * logs that amount as money received, in the same transaction, so a buy paid from it counts
+ * against it and not the month. Unticked by default on /log: money is investable only when
+ * the owner says so.
+ */
+export async function logBondRedemption(
+  db: Db, b: { instrumentId: string; on: string; amountPaise: bigint; note: string; invest?: boolean }, now = new Date().toISOString(),
+): Promise<{ fresh: boolean }> {
+  if (b.amountPaise <= 0n) throw new Error('the amount credited must be positive');
+  assertDate(b.on, now);
+  return db.withTransaction(async (tx) => {
+    const fresh = await recordRedemption(tx, b.instrumentId, { receivedOn: b.on, amountPaise: null, note: b.note });
+    await stateRedemptionAmount(tx, b.instrumentId, b.amountPaise, b.note);
+    if (b.invest) {
+      const [inst] = await tx.query<{ name: string; canonical_id: string | null }>(
+        `select name, canonical_id from instruments where id = $1`, [b.instrumentId]);
+      await logLumpSum(tx, {
+        receivedOn: b.on, amountPaise: b.amountPaise, from: `${inst?.name ?? b.instrumentId} redemption`.slice(0, 200),
+        note: b.note, origin: `bond_redemption:${inst?.canonical_id ?? b.instrumentId}`,
+      }, now);
+    }
+    return { fresh };
   });
 }
 

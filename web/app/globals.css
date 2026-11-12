@@ -687,6 +687,9 @@ a:hover { color: #f0abfc; }
 .field textarea { min-height: 88px; resize: vertical; }
 .field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: #c084fc; box-shadow: 0 0 0 3px rgba(192, 132, 252, 0.25); }
 .field .help { font-size: 12px; color: var(--text-faint); }
+/* A single checkbox with its sentence (open list #8): 44px tap target, wraps on a phone. */
+.check-row { display: flex; align-items: flex-start; gap: 10px; min-height: 44px; padding: 10px 0; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.check-row input { width: 18px; height: 18px; margin-top: 1px; flex: none; accent-color: #c084fc; }
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; }
 .tabs button {
   font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; min-height: 40px;

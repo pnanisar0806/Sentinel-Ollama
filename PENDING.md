@@ -14,7 +14,7 @@ Code fixes
 5. [x] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false. (fixed 2026-11-11: copy lists every FR-31 input and the trading-session rule)
 6. [~] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source. (2026-11-11: `composite` + FX `seed` fixed — un-assessed sources' incidents now resolve, the bootstrap FX `seed` rate is not assessed; close on the next sync. `manual-seed` is REAL: it gap-fills EPF, US:NOW, bonds and only `pnpm seed` refreshes it — owner policy call, see #17)
 7. [x] Weekend FX / FR-31 blocks (weekly report runs Sunday). (already fixed 2026-09-20, `79dbf2a`: prices/NAVs/FX judged against the last completed trading session; prod has no market STALE_DATA incident since 09-21 — verified 2026-11-11)
-8. [ ] Maturity/vest-funded buys not logged as purchases (form change). Purchase side exists (lump sums, "Paid from a lump sum"); gap is that a redemption or sale must be logged again under Money received. Design shown to owner 2026-11-12: "invest this money" checkbox on the redemption and sale forms.
+8. [x] (fixed 2026-11-12, owner OK: unticked by default) Maturity/vest-funded buys not logged as purchases. The bond redemption and sale forms carry "Invest this money": ticked, the amount becomes a lump sum in the same transaction (`lump_sums.origin`, migration 0045), one live lump per entry, and reversing the sale reverses its lump. A vest pays shares, so its money arrives through a sale.
 9. [x] (closed by owner 2026-11-12: not needed. The vest schedule is already modelled; actual vests and new grants come from the Fidelity statement upload on Telegram `/fidelity`) RSU vest form on /log.
 10. [ ] Monthly financial snapshot + expense/surplus trend (job + page). Owner check first: does INDmoney `total_due` include interest/fees?
 11. [x] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed. (verified on prod 2026-11-11: scores since 09-27; 11-08 run 35 of 41 quality-passed names > 0, max 30/30, 10 composites ≥ 60)
@@ -39,6 +39,8 @@ Code fixes
     (unconfirmed). Add `concurrency: { group: sync, cancel-in-progress: false }` to sync.yml (and to any other
     workflow that refreshes the INDmoney token). Also seen 2026-11-12: a second login granted an extra
     `insights:write` scope once; the guard refused it, and a retry granted `portfolio:read` only.
+32. [ ] **Analyse the "1% Club" Android app (owner, 2026-11-12).** Study what it offers and note anything worth
+    learning for Sentinel. Study only; nothing gets built from it without owner approval.
 
 Owner actions / decisions
 15. [x] Top up OpenRouter credit — $8 loaded 2026-11-05; first `ling-3.1-flash` OK rows in `llm_calls` (sentiment, id > 342). Note: ~10k reasoning tokens per 20-event batch, ~2 min each.

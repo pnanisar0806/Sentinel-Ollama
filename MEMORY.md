@@ -3395,6 +3395,10 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` Â
 - A lump sum (`lump_sums`, /log "Money received") is money outside the month: purchases (`owner_purchases.lump_sum_id`)
   and orders from recommendations with `recommendations.lump_sum_id` count against the lump, never `loadMonthSpend`.
   Reversing the lump returns that spend to its month.
+- `lump_sums.origin` (0045, 2026-11-12): `owner_sale:<owner_sales.id>` or `bond_redemption:<canonical id>` when the
+  owner ticked "Invest this money"; NULL when logged by hand. At most one live lump per origin (checked in `logLumpSum`;
+  reversing the lump frees it). Reversing the sale also reverses its lump (`reverseEntry`). A bond redemption cannot be
+  reversed (audit_log), so a wrong amount is fixed by reversing the lump and logging again.
 - `loadSizingInput.reservedPaise` includes every open lump's remaining, so the monthly plan never spends it.
 - `checkRails` checks a lump-sum order against the lump's remaining (`LUMP_SUM_EXCEEDED`), not the month envelope.
 - Lump-sum recommendations neither count toward nor are blocked by FR-12's monthly recommendation cap (owner-approved
