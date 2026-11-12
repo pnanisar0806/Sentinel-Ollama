@@ -3438,3 +3438,15 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` ย
 - FX rows with `source = 'seed'` are a bootstrap value, not a feed, and are not assessed.
 - `manual-seed` stays assessed on purpose: it gap-fills EPF, US:NOW, the bonds and some MF/ETF
   rows, and only `pnpm seed` refreshes it, so its incident is a true FR-31 signal (US:NOW blocked).
+
+## Concentration caps are owner rails (2026-11-12, open list #4)
+
+- The caps in force are the `settings_rails` rows `single_stock_cap_pct`, `issuer_cap_pct`,
+  `mf_scheme_cap_pct`, `sector_cap_pct`, `employer_cap_pct` (percent; may be fractional).
+  Read them with `loadCaps(db)` and pass them to `concentration(positions, caps)`.
+  `CAPS` / `DEFAULT_CAPS` are only the fallback where no db is at hand; a test pins the
+  defaults to the IPS ยง3.5 text.
+- Until 2026-11-12 the seed wrote employer 25 / scheme 10 / sector 20 / issuer 15 while every
+  check used hard-coded PRD values, so the rows on /rails were edits that did nothing.
+  Migration 0044 corrects those four rows (only where still at the wrong seeded value).
+  It must be applied BEFORE code that reads the rows deploys, or a 10% MF-scheme cap fires.

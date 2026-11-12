@@ -5,7 +5,7 @@ import { blockedInstruments, assessStaleness } from '../sources/staleness.js';
 import { formatInr, paise } from '../money/paise.js';
 import { holdingRuleChecker, type Recommendation } from './recommendations.js';
 import type { OverrideEvent } from './recommendations.js';
-import { DEFAULT_OWNER_RAILS, railPaise } from './rail-values.js';
+import { DEFAULT_OWNER_RAILS, loadCaps, railPaise } from './rail-values.js';
 import { istMonth, loadFreeEnvelope } from './sips.js';
 import { loadLumpSum } from './lump-sums.js';
 import { isFreeCash, loadBucketBalances } from './bucket-balances.js';
@@ -233,9 +233,10 @@ async function marginalConcentration(
   const target = held ?? after[after.length - 1]!;
   const ownBuckets = new Set([target.instrumentId, target.issuer, target.sector]
     .filter((b): b is string => b !== null));
-  const before = new Set(concentration(positions).breaches.map(breachSubject));
+  const caps = await loadCaps(db);
+  const before = new Set(concentration(positions, caps).breaches.map(breachSubject));
 
-  return concentration(after).breaches
+  return concentration(after, caps).breaches
     .filter((breach) => {
       const subject = breachSubject(breach);
       // The employer breach names every employer instrument at once, so it is matched on
@@ -371,7 +372,7 @@ export async function checkPortfolioRails(
   const violations: { code: string; detail: string }[] = [];
 
   // Concentration breaches
-  const conc = concentration(positions);
+  const conc = concentration(positions, await loadCaps(db));
   for (const breach of conc.breaches) {
     violations.push({ code: 'CONCENTRATION_BREACH', detail: breach });
   }

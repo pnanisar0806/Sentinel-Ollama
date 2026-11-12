@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
-import { CAPS, concentration } from './allocation.js';
+import { concentration } from './allocation.js';
+import { loadCaps } from './rail-values.js';
 import { listRedemptionsUntil } from './redemptions.js';
 import type { Position } from './networth.js';
 import { fundAliases } from './fund-mix.js';
@@ -331,40 +332,41 @@ export async function evaluateExits(
   // 3. Hard-cap breach (§3.5). Reuses the Phase 0 concentration maps rather than
   // re-deriving them; the sector cap is deliberately absent because it names a sector,
   // not a holding, and an exit candidate has to name something sellable.
-  const c = concentration(positions);
+  const caps = await loadCaps(db);
+  const c = concentration(positions, caps);
   /** Per instrument: why it is over, and how much of the bucket has to go. */
   const capHits = new Map<string, { evidence: string; excess: bigint }>();
   for (const [id, share] of c.byStock) {
-    if (share > CAPS.singleStock) {
+    if (share > caps.singleStock) {
       capHits.set(id, {
-        evidence: `single-stock ${(share * 100).toFixed(1)}% vs ${(CAPS.singleStock * 100).toFixed(0)}% cap`,
-        excess: excessOver(sumWhere((p) => p.instrumentId === id), CAPS.singleStock),
+        evidence: `single-stock ${(share * 100).toFixed(1)}% vs ${(caps.singleStock * 100).toFixed(0)}% cap`,
+        excess: excessOver(sumWhere((p) => p.instrumentId === id), caps.singleStock),
       });
     }
   }
   for (const [id, share] of c.byMfScheme) {
-    if (share > CAPS.singleMfScheme) {
+    if (share > caps.singleMfScheme) {
       capHits.set(id, {
-        evidence: `single-MF-scheme ${(share * 100).toFixed(1)}% vs ${(CAPS.singleMfScheme * 100).toFixed(0)}% cap`,
-        excess: excessOver(sumWhere((p) => p.instrumentId === id), CAPS.singleMfScheme),
+        evidence: `single-MF-scheme ${(share * 100).toFixed(1)}% vs ${(caps.singleMfScheme * 100).toFixed(0)}% cap`,
+        excess: excessOver(sumWhere((p) => p.instrumentId === id), caps.singleMfScheme),
       });
     }
   }
   for (const [issuer, share] of c.byIssuer) {
-    if (share <= CAPS.singleIssuer) continue;
-    const excess = excessOver(sumWhere((x) => x.issuer === issuer), CAPS.singleIssuer);
+    if (share <= caps.singleIssuer) continue;
+    const excess = excessOver(sumWhere((x) => x.issuer === issuer), caps.singleIssuer);
     for (const p of positions.filter((x) => x.issuer === issuer)) {
       capHits.set(p.instrumentId, {
-        evidence: `single-issuer ${issuer} ${(share * 100).toFixed(1)}% vs ${(CAPS.singleIssuer * 100).toFixed(0)}% cap`,
+        evidence: `single-issuer ${issuer} ${(share * 100).toFixed(1)}% vs ${(caps.singleIssuer * 100).toFixed(0)}% cap`,
         excess,
       });
     }
   }
-  if (c.employerPct > CAPS.employer) {
-    const excess = excessOver(sumWhere((x) => x.isEmployer), CAPS.employer);
+  if (c.employerPct > caps.employer) {
+    const excess = excessOver(sumWhere((x) => x.isEmployer), caps.employer);
     for (const p of positions.filter((x) => x.isEmployer)) {
       capHits.set(p.instrumentId, {
-        evidence: `employer ${(c.employerPct * 100).toFixed(1)}% vs ${(CAPS.employer * 100).toFixed(0)}% cap`,
+        evidence: `employer ${(c.employerPct * 100).toFixed(1)}% vs ${(caps.employer * 100).toFixed(0)}% cap`,
         excess,
       });
     }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, type AdvisorData, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getMonthRuleHolds, getSips, getStockChecks } from '../../lib/data';
+import { getAdvisor, getDigest, type AdvisorData, getCaps, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getMonthRuleHolds, getSips, getStockChecks } from '../../lib/data';
 import { monthLabel } from '../../lib/funds';
 import { AllowOnce } from '../allow-once';
 import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
@@ -11,7 +11,6 @@ import type { GoalPlan, GoalTracker } from '../../../src/domain/goal-plan.js';
 import { BANDS } from '../../../src/domain/engine.js';
 import type { CheckName, CheckStatus } from '../../../src/domain/stock-checks.js';
 import { FUND_TYPE_LABEL } from '../../../src/domain/fund-mix.js';
-import { CAPS } from '../../../src/domain/allocation.js';
 import { AdviceActions, LineActions, ProposeRails } from './actions';
 
 export const dynamic = 'force-dynamic';
@@ -72,10 +71,11 @@ async function StockChecksCard() {
 async function FundCandidatesCard() {
   const { approved, buys, typesBelowMidpoint, excluded } = await getFundCandidates();
   const { month, holds } = await getMonthRuleHolds();
+  const caps = await getCaps();
   const pct = (bps: number) => `${(bps / 100).toFixed(1)}%`;
   const below = typesBelowMidpoint.map((t) => FUND_TYPE_LABEL[t]).join(', ');
   return (
-    <Card title="Fund candidates this month" aside={`one tranche · ${Math.round(CAPS.singleMfScheme * 100)}% single-scheme cap · never a sale`}>
+    <Card title="Fund candidates this month" aside={`one tranche · ${Math.round(caps.singleMfScheme * 10_000) / 100}% single-scheme cap · never a sale`}>
       {!approved
         ? <Notice tone="amber">no approved fund mix yet — approve it on <Link href="/funds">/funds</Link>. Until then no fund is topped up and every stock buy is withheld.</Notice>
         : typesBelowMidpoint.length === 0

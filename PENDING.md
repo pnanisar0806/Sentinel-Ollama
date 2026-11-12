@@ -10,7 +10,7 @@ Code fixes
 1. [x] Suggested SIPs: a fund the switch check says to leave shows "kept — Sentinel never suggests cutting a SIP" (`neverCut` overwrites the leave reason, `fund-mix.ts:321`), so Parag Parikh reads as a second decision. Keep the switch reason. (fixed 2026-11-09: `neverCut` keeps any reason `suggestSips` already starts with "kept")
 2. [x] Browser-check PR #11 (/log Start a new SIP, /funds Started/Undo, badges, Overview total) on desktop + 390px. (prod 2026-11-11: /funds, /log, Overview fit 390px; SIP total ₹40,804 same on /funds and Overview; item-1 switch reason live)
 3. [x] Deferred orders never resurface (`defer_until` column never written; DEFERRED→DEFERRED withdrawal row; tie-break). (fixed 2026-11-11; T+2/T+7 reminders were dead too, fixed)
-4. [ ] Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
+4. [x] (fixed 2026-11-12, owner OK: PRD values; migration 0044 corrects the 4 rows, every cap check reads `loadCaps(db)`) Seven rails still constants in `allocation.ts` `CAPS`; four seeded values contradict PRD (employer 25 vs 10, MF scheme 10 vs 35, sector 20 vs 25, issuer 15 vs 10). Fix values first, then wire.
 5. [x] /freshness copy says NAV/price ingestion "unimplemented in Phase 0" — false. (fixed 2026-11-11: copy lists every FR-31 input and the trading-session rule)
 6. [~] Three STALE_DATA incidents never clear: `composite` (2026-08-24), `manual-seed` (09-18), FX `seed` (09-26). Close or re-source. (2026-11-11: `composite` + FX `seed` fixed — un-assessed sources' incidents now resolve, the bootstrap FX `seed` rate is not assessed; close on the next sync. `manual-seed` is REAL: it gap-fills EPF, US:NOW, bonds and only `pnpm seed` refreshes it — owner policy call, see #17)
 7. [x] Weekend FX / FR-31 blocks (weekly report runs Sunday). (already fixed 2026-09-20, `79dbf2a`: prices/NAVs/FX judged against the last completed trading session; prod has no market STALE_DATA incident since 09-21 — verified 2026-11-11)
@@ -301,7 +301,7 @@ Actionability package (larger builds)
       test refuses it to a risk function. The test caught the identifier in a code
       *comment*, which is the guard working as designed.
 
-- [ ] **THE OTHER SEVEN OWNER RAILS ARE STILL CONSTANTS IN CODE.** PRD §11 says “all rails
+- [x] (caps fixed 2026-11-12, open list #4) **THE OTHER SEVEN OWNER RAILS ARE STILL CONSTANTS IN CODE.** PRD §11 says “all rails
       live in `settings_rails`”. Only `cash_ceiling_pct` does. `checkRails` and
       `checkPortfolioRails` still use hard-coded `100_00_000n` / `50_00_000n` and the
       `CAPS` constants in `src/domain/allocation.ts`, and four of the seeded values

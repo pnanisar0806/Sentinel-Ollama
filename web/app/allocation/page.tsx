@@ -5,8 +5,8 @@ import { AllocationBar, Badge, Card, ClassChip, DataTable, Money, Notice, PageHe
 export const dynamic = 'force-dynamic';
 
 export default async function AllocationPage() {
-  const { input, positions } = await getAllocation();
-  const c = concentration(positions);
+  const { input, positions, caps } = await getAllocation();
+  const c = concentration(positions, caps);
 
   const rows = input.drift.map((d) => ({
     key: d.assetClass,

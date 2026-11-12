@@ -3,7 +3,7 @@ import { loadPositions } from './networth.js';
 import { railPaise } from './rails.js';
 import { loadFreeEnvelope } from './sips.js';
 import { loadStockChecks } from './stock-checks.js';
-import { CAPS } from './allocation.js';
+import { loadCaps } from './rail-values.js';
 import { fundAliases, loadFundCandidates, sameFund } from './fund-mix.js';
 import { idleBankCash, loadBucketBalances } from './bucket-balances.js';
 import type { RuleCheck, SizingInput } from './sizing.js';
@@ -80,6 +80,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
   const funds = await loadFundCandidates(db, asOf);
   const ruleCheck = await ruleChecker(db, now, positions, [...funds.buys.map((f) => f.instrumentId), ...buys.map((b) => b.instrumentId), ...sells.map((s) => s.instrument_id)]);
 
+  const caps = await loadCaps(db);
   return {
     asOf,
     tacticalBudgetPaise: envelope.remainingPaise ?? 0n,
@@ -88,7 +89,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
     cashAvailablePaise: cash,
     reservedPaise: BigInt(reserved?.n ?? '0') + await openLumpSumPaise(db),
     portfolioPaise: portfolio,
-    singleStockCapPct: Number(await railPaise(db, 'single_stock_cap_pct')),
+    singleStockCapPct: Math.round(caps.singleStock * 10_000) / 100,
     holdings: positions.map((p) => ({
       instrumentId: p.instrumentId, valuePaise: p.valuePaise, units: unitsOf.get(p.instrumentId) ?? null,
       kind: p.kind, costKnown: p.avgCostPaise !== null,
@@ -101,7 +102,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
       blockedByMinimumHold: s.blocked_by_minimum_hold, reason: `${s.trigger_code}: ${s.evidence}`,
     })),
     funds,
-    singleSchemeCapPct: Math.round(CAPS.singleMfScheme * 100),
+    singleSchemeCapPct: Math.round(caps.singleMfScheme * 10_000) / 100,
     ...(ruleCheck === null ? {} : { ruleCheck }),
   };
 }

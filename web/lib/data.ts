@@ -1,4 +1,5 @@
 import { addP, formatInr, paise, type Paise } from '../../src/money/paise.js';
+import { loadCaps, type Caps } from '../../src/domain/rail-values.js';
 import { redemptionFor } from '../../src/domain/bond-redemptions.js';
 import { openDb, type Db } from '../../src/db/client.js';
 import { buildDigestInput, type DigestInput } from '../../src/notify/digest.js';
@@ -90,8 +91,10 @@ export async function getHoldings() {
 
 export async function getAllocation() {
   const input = await getDigest();
-  const positions = await loadPositions(await db(), input.businessDate);
-  return { input, positions };
+  const d = await db();
+  const positions = await loadPositions(d, input.businessDate);
+  // The caps in force (settings_rails), so /allocation shows what the rails enforce.
+  return { input, positions, caps: await loadCaps(d) };
 }
 
 export async function getRails() {
@@ -777,6 +780,11 @@ export async function getIndexFundChoices(): Promise<{ asOf: string | null; choi
 }
 
 /** /advisor "Fund candidates this month": held funds the sizer tries before any stock (Piece 3 Task 7). */
+/** The concentration caps in force (settings_rails, open list #4). */
+export async function getCaps(): Promise<Caps> {
+  return loadCaps(await db());
+}
+
 export async function getFundCandidates(): Promise<FundCandidates> {
   const today = new Date(Date.now() + 5.5 * 3_600_000).toISOString().slice(0, 10);
   return loadFundCandidates(await db(), today);

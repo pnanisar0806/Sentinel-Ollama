@@ -14,7 +14,8 @@ import { DEFAULT_ADD_INSTRUMENT, addTarget, rebalanceRec, type CandidateAction, 
 import { evaluateExits, persistExitCandidates, type ExitCandidate } from '../domain/sell-triggers.js';
 import { monthlyReviewDone, recordMonthlyReview } from '../domain/cadence.js';
 import { railPaise } from '../domain/rails.js';
-import { CAPS, satelliteFit } from '../domain/allocation.js';
+import { satelliteFit } from '../domain/allocation.js';
+import { loadCaps } from '../domain/rail-values.js';
 import { NON_CORE_TYPES, typeOf } from '../domain/fund-mix.js';
 import { listRedemptionsUntil, type Redemption } from '../domain/redemptions.js';
 import {
@@ -205,7 +206,7 @@ async function runSignalReview(
   const ctx = {
     ...inputs.context,
     blockedIds: blocked,
-    fit: { ...satelliteFit(positions, nonCoreFundIds), sectorCapPct: CAPS.singleSector * 100 },
+    fit: { ...satelliteFit(positions, nonCoreFundIds), sectorCapPct: (await loadCaps(db)).singleSector * 100 },
   };
   const scored = inputs.candidates
     .map((c) => scoreSatellite(c, ctx))

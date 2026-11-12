@@ -1,5 +1,6 @@
 import type { Db } from '../db/client.js';
 import { allocationDrift, concentration, type DriftRow } from '../domain/allocation.js';
+import { loadCaps } from '../domain/rail-values.js';
 import { checkRails, checkPortfolioRails, type RailViolation } from '../domain/rails.js';
 import { bucketStatuses, milestoneStatuses, type BucketStatus, type MilestoneStatus } from '../domain/buckets.js';
 import { fundedStatus } from '../domain/funded-status.js';
@@ -216,7 +217,7 @@ export async function buildDigestInput(db: Db, now: string, liveInputs?: LiveInp
     previousNetPaise: await previousNet(db, businessDate, nw.liabilitiesPaise),
     byAccount: [...nw.byAccount.entries()],
     drift: allocationDrift(nw.byAssetClass, nw.assetsPaise),
-    breaches: concentration(positions).breaches,
+    breaches: concentration(positions, await loadCaps(db)).breaches,
     railBreaches: await checkPortfolioRails(db, positions, nw.assetsPaise),
     buckets: await bucketStatuses(db),
     milestones: await milestoneStatuses(db, businessDate),

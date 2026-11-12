@@ -1,7 +1,7 @@
 import type { Db } from '../db/client.js';
 import { formatInr, type Paise } from '../money/paise.js';
 import { ASSUMPTIONS } from '../config/assumptions.js';
-import { CAPS } from './allocation.js';
+import { loadCaps } from './rail-values.js';
 import { loadMfMetadata } from './mf-metadata.js';
 import { heldFunds } from './mf-ranking.js';
 import { evaluateSwitches } from './mf-switch.js';
@@ -457,7 +457,7 @@ export async function loadFindings(db: Db): Promise<Finding[]> {
 
   // Scheme cap (IPS §3.5): one fund above 35% of the whole loadPositions total.
   const portfolio = positions.reduce((s, p) => s + p.valuePaise, 0n);
-  const capBps = BigInt(Math.round(CAPS.singleMfScheme * 10_000));
+  const capBps = BigInt(Math.round((await loadCaps(db)).singleMfScheme * 10_000));
   for (const [instrumentId, f] of fundsOf(positions)) {
     if (f.valuePaise * 10_000n > portfolio * capBps) {
       out.push({ kind: 'scheme_cap', instrumentId,

@@ -1,5 +1,6 @@
 import { addP, mulP, pctOf, subP, type Paise } from '../money/paise.js';
 import type { AssetClass, Position } from './networth.js';
+import { DEFAULT_CAPS, type Caps } from './rail-values.js';
 
 /**
  * PRD §3.3 strategic allocation — **only the rails the PRD actually states**.
@@ -24,14 +25,12 @@ export const IPS_BANDS: Record<AssetClass, { min: number; max: number }> = {
   CASH: { min: 0.00, max: 1.00 },   // "remainder" — see rails.ts for the owner ceiling
 };
 
-/** PRD 3.5 hard concentration caps. Every one of these is enforced by `concentration`. */
-export const CAPS = {
-  singleStock: 0.10,
-  singleIssuer: 0.10,
-  singleMfScheme: 0.35,
-  singleSector: 0.25,
-  employer: 0.10,
-} as const;
+/**
+ * PRD 3.5 hard concentration caps, as defaulted. Every one is enforced by `concentration`.
+ * The caps in force live in `settings_rails`: read them with `loadCaps(db)` and pass them
+ * in. CAPS is only the fallback where no database is at hand (open list #4).
+ */
+export const CAPS: Caps = DEFAULT_CAPS;
 
 /**
  * Emitted whenever part of the portfolio carries no `instruments.sector`, because the
@@ -130,7 +129,7 @@ export interface Concentration {
   caveats: string[];
 }
 
-export function concentration(positions: Position[]): Concentration {
+export function concentration(positions: Position[], caps: Caps = CAPS): Concentration {
   const total = addP(...positions.map((p) => p.valuePaise));
   const breaches: string[] = [];
   const caveats: string[] = [];
@@ -143,39 +142,39 @@ export function concentration(positions: Position[]): Concentration {
   const byStock = rate(sumBy(positions, (p) => (isDirectStock(p) ? p.instrumentId : null)));
   const topStockPct = [...byStock.values()].reduce((m, p) => Math.max(m, p), 0);
   for (const [id, p] of byStock) {
-    if (p > CAPS.singleStock) {
-      breaches.push(`Single-stock cap: ${id} at ${pct(p)} (cap ${pct(CAPS.singleStock)})`);
+    if (p > caps.singleStock) {
+      breaches.push(`Single-stock cap: ${id} at ${pct(p)} (cap ${pct(caps.singleStock)})`);
     }
   }
 
   const employerIds = [...new Set(positions.filter((p) => p.isEmployer).map((p) => p.instrumentId))];
   const employerValue = addP(...positions.filter((p) => p.isEmployer).map((p) => p.valuePaise));
   const employerPct = pctOf(employerValue, total);
-  if (employerPct > CAPS.employer) {
+  if (employerPct > caps.employer) {
     breaches.push(
-      `Employer cap: ${employerIds.join(', ')} at ${pct(employerPct)} (cap ${pct(CAPS.employer)})`,
+      `Employer cap: ${employerIds.join(', ')} at ${pct(employerPct)} (cap ${pct(caps.employer)})`,
     );
   }
 
   const byIssuer = rate(sumBy(positions, (p) => p.issuer));
   for (const [issuer, p] of byIssuer) {
-    if (p > CAPS.singleIssuer) {
-      breaches.push(`Single-issuer cap: ${issuer} at ${pct(p)} (cap ${pct(CAPS.singleIssuer)})`);
+    if (p > caps.singleIssuer) {
+      breaches.push(`Single-issuer cap: ${issuer} at ${pct(p)} (cap ${pct(caps.singleIssuer)})`);
     }
   }
 
   const byMfScheme = rate(sumBy(positions, (p) => (p.kind === 'MF' ? p.instrumentId : null)));
   for (const [id, p] of byMfScheme) {
-    if (p > CAPS.singleMfScheme) {
-      breaches.push(`Single-MF-scheme cap: ${id} at ${pct(p)} (cap ${pct(CAPS.singleMfScheme)})`);
+    if (p > caps.singleMfScheme) {
+      breaches.push(`Single-MF-scheme cap: ${id} at ${pct(p)} (cap ${pct(caps.singleMfScheme)})`);
     }
   }
 
   const sectorValues = sumBy(positions, (p) => p.sector);
   const bySector = rate(sectorValues);
   for (const [sector, p] of bySector) {
-    if (p > CAPS.singleSector) {
-      breaches.push(`Single-sector cap: ${sector} at ${pct(p)} (cap ${pct(CAPS.singleSector)})`);
+    if (p > caps.singleSector) {
+      breaches.push(`Single-sector cap: ${sector} at ${pct(p)} (cap ${pct(caps.singleSector)})`);
     }
   }
   const sectorCoveragePct = pctOf(addP(...sectorValues.values()), total);
