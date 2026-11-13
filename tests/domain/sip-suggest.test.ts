@@ -173,4 +173,10 @@ describe('FUND_TYPE_BY_ISIN (owner, 2026-10-29)', () => {
     // AMFI scheme 120403, ISIN confirmed against mfapi.in and the prod MFU:120403 row.
     expect(FUND_TYPE_BY_ISIN.INF205K01MV6).toEqual({ type: 'MID', topUp: true });
   });
+
+  it('types the two index SIPs INDmoney listed on 2026-11-13 (open list #13)', () => {
+    // ISINs from the INDmoney SIP feed (snapshot 40), matching prod MFU:150899 and MFU:149039.
+    expect(FUND_TYPE_BY_ISIN.INF754K01QL5).toEqual({ type: 'NEXT50', topUp: true }); // Edelweiss Nifty Next 50 Index
+    expect(FUND_TYPE_BY_ISIN.INF959L01FP2).toEqual({ type: 'NIFTY50', topUp: true }); // Navi Nifty 50 Index
+  });
 });

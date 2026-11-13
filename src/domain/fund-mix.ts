@@ -33,12 +33,14 @@ export interface FundTyping { type: FundType; topUp: boolean }
 
 /**
  * Keyed by ISIN, the scheme identity shared by the seed, INDmoney and AMFI. Every ISIN
- * here was confirmed present on a production instrument on 2026-10-26.
+ * here was confirmed present on a production instrument on 2026-10-26 (Navi and Edelweiss
+ * Next 50: in the INDmoney SIP feed and on MFU:* instruments, 2026-11-13).
  * LARGE_ACTIVE keeps topUp true: its range row's `newMoney: false` already blocks new money.
  */
 export const FUND_TYPE_BY_ISIN: Record<string, FundTyping> = {
   INF109K012M7: { type: 'NIFTY50', topUp: true },       // ICICI Pru Nifty 50 Index Direct
   INF732E01037: { type: 'NIFTY50', topUp: true },       // Nippon Nifty BeES
+  INF959L01FP2: { type: 'NIFTY50', topUp: true },       // Navi Nifty 50 Index Direct (AMFI 149039; SIP from Nov 2026)
   INF879O01027: { type: 'FLEXI', topUp: true },         // Parag Parikh Flexi Cap Direct
   INF209K01XX1: { type: 'FLEXI', topUp: true },         // Aditya Birla Sun Life Flexi Cap Fund (AMFI 120564)
   INF109K016L0: { type: 'LARGE_ACTIVE', topUp: true },  // ICICI Pru Large Cap Direct
@@ -46,6 +48,7 @@ export const FUND_TYPE_BY_ISIN: Record<string, FundTyping> = {
   INF247L01445: { type: 'MID', topUp: true },           // Motilal Oswal Midcap Direct
   INF205K01MV6: { type: 'MID', topUp: true },           // Invesco India Mid Cap Direct (AMFI 120403; SIP from Nov 2026)
   INF194KB1AL4: { type: 'SMALL', topUp: true },         // Bandhan Small Cap Direct
+  INF754K01QL5: { type: 'NEXT50', topUp: true },        // Edelweiss Nifty Next 50 Index Direct (AMFI 150899; SIP from Nov 2026)
   INF732E01045: { type: 'NEXT50', topUp: false },       // Junior BeES — §8: kept, not topped up
 };
 
