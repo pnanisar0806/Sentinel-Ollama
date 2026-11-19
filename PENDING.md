@@ -20,7 +20,7 @@ Code fixes
 11. [x] Verify satellite trend leg now scores (302 days of prices_eod since 2025-09-08) — likely fixed, unconfirmed. (verified on prod 2026-11-11: scores since 09-27; 11-08 run 35 of 41 quality-passed names > 0, max 30/30, 10 composites ≥ 60)
 12. [x] Monthly advisor only runs inside the weekly report (orphan). (not an orphan, by design: first successful weekly run of the month, waits for the budget up to the 7th, retry crons 07:30/11:30 UTC; ran 2026-10-04 and 2026-11-08 on prod. Cost: up to 6 days' lag after the budget settles — owner may ask for a daily attempt)
 13. [x] (done 2026-11-13: the feed listed it; Edelweiss Next 50 `INF754K01QL5` typed NEXT50 and Navi Nifty 50 `INF959L01FP2` typed NIFTY50, both open to new money) Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` once the feed lists it.
-14. [ ] Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
+14. [x] (closed by owner 2026-11-19: the 2026-11-13 feed after both moves listed neither ICICI Nifty 50 nor HDFC Mid Cap, and the SIP total matched INDmoney, Rs 49,804) Watch: a moved-from SIP given a new sip_id while still listed counts as a restart; check first feed after a move.
 
 29. [~] (2026-11-12: HDFC stale warning built: Overview + /freshness date the balance by its last change, stale at 7 days. INDmoney has no refresh API and Account Aggregator access needs a licensed FIU (checked); CRED Money has no API; owner declined SMS forwarding, Gmail and Telegram. Holdings/MF staleness still open) **INDmoney data goes stale without anyone noticing (owner, 2026-11-12).** INDmoney does not refresh
     bank balances and holdings daily; Sentinel reads whatever INDmoney last pulled. Investigate, in order:
@@ -67,7 +67,7 @@ Actionability package (larger builds)
 - [x] **SIP START UI + ACCOUNTING FIXES 2026-11-05** — /log "Start a new SIP", /funds Started/Undo, logged badges; logged starts and
       move-to funds count in the commitment from their first month and retire once INDmoney lists them; a move stops only SIPs
       listed or logged before it. Fixed: 0043 unrecorded on prod (sync/schedule crashed 11-03..11-05), CI web deps, IST window.
-  - [ ] Watch: if INDmoney gives a moved-from SIP a NEW sip_id while still listing it, it counts as a restart (over by its amount). Code cannot tell; check the first feed after a move.
+  - [x] (closed 2026-11-19, open list #14) Watch: if INDmoney gives a moved-from SIP a NEW sip_id while still listing it, it counts as a restart (over by its amount). Code cannot tell; check the first feed after a move.
   - [x] Add Edelweiss Nifty Next 50 ISIN to `FUND_TYPE_BY_ISIN` (done 2026-11-13, open list #13).
   - [x] Owner: top up OpenRouter credit — done 2026-11-05, OK calls confirmed in `llm_calls`.
 - [x] **SIP FULL-BUDGET + LOGGED-SIP ACCOUNTING 2026-11-03** — Suggested SIPs now plan the whole investable budget (budget − set-aside); US with no fund spreads its share; owner-logged SIP starts count everywhere feed SIPs count (migration 0043 `sip_starts`, `logSipStart`, stand-ins in `loadSipCommitment`). 1727 tests. Branch `feat/sip-full-budget`, local only, not pushed.
