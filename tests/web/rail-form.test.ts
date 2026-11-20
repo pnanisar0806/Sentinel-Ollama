@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { invalidRailMessage, parseRailInput, formatRailValue, RAIL_LABELS, railChangeMessage, validRailValue } from '../../web/lib/rail-form.js';
 
 describe('owner rail inputs', () => {
+  it('lists the minimum order (open list #28) as an editable money rail, in rupees', () => {
+    expect(RAIL_LABELS.min_order_paise).toMatch(/Minimum per order/);
+    expect(validRailValue('min_order_paise', 1_00_000)).toBe(true);
+    expect(parseRailInput('min_order_paise', '1,000')).toBe(1_00_000);
+  });
+
   it('validates the API boundary without numeric coercion', () => {
     expect(validRailValue('monthly_budget_paise', 5000000)).toBe(true);
     expect(validRailValue('cash_ceiling_pct', 12.5)).toBe(true);

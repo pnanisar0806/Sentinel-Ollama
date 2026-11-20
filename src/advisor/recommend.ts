@@ -1,6 +1,6 @@
 import type { Db } from '../db/client.js';
 import { OPENROUTER_CHAT_URL, TEXT_MODEL } from '../config/models.js';
-import type { Candidate } from '../domain/sizing.js';
+import { isBelowMinimum, type Candidate } from '../domain/sizing.js';
 import { SATELLITE_WEIGHTS } from '../domain/engine.js';
 import { newsCoverage } from '../sources/news.js';
 import { firstJson } from '../sources/sentiment.js';
@@ -186,7 +186,7 @@ export function validateDecision(raw: unknown, shown: CandidateContext[]): Model
 export async function runAdvisor(
   db: Db,
   opts: { asOf: string; candidates: Candidate[]; apiKey: string | undefined; model?: string | undefined; fetchImpl?: typeof fetch; now?: Date; budget?: AdvisorBudget },
-): Promise<{ proposalId: number; decision: Decision }> {
+): Promise<{ proposalId: number; decision: Decision; reason: string | null }> {
   const now = opts.now ?? new Date();
   const model = opts.model || TEXT_MODEL;
   const { shown, excluded } = await showCandidates(db, opts.candidates, now);
@@ -195,13 +195,19 @@ export async function runAdvisor(
   const snapshot = { asOf: opts.asOf, shown, excluded, ...budget };
   const save = async (decision: Decision, payload: object, usedModel: string | null, evidence: string[] = []) => ({
     decision,
+    reason: (payload as { reason?: string }).reason ?? null,
     proposalId: await recordProposal(db, {
       kind: 'ADVISE', payload: { decision, ...payload }, inputSnapshot: snapshot, evidenceIds: evidence,
       model: usedModel, promptVersion: ADVISE_PROMPT_VERSION, schemaVersion: ADVISE_SCHEMA_VERSION, asOf: now.toISOString(),
     }),
   });
 
-  if (shown.length === 0) return save('NO_ACTION', { reason: 'no candidate is eligible for advice this cycle', excluded }, null);
+  if (shown.length === 0) {
+    // Open list #28: when the minimum order is what stopped the buys, say so; it is a correct month, not a gap.
+    const small = opts.candidates.find((c) => c.action === 'BUY' && isBelowMinimum(c.withheldReason));
+    const reason = small ? `Nothing to invest this month: ${small.withheldReason}. The money stays in the bank.` : 'no candidate is eligible for advice this cycle';
+    return save('NO_ACTION', { reason, excluded }, null);
+  }
   if (!opts.apiKey) return save('UNAVAILABLE', { reason: 'no model key configured', excluded }, null);
 
   const { decided, failure } = await callModel(db, {

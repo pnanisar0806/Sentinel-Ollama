@@ -148,6 +148,12 @@ Advisor (${month}): held — ${envelope.reason ?? 'SIP data unknown'}. It runs a
     const budget = await advisorBudget(db, generatedAt);
     const advice = await runAdvisor(db, { asOf, candidates, ...opts, budget });
     await recordMonthlyReview(db, 'advice', month, { asOf, proposed: advice.decision === 'BUY' || advice.decision === 'SELL' ? 1 : 0 });
+    // Open list #28: nothing to sign says why (a below-minimum month reads as a correct hold).
+    if (advice.reason !== null && (advice.decision === 'NO_ACTION' || advice.decision === 'UNAVAILABLE')) {
+      return `
+
+Advisor (${month}): ${advice.decision} — ${advice.reason.replace(/\.$/, '')}.`;
+    }
     return `
 
 Advisor (${month}): ${advice.decision}. Review and sign it on the web app, Advisor page.`;

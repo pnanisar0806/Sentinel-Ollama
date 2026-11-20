@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { FUND_TYPE_LABEL, byGap, type FundCandidates, type FundType } from './fund-types.js';
+import { formatInr, type Paise } from '../money/paise.js';
 
 /**
  * Deterministic sizing of actionable candidates (Phase 2.5 Task 4).
@@ -32,6 +33,8 @@ export interface SizingInput {
   /** Why the monthly budget is 0/unknown (live SIPs). Withheld BUYs quote it verbatim. */
   envelopeReason: string | null;
   maxOrderPaise: bigint;
+  /** Owner rail `min_order_paise` (open list #28): a BUY below it is withheld, never rounded up. */
+  minOrderPaise: bigint;
   /** Bank cash minus the emergency fund. NULL when it cannot be established. */
   cashAvailablePaise: bigint | null;
   /** Open BUY requests not yet executed: money already spoken for. */
@@ -105,6 +108,11 @@ function withId(c: Omit<Candidate, 'id' | 'policyVersion'>, asOf: string): Candi
 
 type BuyBase = Pick<Candidate, 'action' | 'instrumentId' | 'name' | 'amountPaise' | 'units' | 'pricePaise' | 'quoteAsOf' | 'constraints' | 'vehicle' | 'fund'>;
 
+/** The withheld reason for a BUY under the `min_order_paise` rail. Shared with lump-sum sizing. */
+export const belowMinimum = (amountPaise: bigint, minPaise: bigint): string =>
+  `${formatInr(amountPaise as Paise)} is below the ${formatInr(minPaise as Paise)} minimum order`;
+export const isBelowMinimum = (reason: string | null): boolean => reason !== null && reason.endsWith(' minimum order');
+
 export function sizeCandidates(input: SizingInput): Candidate[] {
   const out: Candidate[] = [];
   const holding = new Map(input.holdings.map((h) => [h.instrumentId, h]));
@@ -146,6 +154,8 @@ export function sizeCandidates(input: SizingInput): Candidate[] {
       if (n === 0n) { withholder(base)(`one share costs more than the ₹${amount / 100n} available`, basis); return; }
       units = n.toString(); price = q.pricePaise; quoteAsOf = q.asOf; amount = n * q.pricePaise;
     }
+    // Below the minimum order: withheld, and the tranche stays for the next candidate.
+    if (amount < input.minOrderPaise) { withholder(base)(belowMinimum(amount, input.minOrderPaise), basis); return; }
     // One tranche a month (owner, 2026-09-27): the rounding remainder is not a second buy.
     budget = 0n; cashLeft = cashNow - amount;
     out.push(withId({ ...base, status: 'ELIGIBLE', withheldReason: null, amountPaise: amount, units, pricePaise: price, quoteAsOf, basis }, input.asOf));

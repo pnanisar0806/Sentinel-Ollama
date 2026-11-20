@@ -48,7 +48,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const input = p && await loadLumpSum(d, lumpId) ? await loadLumpSizingInput(d, lumpId, today) : null;
         const r = await signLumpSum(d, id, input
           ? { candidates: sizeLumpSum(input), limits: lumpLimits(input) }
-          : { candidates: [], limits: { freeCashPaise: 0n, typeRoomPaise: {}, goldRoomPaise: null } });
+          : { candidates: [], limits: { freeCashPaise: 0n, typeRoomPaise: {}, goldRoomPaise: null, minOrderPaise: 0n } });
         return NextResponse.json({ ok: true, message: `Signed: ${r.note}.${r.recommendationIds.length > 0 ? ' Approve them on Approvals.' : ''}` });
       }
       case 'dismiss_lump':

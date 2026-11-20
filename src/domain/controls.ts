@@ -246,7 +246,8 @@ const LOOSENING_BLOCK_DRAWDOWN_PCT = 15;
  * exception is listed deliberately: the goal set-aside comes off the free envelope, so a
  * higher set-aside is TIGHTER. An unknown rail is refused, not guessed at.
  */
-const TIGHTER_WHEN_HIGHER = new Set(['goal_setaside_monthly_paise']);
+// A higher minimum order (open list #28) buys less often, so lowering it is the loosening.
+const TIGHTER_WHEN_HIGHER = new Set(['goal_setaside_monthly_paise', 'min_order_paise']);
 const LOOSER_WHEN_HIGHER = new Set(Object.keys(DEFAULT_OWNER_RAILS).filter((k) => !TIGHTER_WHEN_HIGHER.has(k)));
 
 export function isLoosening(key: string, current: number, proposed: number): boolean {

@@ -1,19 +1,11 @@
 import Link from 'next/link';
 import { getCashflow } from '../../lib/data';
-import { dayLabel, moneyOrUnknown, monthShort, paydayDueText } from '../../lib/cashflow';
+import { avg3, dayLabel, moneyOrUnknown, monthShort, paydayDueText } from '../../lib/cashflow';
 import { Badge, Card, DataTable, Notice, PageHead, Stat } from '../../lib/ui';
-import type { Cycle } from '../../../src/domain/cashflow.js';
 
 export const dynamic = 'force-dynamic';
 
 const m = moneyOrUnknown;
-
-/** Average of known values over the last three cycles; null until three are known. */
-function avg3(cycles: Cycle[], pick: (c: Cycle) => bigint | null): bigint | null {
-  const last = cycles.slice(0, 3).map(pick);
-  if (last.length < 3 || last.some((v) => v === null)) return null;
-  return (last as bigint[]).reduce((s, v) => s + v, 0n) / 3n;
-}
 
 export default async function CashflowPage() {
   const { cycles, paydays, due } = await getCashflow();

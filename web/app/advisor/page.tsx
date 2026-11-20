@@ -1,11 +1,12 @@
 import Link from 'next/link';
-import { getAdvisor, getDigest, type AdvisorData, getCaps, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getMonthRuleHolds, getSips, getStockChecks } from '../../lib/data';
+import { getAdvisor, getCashflow, getDigest, type AdvisorData, getCaps, getFundCandidates, getInvestmentControls, getLumpRuleHolds, getMonthRuleHolds, getSips, getStockChecks } from '../../lib/data';
 import { monthLabel } from '../../lib/funds';
 import { AllowOnce } from '../allow-once';
 import { Badge, Card, ClassChip, DataTable, Money, Notice, PageHead } from '../../lib/ui';
 import type { Tone } from '../../lib/ui';
 import { rupees } from '../../lib/format';
 import { humanize } from '../../lib/plain';
+import { surplusVsBudget } from '../../lib/cashflow';
 import { budgetRaise, disclosureLines, inr, pendingBlocks, setAsideLine } from '../../lib/goals';
 import type { GoalPlan, GoalTracker } from '../../../src/domain/goal-plan.js';
 import { BANDS } from '../../../src/domain/engine.js';
@@ -262,6 +263,8 @@ export default async function AdvisorPage() {
   const sips = await getSips();
   const blocks = pendingBlocks((await getInvestmentControls()).pending);
   const equityShare = (await getDigest()).drift.find((d) => d.assetClass === 'EQUITY')?.actual ?? null;
+  // Open list #28 gap 2: the measured surplus beside the budget, fail-soft like the Overview notices.
+  const surplusLine = await getCashflow().then((c) => surplusVsBudget(c.cycles, sips.budgetPaise, sips.sipTotalPaise), () => null);
   const latest = advice[0] ?? null;
   const older = advice.slice(1);
   const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
@@ -318,6 +321,12 @@ export default async function AdvisorPage() {
           {goalPlan === null
             ? <Card title="Goal plan" tone="bad"><Notice tone="red">Goal plan unavailable: {goalPlanReason}</Notice></Card>
             : <GoalPlanCard tracker={goalPlan.tracker} plan={goalPlan.plan} names={names} sips={sips} equityShare={equityShare} blocks={blocks} />}
+        </div>
+
+        <div className="span-12">
+          <Card title="Budget and your real surplus" aside={<Link href="/cashflow">Cash flow</Link>}>
+            <p style={{ margin: 0 }}>{surplusLine ?? 'Cash flow could not be read.'}</p>
+          </Card>
         </div>
 
         <div className="span-12">

@@ -22,7 +22,7 @@ const fund = (instrumentId: string, gapBps: number): FundBuy => ({
 const ALIASES = new Map([['MF:A', ['MF:A', 'IND:A']], ['MF:B', ['MF:B']]]);
 const check = (rules: HoldingRule[]) => makeRuleCheck(rules, '2026-10', ALIASES, [], 500_000_000n);
 const base = (over: Partial<SizingInput> & { rules?: HoldingRule[] } = {}): SizingInput => ({
-  asOf: AS_OF, tacticalBudgetPaise: 5_000_000n, envelopeReason: null, maxOrderPaise: 10_000_000n, cashAvailablePaise: 20_000_000n,
+  asOf: AS_OF, tacticalBudgetPaise: 5_000_000n, envelopeReason: null, maxOrderPaise: 10_000_000n, minOrderPaise: 1_00_000n, cashAvailablePaise: 20_000_000n,
   reservedPaise: 0n, portfolioPaise: 500_000_000n, singleStockCapPct: 10, holdings: [], quotes: new Map(), buys: [], sells: [],
   funds: { approved: true, buys: [fund('MF:A', 2000), fund('MF:B', 500)], typesBelowMidpoint: ['MID'], excluded: [] },
   singleSchemeCapPct: 35,

@@ -10,6 +10,8 @@ export const DEFAULT_OWNER_RAILS: Record<string, unknown> = {
   tactical_monthly_paise: 50_00_000,
   monthly_budget_paise: 50_00_000, // owner deployment budget incl. SIPs (2026-10-13); raised yearly via /cleanup
   max_order_paise: 100_00_000,
+  // Open list #28 (owner, 2026-11-19): no BUY below ₹1,000, monthly or lump sum. Lowering it loosens.
+  min_order_paise: 1_00_000,
   // IPS §3.5 concentration caps (open list #4, 2026-11-12). The seed carried 25/10/20/15 for
   // employer/scheme/sector/issuer, contradicting the PRD, while enforcement read hard-coded PRD
   // values, so the rows on /rails were edits that changed nothing. Migration 0044 corrects them.

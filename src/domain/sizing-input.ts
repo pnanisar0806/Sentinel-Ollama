@@ -86,6 +86,7 @@ export async function loadSizingInput(db: Db, asOf: string, now = new Date()): P
     tacticalBudgetPaise: envelope.remainingPaise ?? 0n,
     envelopeReason: envelope.reason,
     maxOrderPaise: await railPaise(db, 'max_order_paise'),
+    minOrderPaise: await railPaise(db, 'min_order_paise'),
     cashAvailablePaise: cash,
     reservedPaise: BigInt(reserved?.n ?? '0') + await openLumpSumPaise(db),
     portfolioPaise: portfolio,

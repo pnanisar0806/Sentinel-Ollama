@@ -3467,3 +3467,18 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   check used hard-coded PRD values, so the rows on /rails were edits that did nothing.
   Migration 0044 corrects those four rows (only where still at the wrong seeded value).
   It must be applied BEFORE code that reads the rows deploys, or a 10% MF-scheme cap fires.
+
+## Minimum order and surplus beside the budget (2026-11-19, open list #28)
+
+- **`min_order_paise` = ₹1,000 (owner).** An owner rail in `settings_rails` (migration 0047; editable on
+  /rails with the 48h cooling-off; raising it is the tightening, so it sits in `TIGHTER_WHEN_HIGHER`).
+  `sizeCandidates` withholds any BUY whose final amount (after whole-unit rounding) is below it, and the
+  tranche stays for the next candidate; `sizeLumpSum` does the same; `allocateLumpSum` drops a part below
+  `limits.minOrderPaise`. Reason text is `belowMinimum()` in sizing.ts, matched by `isBelowMinimum()`.
+  Sells are not affected. The leftover is not carried to next month: it stays in HDFC and /cashflow
+  counts it as surplus.
+- `runAdvisor` returns `reason`; a NO_ACTION caused by the minimum reads "Nothing to invest this month:
+  ₹X is below the ₹1,000 minimum order. The money stays in the bank." and the weekly report prints
+  `NO_ACTION — <reason>.` instead of "Review and sign".
+- /advisor "Budget and your real surplus": `surplusVsBudget(cycles, budget, sips)` in web/lib/cashflow.ts,
+  the newest 3 cycles' average surplus (null until all 3 known). Facts only; it never proposes a budget.

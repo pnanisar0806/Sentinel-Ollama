@@ -37,7 +37,7 @@ const bajaj = (over: Partial<Candidate> = {}): Candidate => ({
   vehicle: 'STOCK', fund: null,
   ...over,
 });
-const limits: LumpLimits = { freeCashPaise: 100_000_000n, typeRoomPaise: { FLEXI: 100_000_000n }, goldRoomPaise: null };
+const limits: LumpLimits = { freeCashPaise: 100_000_000n, typeRoomPaise: { FLEXI: 100_000_000n }, goldRoomPaise: null, minOrderPaise: 0n }; // no minimum: these tests are about other limits
 
 const advise = (lumpSumId: string, payload: object = {}) => recordProposal(db, {
   kind: 'LUMP_SUM', inputSnapshot: {}, evidenceIds: [], model: 'm', promptVersion: 'lump-v1', schemaVersion: 'lump-schema-v1', asOf: NOW.toISOString(),

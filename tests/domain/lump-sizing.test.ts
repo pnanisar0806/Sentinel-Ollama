@@ -134,7 +134,7 @@ describe('sizeLumpSum (pure)', () => {
   const input = (over: Partial<SizingInput> = {}): LumpSizingInput => ({
     lumpSumId: '7', remainingPaise: LUMP, fundTotalPaise: 100_000_000n, typeValuePaise: {}, newFunds: [], gold: null, rules: [], month: '2026-10', aliases: {}, held: {},
     sizing: {
-      asOf: AS_OF, tacticalBudgetPaise: 0n, envelopeReason: null, maxOrderPaise: 10_000_000n, cashAvailablePaise: 20_000_000n,
+      asOf: AS_OF, tacticalBudgetPaise: 0n, envelopeReason: null, maxOrderPaise: 10_000_000n, minOrderPaise: 1_00_000n, cashAvailablePaise: 20_000_000n,
       reservedPaise: 0n, portfolioPaise: 1_000_000_000n, singleStockCapPct: 10, holdings: [],
       quotes: new Map([['NSE:A', { pricePaise: 100_000n, asOf: AS_OF }]]),
       buys: [{ instrumentId: 'NSE:A', name: 'A Ltd', kind: 'EQUITY', score: 90 }], sells: [],
@@ -177,7 +177,7 @@ describe('sizeLumpSum (pure)', () => {
 
   it("lumpLimits: free cash, each type's room and gold's room", () => {
     expect(lumpLimits({ ...tight(), sizing: { ...tight().sizing, reservedPaise: 5_000_000n } }))
-      .toEqual({ freeCashPaise: 15_000_000n, typeRoomPaise: { MID: 999_950n }, goldRoomPaise: 999_950n });
+      .toEqual({ freeCashPaise: 15_000_000n, typeRoomPaise: { MID: 999_950n }, goldRoomPaise: 999_950n, minOrderPaise: 1_00_000n });
   });
 });
 
@@ -213,7 +213,7 @@ describe('allocateLumpSum', () => {
   });
 
   const midFund = (id: string) => cand({ id, instrumentId: `MF:${id}`, fund: { fundType: 'MID', actualBps: 1500, midBps: 1500, minBps: 1000, maxBps: 2000, quality: '' } });
-  const limits = (over: Partial<LumpLimits> = {}): LumpLimits => ({ freeCashPaise: 100_000_000n, typeRoomPaise: { MID: 1_500_000n }, goldRoomPaise: 300_000n, ...over });
+  const limits = (over: Partial<LumpLimits> = {}): LumpLimits => ({ freeCashPaise: 100_000_000n, typeRoomPaise: { MID: 1_500_000n }, goldRoomPaise: 300_000n, minOrderPaise: 0n, ...over });
   const n50 = (id: string) => cand({ id, instrumentId: `MFU:${id}`, fund: { fundType: 'NEXT50', actualBps: 0, midBps: 500, minBps: 0, maxBps: 1000, quality: '' } });
 
   it('with limits, two picks of one type never exceed its room together', () => {

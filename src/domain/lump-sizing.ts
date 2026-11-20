@@ -8,7 +8,7 @@ import { FUND_TYPE_LABEL, byGap, midBps, type FundType } from './fund-types.js';
 import { loadActiveHoldingRules, ruleBlock, type HoldingRule } from './holding-rules.js';
 import { loadLumpSum, openLumpSumPaise } from './lump-sums.js';
 import { universeInstrumentId } from './mf-universe.js';
-import { EXCHANGE_TRADED, freshQuote, stocksWait, type Candidate, type SizingInput } from './sizing.js';
+import { EXCHANGE_TRADED, belowMinimum, freshQuote, stocksWait, type Candidate, type SizingInput } from './sizing.js';
 import { loadSizingInput } from './sizing-input.js';
 import { istMonth } from './sips.js';
 
@@ -60,6 +60,8 @@ export interface LumpLimits {
   freeCashPaise: bigint;
   typeRoomPaise: Partial<Record<FundType, bigint>>;
   goldRoomPaise: bigint | null;
+  /** The `min_order_paise` rail: a part below it is dropped (open list #28). */
+  minOrderPaise: bigint;
 }
 
 const INDEX_TYPES: IndexFundType[] = ['NIFTY50', 'NEXT50', 'US'];
@@ -173,6 +175,7 @@ export function lumpLimits(i: LumpSizingInput): LumpLimits {
     freeCashPaise: s.cashAvailablePaise === null ? 0n : s.cashAvailablePaise - s.reservedPaise,
     typeRoomPaise,
     goldRoomPaise: i.gold === null ? null : goldRoom(i.gold),
+    minOrderPaise: s.minOrderPaise,
   };
 }
 
@@ -217,12 +220,16 @@ export function sizeLumpSum(i: LumpSizingInput): Candidate[] {
     // Withheld, never clamped, as in `sizeCandidates`.
     if (heldPaise !== null && heldPaise + amount > schemeCap) return withhold(`would take it above the ${s.singleSchemeCapPct}% single-scheme cap (IPS §3.5)`);
     const basis = `min(lump sum left ${rupees(i.remainingPaise)}, max order ${rupees(s.maxOrderPaise)}, free cash ${rupees(cash)}, ${label} ${rupees(headroom)})`;
-    if (!EXCHANGE_TRADED.has(kind)) return push({ status: 'ELIGIBLE', amountPaise: amount, basis });
+    if (!EXCHANGE_TRADED.has(kind)) {
+      if (amount < s.minOrderPaise) return withhold(belowMinimum(amount, s.minOrderPaise));
+      return push({ status: 'ELIGIBLE', amountPaise: amount, basis });
+    }
     const q = freshQuote(s, b.instrumentId);
     if (typeof q === 'string') return withhold(q);
     const n = amount / q.pricePaise;
     if (n === 0n) return withhold(`one unit costs more than the ${rupees(amount)} available`);
     amount = n * q.pricePaise;
+    if (amount < s.minOrderPaise) return withhold(belowMinimum(amount, s.minOrderPaise));
     push({ status: 'ELIGIBLE', amountPaise: amount, units: n.toString(), pricePaise: q.pricePaise, quoteAsOf: q.asOf, basis });
   };
 
@@ -284,6 +291,8 @@ export function allocateLumpSum(
       amount = n * c.pricePaise; units = n.toString();
     }
     if (amount <= 0n) continue;
+    // A part under the minimum order (open list #28) is dropped; its money stays for the next pick.
+    if (limits !== undefined && amount < limits.minOrderPaise) continue;
     out.push({ candidate: c, amountPaise: amount, units });
     left -= amount;
     if (t !== undefined && typeRoom[t] !== undefined) typeRoom[t] -= amount;

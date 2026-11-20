@@ -48,7 +48,8 @@ describe('monthlyAdvice', () => {
     const line = await monthlyAdvice(db, AS_OF, NOW, { apiKey: 'k', model: undefined, fetchImpl });
     expect(await advised()).toBe(1);
     expect(await monthlyReviewDone(db, 'advice', '2026-10')).toBe(true);
-    expect(line).toMatch(/^\n\nAdvisor \(2026-10\): NO_ACTION\./);
+    // Open list #28: a month with nothing to advise says why in the report, not only on the web.
+    expect(line).toBe('\n\nAdvisor (2026-10): NO_ACTION — no candidate is eligible for advice this cycle.');
     await db.close();
   });
 
@@ -115,7 +116,7 @@ describe('monthlyAdvice', () => {
     await confirmBudget(db, new Date(early));
     await persistSipSnapshot(db, [], early);
     const next = await monthlyAdvice(db, '2026-11-03', early, { apiKey: 'k', model: undefined, fetchImpl });
-    expect(next).toMatch(/^\n\nAdvisor \(2026-11\): NO_ACTION\./);
+    expect(next).toBe('\n\nAdvisor (2026-11): NO_ACTION — no candidate is eligible for advice this cycle.');
     expect(await monthlyReviewDone(db, 'advice', '2026-11')).toBe(true);
     await db.close();
   });

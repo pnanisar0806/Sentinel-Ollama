@@ -5,6 +5,7 @@ export const RAIL_LABELS: Record<string, string> = {
   monthly_budget_paise: 'Monthly investment budget',
   tactical_monthly_paise: 'Tactical monthly cap',
   max_order_paise: 'Maximum per order',
+  min_order_paise: 'Minimum per order (below it, nothing is bought that month)',
   cash_ceiling_pct: 'Cash ceiling',
   single_stock_cap_pct: 'Single stock cap',
   employer_cap_pct: 'Employer stock cap',

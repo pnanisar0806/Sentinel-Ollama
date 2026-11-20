@@ -19,6 +19,7 @@ const base = (over: Partial<SizingInput> = {}): SizingInput => ({
   tacticalBudgetPaise: 5_000_000n,       // ₹50k a month
   envelopeReason: null,
   maxOrderPaise: 10_000_000n,
+  minOrderPaise: 1_00_000n,
   cashAvailablePaise: 20_000_000n,       // ₹2L free cash
   reservedPaise: 0n,
   portfolioPaise: 500_000_000n,          // ₹50L

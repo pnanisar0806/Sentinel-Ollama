@@ -58,7 +58,7 @@ Owner actions / decisions
 27. [ ] September review items (redesign v2, /import flow, real app) — confirm close.
 
 Actionability package (larger builds)
-28. [ ] Per-action policy for the free envelope; Task 4 sizing / Task 6 ADVISE / Task 10 /advisor — re-audit what already exists before building.
+28. [x] (done 2026-11-19, owner-approved design) Per-action policy for the free envelope; Task 4 sizing / Task 6 ADVISE / Task 10 /advisor — re-audit what already exists before building. Re-audit: the per-action rule (one tranche a month, owner 2026-09-27), sizing, ADVISE, /advisor, cleanup wiring and exit promotion were all built. Two gaps built: the `min_order_paise` rail, ₹1,000 (migration 0047; no BUY below it, monthly or lump sum; the advice and weekly report say why), and /advisor's "Budget and your real surplus" card (3-cycle average from /cashflow beside budget and SIPs; facts only, never changes a rail).
 
 ## Next up
 - [x] **SBI NOT FREE CASH + INDMONEY-ID QUOTES 2026-11-09** — SBI balance excluded from idle cash and the cash
@@ -857,13 +857,13 @@ items below either point at them or name a gap that plan does not cover.
       that free amount shrinks by ~₹2,250 every August as three of the four SIPs step up.
       The sizer must read the live SIP total, never pin a constant. *(2026-10-14: it does —
       `loadFreeEnvelope`. October real free ₹19,746, fully deployed; November ₹19,746.)*
-- [ ] **Still needed: the per-action policy, not just the pot.** The free envelope is a
+- [x] (2026-11-19, #28: one tranche a month since 2026-09-27, plus the ₹1,000 minimum order) **Still needed: the per-action policy, not just the pot.** The free envelope is a
       monthly flow. Task 4 needs a rule for how much of it any single action may consume —
       one name per month, a cap per action, a minimum ticket. Phase 2.5 is explicit: *"Do
       not invent the satellite allocation budget/rule if no existing IPS/owner input
       supplies one... Score ≠ budget."* A pot without a per-action rule still cannot size
       a BUY.
-- [ ] **Reconcile the ₹50,000 against the modelled surplus.** `surplus.ts` derives
+- [~] (2026-11-19: /advisor now shows the measured 3-cycle surplus beside the budget once /cashflow has three cycles; the decision stays #22) **Reconcile the ₹50,000 against the modelled surplus.** `surplus.ts` derives
       investable from take-home ₹2,15,000 minus loan/fixed/child outflows — a materially
       larger number than ₹50,000. The difference accumulates as cash and runs straight at
       the 10% cash ceiling rail. Decide which figure is authoritative before the sizer
@@ -871,21 +871,21 @@ items below either point at them or name a gap that plan does not cover.
 
 ### Already planned in Phase 2.5 — do not duplicate
 
-- [ ] **Task 4 — deterministic sizing.** The missing "how much". The plan names the exact
+- [x] (built: `sizing.ts`, 2026-09-27) **Task 4 — deterministic sizing.** The missing "how much". The plan names the exact
       gap found here: *"allocation drift paise is not a general satellite/exit unit sizer.
       Signal score and sell-trigger objects alone do not establish an affordable BUY or
       sellable SELL."* Sizes from real cash, holdings, paper reservations, **concentration
       and liquidity headroom** — which is what makes the ServiceNow employer-cap trim
       sizeable. Also requires the combined batch to be validated so two candidates cannot
       spend the same rupee.
-- [ ] **Task 6 — ADVISE.** The "what to put it into": BUY/SELL/HOLD/WAIT chosen among
+- [x] (built: `recommend.ts`, advise-v3) **Task 6 — ADVISE.** The "what to put it into": BUY/SELL/HOLD/WAIT chosen among
       *eligible sized* candidates, assembled as FR-11 primary + exactly two alternates.
-- [ ] **Task 10 — `/advisor` surface.** Renders size provenance, the full FR-11 choice set
+- [x] (built: /advisor) **Task 10 — `/advisor` surface.** Renders size provenance, the full FR-11 choice set
       and coverage/failure state, with sign-off handing to the Phase 2 approval flow.
 
 ### Gaps Phase 2.5 does NOT cover — new work
 
-- [ ] **`src/jobs/cleanup.ts` is never invoked.** No `package.json` script, no workflow,
+- [x] (wired: `pnpm cleanup` in schedule.yml) **`src/jobs/cleanup.ts` is never invoked.** No `package.json` script, no workflow,
       no caller anywhere in `src/`. Eight built recommendation builders are dead code as a
       result: `buildSmallcaseTerminationRec`, `buildBondCreditReviewRec`,
       `buildLtcgHarvestRec`, `buildFyHarvestPlan`, `buildThesisLessRec`,
@@ -894,23 +894,23 @@ items below either point at them or name a gap that plan does not cover.
       Needs a `pnpm cleanup` script plus a schedule, and per-run idempotence like the one
       `pnpm report` just gained — `persistRecommendation` is a bare INSERT into an
       append-only table.
-- [ ] **Exit candidates are narrated, never persisted.** `evaluateExits` output is rendered
+- [x] (exit-promotion.ts: the owner promotes an exit on /cleanup) **Exit candidates are narrated, never persisted.** `evaluateExits` output is rendered
       into the Telegram report text (`src/notify/report.ts:515`) and nothing writes it to
       `recommendations`, so no exit trigger — employer cap, underperformance,
       falsification, better-alternative, credit-maturity — can ever reach
       `/recommendations`. `ExitCandidate` also carries **no `amountPaise` field**; Task 4
       supplies the number, this item supplies the row.
-- [ ] **`mf_switch` is declared and never built.** It is in the `recommendations.kind`
+- [~] (see open list #26: /funds switch check covers it) **`mf_switch` is declared and never built.** It is in the `recommendations.kind`
       CHECK constraint and in the `RecKind` union, and no code constructs one. The engine
       ranks funds (consistency 40 / expense 20) but nothing turns a ranking into a switch.
       This is the entire mutual-fund answer and it does not exist.
 - [x] (closed 2026-11-05: exit-promotion.ts produces kind sell) **`sell` kind likewise never built.** Declared, unused.
-- [ ] **Smallcase units are placeholders — blocks any exit sizing.** `NSE:SMALLCASE-RESIDUE`
+- [~] (see open list #25: no open smallcase lots on prod) **Smallcase units are placeholders — blocks any exit sizing.** `NSE:SMALLCASE-RESIDUE`
       (₹6,55,400), `NSE:NIFTYBEES` (₹95,000) and `NSE:LIQUIDBEES` (₹16,000) all carry
       `quantity = 1` against five- and six-figure values; only `NSE:GOLDBEES` (2,616 units)
       looks real. Task 4 sizes a SELL by actually owned units, so **no smallcase exit can be
       sized until real units are ingested.** Prerequisite to the decompose question below.
-- [ ] **Smallcase: decompose or single decision (owner call).** Single = treat the residue
+- [~] (see open list #25) **Smallcase: decompose or single decision (owner call).** Single = treat the residue
       as one line and make one sell-all/keep-all call, which is what the already-written
       `buildSmallcaseTerminationRec` does (sell the residue, retain the constituent ETFs).
       Decompose = break the residue into its underlying holdings so the engine can advise
