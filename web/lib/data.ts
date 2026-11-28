@@ -36,6 +36,7 @@ import { loadProposals, type StoredProposal } from '../../src/advisor/proposals.
 import { calibrateByOrigin } from '../../src/advisor/calibrate.js';
 import { loadOwnerTimeline, type TimelineEntry } from '../../src/domain/owner-log.js';
 import { loadOpenLumpSums, type LumpSum } from '../../src/domain/lump-sums.js';
+import { loadDataAge, type DataAge } from '../../src/domain/data-age.js';
 import { bankBalanceAge, loadCashflowCycles, loadPaydays, paydayDue, type BalanceAge, type Cycle, type Payday, type PaydayDue } from '../../src/domain/cashflow.js';
 import { idleBankCash, loadBucketBalances, loadSpLabels } from '../../src/domain/bucket-balances.js';
 import { loadGoalPlan, loadGoalTracker, type GoalPlan, type GoalTracker } from '../../src/domain/goal-plan.js';
@@ -1192,6 +1193,11 @@ export async function getLumpRuleHolds(): Promise<Map<string, { name: string; re
 
 /** Open list #10/#29: whether a payday entry is due, and how old INDmoney's HDFC balance really is. */
 export interface PaydayStatus { due: PaydayDue; hdfc: BalanceAge | null }
+
+/** Open list #29: how old INDmoney's banks, EPF and SIP units really are. */
+export async function getDataAge(): Promise<DataAge> {
+  return loadDataAge(await db(), new Date().toISOString());
+}
 export async function getPaydayStatus(): Promise<PaydayStatus> {
   const d = await db();
   const now = new Date().toISOString();

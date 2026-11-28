@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { formatInr, type Paise } from '../../src/money/paise.js';
-import { getGoals, getInvestmentControls, getLifeEventReview, getOverview, getPaydayStatus, getPlannedSpending, getSips } from '../lib/data';
-import { paydayDueText, staleBankText } from '../lib/cashflow';
+import { getDataAge, getGoals, getInvestmentControls, getLifeEventReview, getOverview, getPaydayStatus, getPlannedSpending, getSips } from '../lib/data';
+import { paydayDueText } from '../lib/cashflow';
+import { dataAgeNotices } from '../lib/data-age';
 import { plannedSpendingLine } from '../lib/log';
 import { VERDICT, verdictLine } from '../lib/goals';
 import BudgetEditor from './budget-editor';
@@ -20,7 +21,8 @@ export default async function OverviewPage() {
   // Open list #10/#29: fail-soft, like the life-event review.
   const payday = await getPaydayStatus().catch(() => null);
   const dueText = payday === null ? null : paydayDueText(payday.due);
-  const bankText = payday === null ? null : staleBankText(payday.hdfc);
+  // Open list #29: INDmoney banks, EPF and SIP units that stopped changing. Warn only, fail-soft.
+  const ageNotices = await getDataAge().then(dataAgeNotices, () => [] as string[]);
   // Fail-soft: the overview never goes down for the life-event review.
   const life = await getLifeEventReview().then((l) => ({ ...l, error: null as string | null }))
     .catch((e: unknown) => ({ open: [], waiting: [], stops: [], error: e instanceof Error ? e.message : String(e) }));
@@ -41,7 +43,7 @@ export default async function OverviewPage() {
         {dueText !== null && (
           <div className="span-12"><Notice tone="indigo">{dueText} <Link href="/log?tab=payday">Enter it on Log</Link>.</Notice></div>
         )}
-        {bankText !== null && <div className="span-12"><Notice tone="amber">{bankText}</Notice></div>}
+        {ageNotices.map((t) => <div className="span-12" key={t}><Notice tone="amber">{t} <Link href="/freshness">Details</Link>.</Notice></div>)}
         {life.error !== null && <div className="span-12"><Notice tone="amber">life-event review unavailable: {life.error}</Notice></div>}
         {life.stops.map((s) => (
           <div className="span-12" key={s.eventId}>

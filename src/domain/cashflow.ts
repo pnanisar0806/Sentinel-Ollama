@@ -4,6 +4,9 @@ import { istDate, istMonth, loadSipCommitment, ORDER_PAISE_SQL, SIP_MAX_AGE_DAYS
 import { assertRealDate } from './owner-log.js';
 import { auditPayload } from './owner-sales.js';
 import { loadRedemptions } from './bond-redemptions.js';
+import { bankAge, type BalanceAge } from './data-age.js';
+
+export type { BalanceAge } from './data-age.js';
 
 /**
  * Open list #10/#29 (owner, 2026-11-12): the payday entry and the payday-to-payday cash flow.
@@ -19,13 +22,10 @@ export const PAYDAY_ACCOUNT = OPERATING_SAVINGS_BANK;
 const MIN_CYCLE_DAYS = 10;
 /** The SIP commitment is frozen only if the payday is entered within this many days of it. */
 const SIP_FREEZE_DAYS = 10;
-/** The HDFC balance is stale once INDmoney has not changed it for this many days. */
-export const BANK_STALE_DAYS = 7;
 
 const DAY = 86_400_000;
 const days = (from: string, to: string): number => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY);
 const shift = (on: string, n: number): string => new Date(Date.parse(`${on}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
-const asIso = (v: string | Date): string => (v instanceof Date ? v : new Date(v)).toISOString();
 
 /** The n-th last weekday (Mon–Fri) of a `YYYY-MM` month; n = 1 is the last. Bank holidays are not known. */
 function nthLastWeekday(month: string, n: number): string {
@@ -143,40 +143,12 @@ export async function paydayDue(db: Db, now: string): Promise<PaydayDue> {
   return { due: false, month, from, lastOn };
 }
 
-export interface BalanceAge {
-  amountPaise: bigint;
-  /** IST date INDmoney first reported this amount, after a different one. */
-  lastChangedOn: string;
-  /** IST date of the latest fetch. */
-  fetchedOn: string;
-  daysUnchanged: number;
-  stale: boolean;
-}
-
 /**
  * How old the HDFC balance really is (#29). Sentinel fetches it daily, but INDmoney refreshes it
- * only when the owner opens its app, so the fetch date says nothing; the date the amount last
- * changed does. A balance that genuinely did not move for a week reads stale too: for a salary
- * account that is rare, and the warning only asks the owner to look.
+ * only when the owner opens its app, so the date the amount last changed is what counts.
+ * Stale after `BANK_STALE_DAYS` (owner, 2026-11-20: 2 days), as every bank in data-age.ts.
  */
-export async function bankBalanceAge(db: Db, now: string): Promise<BalanceAge | null> {
-  const rows = await db.query<{ as_of: string | Date; amount_paise: string }>(
-    `select as_of, amount_paise::text from balance_snapshots where kind = 'savings' and label = $1 order by as_of desc`,
-    [PAYDAY_ACCOUNT]);
-  if (rows.length === 0) return null;
-  const amount = rows[0]!.amount_paise;
-  let since = rows[0]!.as_of;
-  for (const r of rows) {
-    if (r.amount_paise !== amount) break;
-    since = r.as_of;
-  }
-  const lastChangedOn = istDate(asIso(since));
-  const daysUnchanged = days(lastChangedOn, istDate(now));
-  return {
-    amountPaise: BigInt(amount), lastChangedOn, fetchedOn: istDate(asIso(rows[0]!.as_of)),
-    daysUnchanged, stale: daysUnchanged >= BANK_STALE_DAYS,
-  };
-}
+export const bankBalanceAge = (db: Db, now: string): Promise<BalanceAge | null> => bankAge(db, PAYDAY_ACCOUNT, now);
 
 export interface Cycle {
   /** Start payday (exclusive: its own day's entries came before the balance was taken). */

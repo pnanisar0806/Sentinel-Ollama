@@ -1,5 +1,7 @@
-import { getFreshness, getPaydayStatus } from '../../lib/data';
-import { dayLabel, staleBankText } from '../../lib/cashflow';
+import { getDataAge, getFreshness } from '../../lib/data';
+import { dayLabel } from '../../lib/cashflow';
+import { dataAgeNotices } from '../../lib/data-age';
+import { BANK_STALE_DAYS, EPF_STALE_DAYS, SIP_UNITS_GRACE_DAYS, type BalanceAge } from '../../../src/domain/data-age.js';
 import { formatInr, type Paise } from '../../../src/money/paise.js';
 import { Badge, Card, DataTable, Notice, PageHead } from '../../lib/ui';
 
@@ -10,7 +12,21 @@ const fmtAge = (ageHours: number): string =>
 
 export default async function FreshnessPage() {
   const { rows, blocked, businessDate } = await getFreshness();
-  const { hdfc } = await getPaydayStatus();
+  const age = await getDataAge();
+  const notices = dataAgeNotices(age);
+  const balanceRow = (key: string, item: string, a: BalanceAge) => ({
+    key, item, value: formatInr(a.amountPaise as Paise), stale: a.stale,
+    changed: `${dayLabel(a.lastChangedOn)} (${a.daysUnchanged} days ago); fetched ${dayLabel(a.fetchedOn)}`,
+  });
+  const ageRows = [
+    ...age.banks.map((b) => balanceRow(`bank-${b.label}`, b.label, b.age)),
+    ...(age.epf === null ? [] : [balanceRow('epf', 'EPF', age.epf)]),
+    ...age.sipUnits.map((u) => ({
+      key: `sip-${u.instrumentId}`, item: `${u.fundName} SIP units`, value: `${u.unitsNow} units`, stale: u.stale,
+      changed: `${u.unitsBefore} before the ${dayLabel(u.instalmentOn)} instalment`,
+    })),
+  ];
+  const stale = ageRows.filter((r) => r.stale).length;
 
   const tableRows = rows.map((r) => ({
     key: r.source,
@@ -59,22 +75,30 @@ export default async function FreshnessPage() {
         </p>
       </Card>
       <Card
-        title="HDFC balance (INDmoney)"
-        aside={hdfc === null ? 'never fetched' : hdfc.stale ? `unchanged ${hdfc.daysUnchanged} days` : 'recently changed'}
-        tone={hdfc === null ? undefined : hdfc.stale ? 'warn' : 'ok'}
+        title="INDmoney data age"
+        aside={stale === 0 ? 'nothing stale' : `${stale} stale`}
+        tone={stale === 0 ? 'ok' : 'warn'}
       >
-        {hdfc === null
-          ? <Notice>No HDFC balance fetched yet. The daily sync reads it from INDmoney.</Notice>
+        {ageRows.length === 0
+          ? <Notice>Nothing fetched from INDmoney yet. The daily sync reads it.</Notice>
           : (
-            <p style={{ margin: '0.2rem 0' }}>
-              {formatInr(hdfc.amountPaise as Paise)}, unchanged since {dayLabel(hdfc.lastChangedOn)}; last fetched {dayLabel(hdfc.fetchedOn)}.
-            </p>
+            <DataTable
+              rows={ageRows}
+              cols={[
+                { label: 'Item', value: (r) => r.item },
+                { label: 'Value', align: 'right', value: (r) => r.value },
+                { label: 'Last changed', value: (r) => <span className="dim">{r.changed}</span> },
+                { label: 'State', value: (r) => (r.stale ? <Badge tone="amber">stale</Badge> : <Badge tone="green">fresh</Badge>) },
+              ]}
+            />
           )}
-        {staleBankText(hdfc) ? <Notice tone="amber">{staleBankText(hdfc)}</Notice> : null}
+        {notices.map((t) => <Notice key={t} tone="amber">{t}</Notice>)}
         <p className="dim" style={{ marginBottom: 0 }}>
-          Sentinel fetches the balance every day, but INDmoney refreshes it only when you open its app, so the fetch date says
-          nothing about its age. The date the amount last changed does. The monthly cash flow does not depend on it: it uses the
-          balance you enter on payday.
+          INDmoney gives no refresh time for a holding, and refreshes bank balances and EPF only when you open its app, so
+          Sentinel dates each by when its value last changed. A bank is stale after {BANK_STALE_DAYS} days unchanged, EPF after{' '}
+          {EPF_STALE_DAYS} days, and a fund&apos;s SIP units when they have not risen {SIP_UNITS_GRACE_DAYS} days after the
+          instalment. This only warns: Sentinel keeps using the last value. The monthly cash flow does not depend on the HDFC
+          figure: it uses the balance you enter on payday.
         </p>
       </Card>
     </>

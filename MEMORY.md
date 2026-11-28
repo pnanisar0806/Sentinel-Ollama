@@ -3482,3 +3482,16 @@ Full context: `docs/superpowers/specs/2026-10-14-sips-goals-advisor-design.md` �
   `NO_ACTION — <reason>.` instead of "Review and sign".
 - /advisor "Budget and your real surplus": `surplusVsBudget(cycles, budget, sips)` in web/lib/cashflow.ts,
   the newest 3 cycles' average surplus (null until all 3 known). Facts only; it never proposes a budget.
+
+## INDmoney data age (2026-11-20, open list #29)
+
+- INDmoney's holdings rows carry no refresh time (checked 2026-11-20: EPF, MF). Staleness is inferred:
+  a savings balance or the EPF total dated by when its value last changed (`seriesAge`), stale after
+  `BANK_STALE_DAYS` 2 / `EPF_STALE_DAYS` 45 (owner). EPF is summed per INDmoney snapshot because INDmoney
+  gave the same EPF four different instrument ids (Aug–Nov).
+- SIP units: for each MONTHLY SIP in the latest SIP snapshot, the latest instalment at least
+  `SIP_UNITS_GRACE_DAYS` (5) old (day of `start_date`, clamped to month end) is checked: units summed
+  across accounts in the latest INDmoney snapshot must exceed those in the last snapshot before that IST
+  day. An instalment before the SIP's earliest feed `start_date` is skipped (INDmoney's `start_date` is
+  the current cycle's date, not the original start).
+- Warn only. MF values move daily with NAV and bonds are flat by nature, so neither is checked by value.

@@ -2,8 +2,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { runMigrations } from '../../src/db/migrate.js';
 import { rupees } from '../../src/money/paise.js';
 import { db, getCashflow } from '../../web/lib/data.js';
-import { avg3, dayLabel, hdfcHint, moneyOrUnknown, paydayDueText, staleBankText, surplusVsBudget } from '../../web/lib/cashflow.js';
+import { avg3, dayLabel, hdfcHint, moneyOrUnknown, paydayDueText, surplusVsBudget } from '../../web/lib/cashflow.js';
 import type { Cycle } from '../../src/domain/cashflow.js';
+import { dataAgeNotices } from '../../web/lib/data-age.js';
+import type { DataAge } from '../../src/domain/data-age.js';
 
 const L = (n: number) => BigInt(rupees(n));
 
@@ -19,14 +21,40 @@ describe('/cashflow display helpers', () => {
       .toBe('Payday for Nov 2026: enter the salary credited and the HDFC balance right after it. Last entry: 29-Oct.');
   });
 
-  it('warns about the HDFC balance only when stale, and dates it by its last change', () => {
+  it('the /log hint dates the HDFC balance by its last change (the stale warning: dataAgeNotices)', () => {
     const age = { amountPaise: L(135_857), lastChangedOn: '2026-10-01', fetchedOn: '2026-11-12', daysUnchanged: 42, stale: true };
-    expect(staleBankText({ ...age, stale: false })).toBeNull();
-    expect(staleBankText(null)).toBeNull();
-    expect(staleBankText(age)).toMatch(/unchanged since 1-Oct \(42 days\)/);
     expect(hdfcHint(age)).toMatch(/unchanged since 1-Oct: for reference only/);
     expect(hdfcHint({ ...age, daysUnchanged: 0 })).toMatch(/changed today/);
     expect(dayLabel('2026-11-27')).toBe('27-Nov');
+  });
+});
+
+describe('INDmoney data age notices (#29, owner 2026-11-20)', () => {
+  const age = (r: number, on: string, d: number, stale: boolean) => ({ amountPaise: L(r), lastChangedOn: on, fetchedOn: '2026-11-19', daysUnchanged: d, stale });
+  const fresh: DataAge = { banks: [{ label: 'HDFC Bank', age: age(1, '2026-11-19', 1, false) }], epf: age(5, '2026-11-01', 19, false),
+    sipUnits: [{ instrumentId: 'IND:3229', fundName: 'Parag Parikh Flexi Cap', instalmentOn: '2026-11-12', unitsBefore: '3000', unitsNow: '3096.27', stale: false }] };
+
+  it('nothing fresh is shouted about', () => {
+    expect(dataAgeNotices(fresh)).toEqual([]);
+  });
+
+  it('one line per stale bank and for EPF, naming the date and what to do', () => {
+    const d: DataAge = { ...fresh, banks: [{ label: 'HDFC Bank', age: age(1_46_711, '2026-11-18', 2, true) }, { label: 'State Bank Of India', age: age(1_20_964, '2026-11-01', 19, true) }],
+      epf: age(13_53_592, '2026-08-24', 88, true) };
+    expect(dataAgeNotices(d)).toEqual([
+      'HDFC Bank balance ₹1,46,711 is unchanged since 18-Nov (2 days). INDmoney refreshes it only when you open its app: open INDmoney and pull to refresh, and the next sync picks it up.',
+      'State Bank Of India balance ₹1,20,964 is unchanged since 1-Nov (19 days). INDmoney refreshes it only when you open its app: open INDmoney and pull to refresh, and the next sync picks it up.',
+      'EPF ₹13,53,592 is unchanged since 24-Aug (88 days). INDmoney updates EPF only when it is refreshed in its app: open EPF in INDmoney and refresh it.',
+    ]);
+  });
+
+  it('SIP units not risen after an instalment: one line naming the funds', () => {
+    const d: DataAge = { ...fresh, sipUnits: [
+      { instrumentId: 'A', fundName: 'Navi Nifty 50', instalmentOn: '2026-12-12', unitsBefore: '1028.12', unitsNow: '1028.12', stale: true },
+      { instrumentId: 'B', fundName: 'Bandhan Small Cap', instalmentOn: '2026-12-12', unitsBefore: '510.93', unitsNow: '510.93', stale: true }] };
+    expect(dataAgeNotices(d)).toEqual([
+      'SIP units not updated: Navi Nifty 50 (12-Dec instalment), Bandhan Small Cap (12-Dec instalment). The fund mix undercounts them until INDmoney picks the units up: open INDmoney and refresh.',
+    ]);
   });
 });
 

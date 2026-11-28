@@ -113,8 +113,10 @@ describe('bankBalanceAge (#29)', () => {
     await snap('2026-11-12T14:00:00Z', 'savings', 'HDFC Bank', 271_069);
     await snap('2026-11-12T14:00:00Z', 'savings', 'State Bank Of India', 1);
     const a = await bankBalanceAge(db, '2026-11-12T16:00:00Z');
-    expect(a).toMatchObject({ amountPaise: L(271_069), lastChangedOn: '2026-11-06', fetchedOn: '2026-11-12', daysUnchanged: 6, stale: false });
-    expect(await bankBalanceAge(db, '2026-11-13T16:00:00Z')).toMatchObject({ daysUnchanged: 7, stale: true });
+    expect(a).toMatchObject({ amountPaise: L(271_069), lastChangedOn: '2026-11-06', fetchedOn: '2026-11-12', daysUnchanged: 6, stale: true });
+    // Owner 2026-11-20: stale from 2 days unchanged (was 7).
+    expect(await bankBalanceAge(db, '2026-11-07T16:00:00Z')).toMatchObject({ daysUnchanged: 1, stale: false });
+    expect(await bankBalanceAge(db, '2026-11-08T16:00:00Z')).toMatchObject({ daysUnchanged: 2, stale: true });
   });
 
   it('null with no HDFC rows', async () => {

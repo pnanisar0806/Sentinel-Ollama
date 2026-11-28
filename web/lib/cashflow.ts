@@ -43,13 +43,6 @@ export function paydayDueText(d: PaydayDue): string | null {
   return `Payday for ${monthShort(d.month)}: enter the salary credited and the HDFC balance right after it.${last}`;
 }
 
-/** The warning when INDmoney has not refreshed the HDFC balance; null when it is fresh or unknown. */
-export function staleBankText(a: BalanceAge | null): string | null {
-  if (a === null || !a.stale) return null;
-  return `HDFC balance ${formatInr(a.amountPaise as Paise)} is unchanged since ${dayLabel(a.lastChangedOn)} (${a.daysUnchanged} days). ` +
-    'INDmoney refreshes it only when you open its app: open INDmoney and pull to refresh, and the next sync picks it up.';
-}
-
 /** The /log hint under the HDFC field: INDmoney's figure, for reference only. */
 export function hdfcHint(a: BalanceAge | null): string | null {
   if (a === null) return null;
